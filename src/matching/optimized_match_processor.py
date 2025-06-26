@@ -17,6 +17,7 @@ import time
 from .exact_matcher import ExactMatcher, MatchResult
 from .fuzzy_matcher import FuzzyMatcher
 from .optimized_fuzzy_matcher import OptimizedFuzzyMatcher, FuzzyMatchResult
+from .enhanced_fuzzy_matcher import EnhancedFuzzyMatcher, EnhancedFuzzyMatchResult
 from src.utils.helpers import batch_iterator, generate_match_id, format_timestamp
 
 logger = logging.getLogger(__name__)
@@ -143,6 +144,7 @@ class OptimizedMatchProcessor:
         self.exact_matcher = ExactMatcher(config)
         self.fuzzy_matcher = FuzzyMatcher(config)
         self.optimized_fuzzy_matcher = OptimizedFuzzyMatcher(config)
+        self.enhanced_fuzzy_matcher = EnhancedFuzzyMatcher(config)  # 新增增强模糊匹配器
         
         # 批处理配置
         self.batch_config = config.get('batch_processing', {})
@@ -496,35 +498,42 @@ class OptimizedMatchProcessor:
             
             # 模糊匹配（仅在精确匹配失败或指定模糊匹配时进行）
             if match_type in ['fuzzy', 'both'] and not match_result:
-                # 优先使用优化的模糊匹配器
-                optimized_fuzzy_result = self.optimized_fuzzy_matcher.match_single_record_optimized(
+                # 优先使用增强的模糊匹配器（解决匹配幻觉问题）
+                enhanced_fuzzy_result = self.enhanced_fuzzy_matcher.match_single_record(
                     source_record, target_records
                 )
                 
-                if optimized_fuzzy_result.get('matched', False):
-                    # 转换为标准的FuzzyMatchResult格式
-                    fuzzy_result = FuzzyMatchResult(
-                        matched=True,
-                        similarity_score=optimized_fuzzy_result.get('similarity_score', 0.0),
-                        source_record=source_record,
-                        target_record=optimized_fuzzy_result.get('target_record'),
-                        match_details=optimized_fuzzy_result.get('match_details', {})
-                    )
-                    
+                if enhanced_fuzzy_result.matched:
                     match_result = self._format_optimized_match_result(
-                        fuzzy_result, 'fuzzy_optimized', source_record
+                        enhanced_fuzzy_result, 'fuzzy_enhanced', source_record
                     )
-                    logger.info(f"优化模糊匹配成功: {source_record.get('UNIT_NAME', 'Unknown')}, "
-                               f"候选数: {optimized_fuzzy_result.get('match_details', {}).get('candidates_count', 0)}")
-                else:
-                    # 如果优化模糊匹配失败，使用传统模糊匹配作为备用
-                    fuzzy_result = self.fuzzy_matcher.match_single_record(source_record, target_records)
+                    logger.info(f"增强模糊匹配成功: {source_record.get('UNIT_NAME', 'Unknown')}, "
+                               f"相似度: {enhanced_fuzzy_result.similarity_score:.3f}")
                     
-                    if fuzzy_result.matched:
-                        match_result = self._format_optimized_match_result(
-                            fuzzy_result, 'fuzzy', source_record
+                    # 记录匹配警告
+                    if enhanced_fuzzy_result.match_warnings:
+                        logger.warning(f"匹配警告: {', '.join(enhanced_fuzzy_result.match_warnings)}")
+                else:
+                    # 如果增强模糊匹配失败，尝试使用优化的模糊匹配器作为备用
+                    optimized_fuzzy_result = self.optimized_fuzzy_matcher.match_single_record_optimized(
+                        source_record, target_records
+                    )
+                    
+                    if optimized_fuzzy_result.get('matched', False):
+                        # 转换为标准的FuzzyMatchResult格式
+                        fuzzy_result = FuzzyMatchResult(
+                            matched=True,
+                            similarity_score=optimized_fuzzy_result.get('similarity_score', 0.0),
+                            source_record=source_record,
+                            target_record=optimized_fuzzy_result.get('target_record'),
+                            match_details=optimized_fuzzy_result.get('match_details', {})
                         )
-                        logger.info(f"传统模糊匹配成功: {source_record.get('UNIT_NAME', 'Unknown')}")
+                        
+                        match_result = self._format_optimized_match_result(
+                            fuzzy_result, 'fuzzy_optimized', source_record
+                        )
+                        logger.info(f"优化模糊匹配成功: {source_record.get('UNIT_NAME', 'Unknown')}, "
+                                   f"候选数: {optimized_fuzzy_result.get('match_details', {}).get('candidates_count', 0)}")
             
             # 如果没有匹配结果，创建未匹配记录
             if not match_result:

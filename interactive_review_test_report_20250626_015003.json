@@ -1,0 +1,28 @@
+{
+  "timestamp": "2025-06-26T01:50:03.094270",
+  "total_tests": 4,
+  "passed_tests": 1,
+  "success_rate": 25.0,
+  "results": [
+    {
+      "name": "获取匹配结果API",
+      "passed": true,
+      "details": "找到测试记录: None"
+    },
+    {
+      "name": "审核通过功能",
+      "passed": false,
+      "details": "审核状态更新和验证"
+    },
+    {
+      "name": "审核拒绝功能",
+      "passed": false,
+      "details": "审核拒绝和备注保存"
+    },
+    {
+      "name": "Web界面元素",
+      "passed": false,
+      "details": "模态框和JavaScript函数"
+    }
+  ]
+}

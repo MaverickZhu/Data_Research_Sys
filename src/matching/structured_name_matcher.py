@@ -68,7 +68,7 @@ class StructuredNameMatcher:
         
         # 阈值配置 - 基于测试结果优化
         self.thresholds = {
-            'core_name_strict': 0.90,     # 核心名称严格阈值
+            'core_name_strict': 0.95,     # 核心名称严格阈值（提高到0.95）
             'overall_match': 0.85,        # 总体匹配阈值
             'address_verification': 0.75, # 地址验证触发阈值（降低以便触发）
             'address_match': 0.70,        # 地址匹配阈值（降低以便匹配）
@@ -307,6 +307,20 @@ class StructuredNameMatcher:
                     core_name = core_name.replace(keyword, '', 1).strip()
                     break
         
+        # 新增：进一步精简核心名称（去除常见业务后缀）
+        business_suffixes = ['钢结构', '工贸', '贸易', '电器', '科技', '技术', '信息', '软件', 
+                           '化工', '建筑', '装饰', '服装', '食品', '物流', '投资', '地产', 
+                           '能源', '材料', '汽车', '广告', '教育', '医疗', '环保']
+        
+        for suffix in business_suffixes:
+            if core_name.endswith(suffix) and len(core_name) > len(suffix):
+                # 移除业务后缀，保留真正的核心名称
+                core_name = core_name[:-len(suffix)].strip()
+                # 如果还没有业务类型，设置为这个后缀
+                if not business_type:
+                    business_type = suffix
+                break
+        
         # 计算分解置信度
         confidence = self._calculate_parse_confidence(
             original_name, region, core_name, business_type, company_type
@@ -514,14 +528,43 @@ class StructuredNameMatcher:
         
         # 根据字段类型选择不同的相似度算法
         if field_type == 'core_name':
-            # 核心名称使用多种算法，取最高值
-            similarities = [
-                fuzz.ratio(source_field, target_field) / 100.0,
-                fuzz.partial_ratio(source_field, target_field) / 100.0,
-                fuzz.token_set_ratio(source_field, target_field) / 100.0,
-                fuzz.token_sort_ratio(source_field, target_field) / 100.0
-            ]
-            return max(similarities)
+            # 核心名称使用更严格的匹配策略
+            
+            # 1. 完全相同返回1.0
+            if source_field == target_field:
+                return 1.0
+            
+            # 2. 长度不同，严重惩罚
+            if len(source_field) != len(target_field):
+                # 基础相似度
+                base_sim = fuzz.ratio(source_field, target_field) / 100.0
+                # 长度差异惩罚
+                len_diff = abs(len(source_field) - len(target_field))
+                len_penalty = len_diff * 0.2
+                return max(0.0, base_sim - len_penalty)
+            
+            # 3. 长度相同，检查字符差异
+            diff_count = sum(1 for a, b in zip(source_field, target_field) if a != b)
+            
+            # 4. 短名称（2-4个字）的严格处理
+            if len(source_field) <= 4:
+                if diff_count == 0:
+                    return 1.0
+                elif diff_count == 1:
+                    # 一个字不同，最高0.5
+                    return 0.5
+                else:
+                    # 多个字不同，最高0.3
+                    return 0.3
+            
+            # 5. 较长名称的处理
+            else:
+                if diff_count == 0:
+                    return 1.0
+                else:
+                    # 按差异比例计算
+                    diff_ratio = diff_count / len(source_field)
+                    return max(0.0, 1.0 - diff_ratio * 1.5)
         elif field_type == 'region':
             # 区域名称使用部分匹配
             return fuzz.partial_ratio(source_field, target_field) / 100.0

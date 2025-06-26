@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 from .fuzzy_matcher import FuzzyMatcher, FuzzyMatchResult, SimilarityCalculator
 from .structured_name_matcher import StructuredNameMatcher, StructuredMatchResult
+from rapidfuzz import fuzz
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +43,11 @@ class EnhancedFuzzyMatcher(FuzzyMatcher):
         self.enhanced_config = {
             'use_structured_matching': True,  # 是否使用结构化匹配
             'core_name_weight_boost': 1.5,    # 核心名称权重提升系数
-            'address_penalty_threshold': 0.3, # 地址差异惩罚阈值
+            'address_penalty_threshold': 0.4, # 地址差异惩罚阈值（提高到0.4）
             'business_conflict_penalty': 0.3, # 业务类型冲突惩罚
             'structured_match_threshold': 0.85, # 结构化匹配阈值
-            'address_mismatch_max_score': 0.70  # 地址不匹配时的最大分数
+            'address_mismatch_max_score': 0.60,  # 地址不匹配时的最大分数（降低到0.60）
+            'core_name_mismatch_max_score': 0.50  # 核心名称不匹配时的最大分数（新增）
         }
         
         # 更新字段权重配置，强调核心名称的重要性
@@ -86,6 +88,12 @@ class EnhancedFuzzyMatcher(FuzzyMatcher):
             score, field_similarities, warnings = self._calculate_enhanced_similarity(
                 source_record, target_record, structured_result
             )
+            
+            # 2.5 核心名称相似度检查（新增）
+            if structured_result and structured_result.core_name_similarity < 0.7:
+                # 核心名称相似度太低，直接跳过
+                logger.debug(f"核心名称相似度太低: {source_record.get('UNIT_NAME')} vs {target_record.get('dwmc')} (相似度: {structured_result.core_name_similarity:.3f})")
+                continue
             
             # 3. 应用阈值检查
             if score >= self.threshold:
@@ -224,6 +232,54 @@ class EnhancedFuzzyMatcher(FuzzyMatcher):
             base_score = max(0.0, base_score - core_penalty)
             warnings.append(f"核心名称差异: {structured_result.source_structure.core_name} vs {structured_result.target_structure.core_name}")
             field_similarities['core_name_penalty'] = core_penalty
+        
+        # 5. 增强的核心名称严格检查（新增）
+        if structured_result:
+            source_core = structured_result.source_structure.core_name
+            target_core = structured_result.target_structure.core_name
+            
+            # 对于短核心名称（2-4个字），要求更严格的匹配
+            if source_core and target_core:
+                core_len = min(len(source_core), len(target_core))
+                
+                if core_len <= 4:
+                    # 短名称要求精确匹配或极高相似度
+                    if structured_result.core_name_similarity < 0.95:
+                        # 检查是否只有一个字不同
+                        diff_count = sum(1 for a, b in zip(source_core, target_core) if a != b)
+                        if diff_count >= 1 and core_len <= 3:
+                            # 短名称中有字不同，严重惩罚
+                            severe_penalty = 0.5
+                            base_score = max(0.0, base_score - severe_penalty)
+                            warnings.append(f"核心名称关键字不同: '{source_core}' vs '{target_core}'")
+                            field_similarities['core_name_severe_penalty'] = severe_penalty
+                
+                # 拼音检查（防止音近字不同的误匹配）
+                try:
+                    import pypinyin
+                    source_pinyin = ''.join([p[0] for p in pypinyin.pinyin(source_core, style=pypinyin.NORMAL)])
+                    target_pinyin = ''.join([p[0] for p in pypinyin.pinyin(target_core, style=pypinyin.NORMAL)])
+                    
+                    # 拼音完全不同时进行惩罚
+                    pinyin_sim = fuzz.ratio(source_pinyin, target_pinyin) / 100.0
+                    if pinyin_sim < 0.6 and structured_result.core_name_similarity > 0.7:
+                        # 字形相似但读音不同，可能是误匹配
+                        pinyin_penalty = 0.2
+                        base_score = max(0.0, base_score - pinyin_penalty)
+                        warnings.append(f"核心名称读音差异过大: {source_pinyin} vs {target_pinyin}")
+                        field_similarities['pinyin_penalty'] = pinyin_penalty
+                except:
+                    pass
+        
+        # 6. 最终分数上限检查（新增）
+        if structured_result:
+            # 如果核心名称相似度低于阈值，限制最高分数
+            if structured_result.core_name_similarity < 0.8:
+                max_allowed = self.enhanced_config.get('core_name_mismatch_max_score', 0.50)
+                if base_score > max_allowed:
+                    warnings.append(f"核心名称差异过大，分数限制在 {max_allowed}")
+                    base_score = max_allowed
+                    field_similarities['core_name_max_score_limited'] = True
         
         return base_score, field_similarities, warnings
     

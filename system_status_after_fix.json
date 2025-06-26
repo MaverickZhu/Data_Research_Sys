@@ -1,0 +1,11 @@
+{
+  "timestamp": "2025-06-25T17:57:24.392522",
+  "fix_status": "Int64错误修复已完成",
+  "database_status": {
+    "xfaqpc_jzdwxx": 220739,
+    "xxj_shdwjbxx": 1659320,
+    "unit_match_results": 0
+  },
+  "matching_statistics": {},
+  "system_health": "HEALTHY"
+}

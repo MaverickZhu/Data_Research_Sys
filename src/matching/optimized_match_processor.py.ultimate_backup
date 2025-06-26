@@ -1,0 +1,869 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+优化的匹配处理器模块
+解决重复数据、增量匹配和信息完整性问题
+"""
+
+import logging
+import uuid
+import json
+from typing import Dict, List, Optional, Union, Tuple
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
+import time
+
+from .exact_matcher import ExactMatcher, MatchResult
+from .fuzzy_matcher import FuzzyMatcher, FuzzyMatchResult
+from src.utils.helpers import batch_iterator, generate_match_id, format_timestamp
+
+logger = logging.getLogger(__name__)
+
+
+class MatchingMode:
+    """匹配模式枚举"""
+    INCREMENTAL = "incremental"  # 增量匹配，只处理未匹配的记录
+    UPDATE = "update"           # 更新匹配，重新匹配已有结果
+    FULL = "full"              # 全量匹配，清空后重新匹配
+
+
+class OptimizedMatchProgress:
+    """优化的匹配进度跟踪"""
+    
+    def __init__(self, task_id: str, total_records: int, mode: str = MatchingMode.INCREMENTAL):
+        self.task_id = task_id
+        self.total_records = total_records
+        self.mode = mode
+        self.processed_records = 0
+        self.matched_records = 0
+        self.updated_records = 0
+        self.skipped_records = 0
+        self.error_records = 0
+        self.start_time = datetime.now()
+        self.status = "running"  # running, completed, error, stopped
+        self.lock = Lock()
+        self.current_batch = 0
+        self.last_processed_id = None
+    
+    def update_progress(self, processed: int = 1, matched: int = 0, updated: int = 0, 
+                       skipped: int = 0, error: int = 0, last_id: str = None):
+        """更新进度"""
+        with self.lock:
+            self.processed_records += processed
+            self.matched_records += matched
+            self.updated_records += updated
+            self.skipped_records += skipped
+            self.error_records += error
+            if last_id:
+                self.last_processed_id = last_id
+    
+    def get_progress(self) -> Dict:
+        """获取进度信息"""
+        with self.lock:
+            elapsed_time = (datetime.now() - self.start_time).total_seconds()
+            
+            # 计算进度百分比
+            progress_percent = (self.processed_records / self.total_records * 100) if self.total_records > 0 else 0
+            
+            # 估算剩余时间
+            if self.processed_records > 0 and elapsed_time > 0:
+                avg_time_per_record = elapsed_time / self.processed_records
+                remaining_records = self.total_records - self.processed_records
+                estimated_remaining_time = remaining_records * avg_time_per_record
+            else:
+                estimated_remaining_time = 0
+            
+            return {
+                'task_id': self.task_id,
+                'mode': self.mode,
+                'status': self.status,
+                'total_records': self.total_records,
+                'processed_records': self.processed_records,
+                'matched_records': self.matched_records,
+                'updated_records': self.updated_records,
+                'skipped_records': self.skipped_records,
+                'error_records': self.error_records,
+                'current_batch': self.current_batch,
+                'last_processed_id': self.last_processed_id,
+                'progress_percent': round(progress_percent, 2),
+                'elapsed_time': round(elapsed_time, 2),
+                'estimated_remaining_time': round(estimated_remaining_time, 2),
+                'match_rate': round((self.matched_records / self.processed_records * 100) if self.processed_records > 0 else 0, 2)
+            }
+    
+    def set_status(self, status: str):
+        """设置状态"""
+        with self.lock:
+            self.status = status
+    
+    def set_current_batch(self, batch_num: int):
+        """设置当前批次"""
+        with self.lock:
+            self.current_batch = batch_num
+
+
+class OptimizedMatchProcessor:
+    """优化的匹配处理器"""
+    
+    def __init__(self, db_manager, config: Dict):
+        """
+        初始化优化匹配处理器
+        
+        Args:
+            db_manager: 数据库管理器
+            config: 匹配配置
+        """
+        self.db_manager = db_manager
+        self.config = config
+        
+        # 初始化匹配器
+        self.exact_matcher = ExactMatcher(config)
+        self.fuzzy_matcher = FuzzyMatcher(config)
+        
+        # 批处理配置
+        self.batch_config = config.get('batch_processing', {})
+        self.batch_size = self.batch_config.get('batch_size', 100)
+        self.max_workers = self.batch_config.get('max_workers', 4)
+        self.timeout = self.batch_config.get('timeout', 300)
+        
+        # 任务管理
+        self.active_tasks = {}  # task_id -> OptimizedMatchProgress
+        self.tasks_lock = Lock()
+        
+    def start_optimized_matching_task(self, match_type: str = "both", 
+                                    mode: str = MatchingMode.INCREMENTAL,
+                                    batch_size: Optional[int] = None,
+                                    clear_existing: bool = False) -> str:
+        """
+        启动优化的匹配任务
+        
+        Args:
+            match_type: 匹配类型 ('exact', 'fuzzy', 'both')
+            mode: 匹配模式 ('incremental', 'update', 'full')
+            batch_size: 批处理大小
+            clear_existing: 是否清空现有结果
+            
+        Returns:
+            str: 任务ID
+        """
+        # 生成任务ID
+        task_id = str(uuid.uuid4())
+        
+        # 使用自定义批次大小
+        if batch_size:
+            self.batch_size = batch_size
+        
+        try:
+            # 如果是全量匹配或要求清空，先清空现有结果
+            if mode == MatchingMode.FULL or clear_existing:
+                self._clear_match_results()
+                logger.info("已清空现有匹配结果")
+            
+            # 获取需要处理的记录数
+            if mode == MatchingMode.INCREMENTAL:
+                total_records = self._get_unmatched_count()
+            else:
+                total_records = self.db_manager.get_collection_count('xxj_shdwjbxx')
+            
+            if total_records == 0:
+                if mode == MatchingMode.INCREMENTAL:
+                    raise ValueError("所有记录已匹配，无需增量处理")
+                else:
+                    raise ValueError("源数据为空，无法进行匹配")
+            
+            # 创建进度跟踪器
+            progress = OptimizedMatchProgress(task_id, total_records, mode)
+            
+            with self.tasks_lock:
+                self.active_tasks[task_id] = progress
+            
+            # 启动异步任务
+            from threading import Thread
+            task_thread = Thread(
+                target=self._execute_optimized_matching_task,
+                args=(task_id, match_type, mode),
+                daemon=True
+            )
+            task_thread.start()
+            
+            logger.info(f"优化匹配任务启动成功: {task_id}, 类型: {match_type}, 模式: {mode}, 总记录数: {total_records}")
+            
+            return task_id
+            
+        except Exception as e:
+            logger.error(f"启动优化匹配任务失败: {str(e)}")
+            raise
+    
+    def _execute_optimized_matching_task(self, task_id: str, match_type: str, mode: str):
+        """执行优化的匹配任务"""
+        progress = self.active_tasks.get(task_id)
+        if not progress:
+            return
+        
+        try:
+            logger.info(f"开始执行优化匹配任务: {task_id}, 模式: {mode}")
+            
+            # 获取目标数据（安全排查系统）- 作为主数据源
+            target_records = self._load_target_records()
+            logger.info(f"加载目标数据（安全排查系统）: {len(target_records)} 条")
+            
+            # 根据模式获取需要处理的源数据
+            if mode == MatchingMode.INCREMENTAL:
+                source_records_generator = self._get_unmatched_records_generator()
+            else:
+                source_records_generator = self._get_all_records_generator()
+            
+            batch_count = 0
+            
+            # 分批处理
+            for source_batch in source_records_generator:
+                if not source_batch:
+                    break
+                
+                batch_count += 1
+                progress.set_current_batch(batch_count)
+                logger.info(f"处理第 {batch_count} 批数据: {len(source_batch)} 条")
+                
+                # 检查任务是否被停止
+                if progress.status == "stopped":
+                    logger.info(f"任务被停止: {task_id}")
+                    return
+                
+                # 处理当前批次
+                self._process_optimized_batch(task_id, source_batch, target_records, match_type, mode)
+            
+            # 任务完成
+            progress.set_status("completed")
+            logger.info(f"优化匹配任务完成: {task_id}")
+            
+        except Exception as e:
+            logger.error(f"优化匹配任务执行失败 {task_id}: {str(e)}")
+            progress.set_status("error")
+    
+    def _get_unmatched_count(self) -> int:
+        """获取未匹配记录数量"""
+        try:
+            # 获取已匹配的源记录ID列表
+            matched_ids = self._get_matched_source_ids()
+            
+            # 计算总记录数
+            total_count = self.db_manager.get_collection_count('xxj_shdwjbxx')
+            
+            # 返回未匹配数量
+            return total_count - len(matched_ids)
+            
+        except Exception as e:
+            logger.error(f"获取未匹配记录数量失败: {str(e)}")
+            return 0
+    
+    def _get_matched_source_ids(self) -> set:
+        """获取已匹配的源记录ID集合"""
+        try:
+            collection = self.db_manager.get_collection('match_results')
+            
+            # 查询所有已匹配的源记录ID
+            cursor = collection.find(
+                {'source_record_id': {'$exists': True, '$ne': None}},
+                {'source_record_id': 1}
+            ).hint([("dwmc", 1)])
+            
+            matched_ids = {str(doc['source_record_id']) for doc in cursor}
+            logger.debug(f"已匹配记录数: {len(matched_ids)}")
+            
+            return matched_ids
+            
+        except Exception as e:
+            logger.error(f"获取已匹配记录ID失败: {str(e)}")
+            return set()
+    
+    def _get_unmatched_records_generator(self):
+        """获取未匹配记录的生成器"""
+        try:
+            matched_ids = self._get_matched_source_ids()
+            
+            skip = 0
+            while True:
+                # 获取一批源数据
+                source_batch = self.db_manager.get_supervision_units(
+                    skip=skip, 
+                    limit=self.batch_size
+                )
+                
+                if not source_batch:
+                    break
+                
+                # 过滤出未匹配的记录
+                unmatched_batch = [
+                    record for record in source_batch 
+                    if str(record.get('_id')) not in matched_ids
+                ]
+                
+                if unmatched_batch:
+                    yield unmatched_batch
+                
+                skip += self.batch_size
+                
+        except Exception as e:
+            logger.error(f"获取未匹配记录失败: {str(e)}")
+            yield []
+    
+    def _get_all_records_generator(self):
+        """获取所有记录的生成器"""
+        try:
+            skip = 0
+            while True:
+                # 获取一批源数据
+                source_batch = self.db_manager.get_supervision_units(
+                    skip=skip, 
+                    limit=self.batch_size
+                )
+                
+                if not source_batch:
+                    break
+                
+                yield source_batch
+                skip += self.batch_size
+                
+        except Exception as e:
+            logger.error(f"获取所有记录失败: {str(e)}")
+            yield []
+    
+    def _process_optimized_batch(self, task_id: str, source_batch: List[Dict], 
+                               target_records: List[Dict], match_type: str, mode: str):
+        """处理优化的批次数据"""
+        progress = self.active_tasks.get(task_id)
+        if not progress:
+            return
+        
+        batch_results = []
+        
+        for source_record in source_batch:
+            try:
+                # 检查任务状态
+                if progress.status == "stopped":
+                    break
+                
+                # 处理单条记录
+                result = self._process_optimized_single_record(
+                    source_record, target_records, match_type, mode
+                )
+                
+                if result:
+                    batch_results.append(result)
+                    
+                    # 更新进度
+                    if result.get('operation') == 'matched':
+                        progress.update_progress(
+                            processed=1, matched=1, 
+                            last_id=str(source_record.get('_id'))
+                        )
+                    elif result.get('operation') == 'updated':
+                        progress.update_progress(
+                            processed=1, updated=1,
+                            last_id=str(source_record.get('_id'))
+                        )
+                    elif result.get('operation') == 'skipped':
+                        progress.update_progress(
+                            processed=1, skipped=1,
+                            last_id=str(source_record.get('_id'))
+                        )
+                    else:
+                        progress.update_progress(
+                            processed=1,
+                            last_id=str(source_record.get('_id'))
+                        )
+                else:
+                    progress.update_progress(
+                        processed=1, error=1,
+                        last_id=str(source_record.get('_id'))
+                    )
+                    
+            except Exception as e:
+                logger.error(f"处理记录失败: {str(e)}")
+                progress.update_progress(processed=1, error=1)
+        
+        # 批量保存结果
+        if batch_results:
+            self._batch_save_optimized_results(batch_results)
+    
+    def _process_optimized_single_record(self, source_record: Dict, target_records: List[Dict], 
+                                       match_type: str, mode: str) -> Optional[Dict]:
+        """处理优化的单条记录"""
+        try:
+            source_id = str(source_record.get('_id'))
+            
+            # 检查是否已存在匹配结果
+            existing_result = self._get_existing_match_result(source_id)
+            
+            # 根据模式决定是否跳过
+            if mode == MatchingMode.INCREMENTAL and existing_result:
+                return {
+                    'operation': 'skipped',
+                    'source_id': source_id,
+                    'reason': 'already_matched'
+                }
+            
+            # 执行匹配
+            match_result = None
+            
+            # 精确匹配
+            if match_type in ['exact', 'both']:
+                exact_result = self.exact_matcher.match_single_record(source_record, target_records)
+                
+                if exact_result.matched:
+                    match_result = self._format_optimized_match_result(
+                        exact_result, 'exact', source_record
+                    )
+                    logger.debug(f"精确匹配成功: {source_record.get('dwmc', 'Unknown')}")
+            
+            # 模糊匹配（仅在精确匹配失败或指定模糊匹配时进行）
+            if match_type in ['fuzzy', 'both'] and not match_result:
+                fuzzy_result = self.fuzzy_matcher.match_single_record(source_record, target_records)
+                
+                if fuzzy_result.matched:
+                    match_result = self._format_optimized_match_result(
+                        fuzzy_result, 'fuzzy', source_record
+                    )
+                    logger.debug(f"模糊匹配成功: {source_record.get('dwmc', 'Unknown')}")
+            
+            # 如果没有匹配结果，创建未匹配记录
+            if not match_result:
+                match_result = self._format_optimized_no_match_result(source_record)
+                logger.debug(f"未找到匹配: {source_record.get('dwmc', 'Unknown')}")
+            
+            # 设置操作类型
+            if existing_result:
+                match_result['operation'] = 'updated'
+                match_result['previous_result_id'] = existing_result.get('_id')
+            else:
+                match_result['operation'] = 'matched'
+            
+            return match_result
+            
+        except Exception as e:
+            logger.error(f"处理优化单条记录失败: {str(e)}")
+            return None 
+
+    def _format_optimized_match_result(self, match_result: Union[MatchResult, FuzzyMatchResult], 
+                                     match_type: str, source_record: Dict) -> Dict:
+        """格式化优化的匹配结果 - 以安全排查系统为主记录"""
+        target_record = match_result.target_record
+        
+        # 基础信息 - 以安全排查系统（target）为主记录
+        result = {
+            # 主记录信息（安全排查系统）
+            'primary_record_id': target_record.get('_id') if target_record else None,
+            'primary_system': 'inspection',  # 安全排查系统
+            'unit_name': target_record.get('UNIT_NAME', '') if target_record else '',
+            'unit_address': target_record.get('UNIT_ADDRESS', '') if target_record else '',
+            'unit_type': target_record.get('UNIT_TYPE', '') if target_record else '',
+            'contact_person': target_record.get('CONTACT_PERSON', '') if target_record else '',
+            'contact_phone': target_record.get('CONTACT_PHONE', '') if target_record else '',
+            
+            # 源记录信息（监督管理系统）
+            'source_record_id': source_record.get('_id'),
+            'source_system': 'supervision',  # 监督管理系统
+            'source_unit_name': source_record.get('dwmc', ''),
+            'source_unit_address': source_record.get('dwdz', ''),
+            'source_credit_code': source_record.get('tyshxydm', ''),
+            'source_legal_person': source_record.get('fddbr', ''),
+            'source_contact_phone': source_record.get('lxdh', ''),
+            'source_registration_date': source_record.get('djrq', ''),
+            'source_business_scope': source_record.get('jyfw', ''),
+            
+            # 匹配信息
+            'match_type': match_type,
+            'match_status': 'matched',
+            'similarity_score': 0.0,
+            'match_confidence': 'high' if match_type == 'exact' else 'medium',
+            
+            # 匹配详情
+            'match_fields': [],  # 用于匹配的字段
+            'match_details': {},  # 详细匹配信息
+            
+            # 审核信息
+            'review_status': 'pending',  # pending, approved, rejected
+            'review_notes': '',
+            'reviewer': '',
+            'review_time': None,
+            
+            # 时间戳
+            'created_time': datetime.now(),
+            'updated_time': datetime.now()
+        }
+        
+        # 根据匹配类型添加详细信息
+        if match_type == 'exact':
+            result.update({
+                'similarity_score': match_result.confidence,
+                'match_fields': match_result.match_details.get('matched_fields', []) if match_result.match_details else [],
+                'match_details': {
+                    'exact_match_fields': match_result.match_details.get('matched_fields', []) if match_result.match_details else [],
+                    'match_method': 'exact',
+                    'confidence_level': match_result.confidence
+                }
+            })
+        elif match_type == 'fuzzy':
+            # 获取模糊匹配的详细信息
+            field_similarities = match_result.field_similarities or {}
+            matched_fields = []
+            fuzzy_details = {}
+            
+            for field, similarity in field_similarities.items():
+                if similarity > 0.5:  # 只记录相似度较高的字段
+                    matched_fields.append(field)
+                    fuzzy_details[f'{field}_similarity'] = similarity
+            
+            result.update({
+                'similarity_score': match_result.similarity_score,
+                'match_fields': matched_fields,
+                'match_details': {
+                    'fuzzy_match_fields': matched_fields,
+                    'field_similarities': field_similarities,
+                    'overall_similarity': match_result.similarity_score,
+                    'threshold_used': match_result.match_details.get('threshold', 0.75) if match_result.match_details else 0.75,
+                    'match_method': 'fuzzy',
+                    **fuzzy_details
+                }
+            })
+            
+            # 根据相似度设置置信度
+            if match_result.similarity_score >= 0.9:
+                result['match_confidence'] = 'high'
+            elif match_result.similarity_score >= 0.75:
+                result['match_confidence'] = 'medium'
+            else:
+                result['match_confidence'] = 'low'
+        
+        # 生成匹配ID
+        result['match_id'] = generate_match_id(
+            str(result['primary_record_id']), 
+            str(result['source_record_id'])
+        )
+        
+        return result
+    
+    def _format_optimized_no_match_result(self, source_record: Dict) -> Dict:
+        """格式化优化的无匹配结果"""
+        return {
+            # 主记录信息（空，因为没有匹配）
+            'primary_record_id': None,
+            'primary_system': None,
+            'unit_name': '',
+            'unit_address': '',
+            'unit_type': '',
+            'contact_person': '',
+            'contact_phone': '',
+            
+            # 源记录信息（监督管理系统）
+            'source_record_id': source_record.get('_id'),
+            'source_system': 'supervision',
+            'source_unit_name': source_record.get('dwmc', ''),
+            'source_unit_address': source_record.get('dwdz', ''),
+            'source_credit_code': source_record.get('tyshxydm', ''),
+            'source_legal_person': source_record.get('fddbr', ''),
+            'source_contact_phone': source_record.get('lxdh', ''),
+            'source_registration_date': source_record.get('djrq', ''),
+            'source_business_scope': source_record.get('jyfw', ''),
+            
+            # 匹配信息
+            'match_type': 'none',
+            'match_status': 'unmatched',
+            'similarity_score': 0.0,
+            'match_confidence': 'none',
+            'match_fields': [],
+            'match_details': {
+                'match_method': 'none',
+                'reason': 'no_suitable_match_found'
+            },
+            
+            # 审核信息
+            'review_status': 'pending',
+            'review_notes': '未找到匹配，需要人工审核',
+            'reviewer': '',
+            'review_time': None,
+            
+            # 时间戳
+            'created_time': datetime.now(),
+            'updated_time': datetime.now(),
+            
+            # 匹配ID
+            'match_id': generate_match_id(str(source_record.get('_id')), 'no_match')
+        }
+    
+    def _get_existing_match_result(self, source_id: str) -> Optional[Dict]:
+        """获取现有的匹配结果"""
+        try:
+            collection = self.db_manager.get_collection('match_results')
+            
+            # 查找基于源记录ID的匹配结果
+            result = collection.find_one({'source_record_id': source_id})
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"获取现有匹配结果失败: {str(e)}")
+            return None
+    
+    def _batch_save_optimized_results(self, results: List[Dict]) -> bool:
+        """批量保存优化的匹配结果"""
+        try:
+            collection = self.db_manager.get_collection('match_results')
+            
+            operations = []
+            
+            for result in results:
+                if result.get('operation') == 'skipped':
+                    continue
+                
+                source_id = result.get('source_record_id')
+                if not source_id:
+                    continue
+                
+                # 移除操作标识，不保存到数据库
+                result_to_save = {k: v for k, v in result.items() if k not in ['operation', 'previous_result_id']}
+                
+                # 使用upsert操作，基于source_record_id进行去重
+                operations.append({
+                    'replaceOne': {
+                        'filter': {'source_record_id': source_id},
+                        'replacement': result_to_save,
+                        'upsert': True
+                    }
+                })
+            
+            if operations:
+                # 执行批量操作
+                bulk_result = collection.bulk_write(operations)
+                
+                logger.info(f"批量保存结果: 匹配={bulk_result.matched_count}, "
+                          f"修改={bulk_result.modified_count}, 插入={bulk_result.upserted_count}")
+                
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"批量保存优化匹配结果失败: {str(e)}")
+            return False
+    
+    def _clear_match_results(self) -> bool:
+        """清空匹配结果"""
+        try:
+            collection = self.db_manager.get_collection('match_results')
+            
+            # 删除所有匹配结果
+            result = collection.delete_many({})
+            
+            logger.info(f"清空匹配结果: 删除了 {result.deleted_count} 条记录")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"清空匹配结果失败: {str(e)}")
+            return False
+    
+    def _load_target_records(self) -> List[Dict]:
+        """加载目标记录（安全排查系统）"""
+        try:
+            # 获取所有安全排查系统的记录
+            target_records = []
+            skip = 0
+            batch_size = 1000000  # 使用较大的批次大小加载目标数据
+            
+            while True:
+                batch = self.db_manager.get_inspection_units(skip=skip, limit=batch_size)
+                if not batch:
+                    break
+                
+                target_records.extend(batch)
+                skip += batch_size
+                
+                # 避免内存溢出，限制最大记录数
+                if len(target_records) >= 50000:
+                    logger.warning("目标记录数量过大，使用全部数据")
+                    break
+            
+            logger.info(f"加载目标记录完成: {len(target_records)} 条")
+            return target_records
+            
+        except Exception as e:
+            logger.error(f"加载目标记录失败: {str(e)}")
+            return []
+    
+    def get_optimized_task_progress(self, task_id: str) -> Dict:
+        """获取优化任务进度"""
+        with self.tasks_lock:
+            progress = self.active_tasks.get(task_id)
+            
+            if not progress:
+                return {
+                    'error': '任务不存在',
+                    'task_id': task_id
+                }
+            
+            return progress.get_progress()
+    
+    def stop_optimized_matching_task(self, task_id: str) -> bool:
+        """停止优化匹配任务"""
+        try:
+            with self.tasks_lock:
+                progress = self.active_tasks.get(task_id)
+                
+                if not progress:
+                    return False
+                
+                if progress.status == "running":
+                    progress.set_status("stopped")
+                    logger.info(f"优化匹配任务已停止: {task_id}")
+                    return True
+                else:
+                    return False
+                    
+        except Exception as e:
+            logger.error(f"停止优化匹配任务失败: {str(e)}")
+            return False
+    
+    def get_optimized_matching_statistics(self) -> Dict:
+        """获取优化匹配统计信息"""
+        try:
+            collection = self.db_manager.get_collection('match_results')
+            
+            # 基础统计
+            total_results = collection.count_documents({})
+            matched_results = collection.count_documents({'match_status': 'matched'})
+            unmatched_results = collection.count_documents({'match_status': 'unmatched'})
+            
+            # 按匹配类型统计
+            match_type_stats = list(collection.aggregate([
+                {
+                    '$group': {
+                        '_id': '$match_type',
+                        'count': {'$sum': 1},
+                        'avg_similarity': {'$avg': '$similarity_score'}
+                    }
+                }
+            ]))
+            
+            # 按置信度统计
+            confidence_stats = list(collection.aggregate([
+                {
+                    '$group': {
+                        '_id': '$match_confidence',
+                        'count': {'$sum': 1}
+                    }
+                }
+            ]))
+            
+            # 审核状态统计
+            review_stats = list(collection.aggregate([
+                {
+                    '$group': {
+                        '_id': '$review_status',
+                        'count': {'$sum': 1}
+                    }
+                }
+            ]))
+            
+            # 任务统计
+            with self.tasks_lock:
+                task_stats = {
+                    'active_tasks': len([p for p in self.active_tasks.values() if p.status == 'running']),
+                    'completed_tasks': len([p for p in self.active_tasks.values() if p.status == 'completed']),
+                    'total_tasks': len(self.active_tasks)
+                }
+            
+            return {
+                'total_results': total_results,
+                'matched_results': matched_results,
+                'unmatched_results': unmatched_results,
+                'match_rate': round((matched_results / total_results * 100) if total_results > 0 else 0, 2),
+                'match_type_stats': match_type_stats,
+                'confidence_stats': confidence_stats,
+                'review_stats': review_stats,
+                'task_stats': task_stats,
+                'last_updated': datetime.now()
+            }
+            
+        except Exception as e:
+            logger.error(f"获取优化匹配统计失败: {str(e)}")
+            return {
+                'total_results': 0,
+                'matched_results': 0,
+                'unmatched_results': 0,
+                'match_rate': 0,
+                'match_type_stats': [],
+                'confidence_stats': [],
+                'review_stats': [],
+                'task_stats': {},
+                'error': str(e)
+            }
+    
+    def cleanup_optimized_completed_tasks(self, max_age_hours: int = 24):
+        """清理已完成的优化任务"""
+        try:
+            current_time = datetime.now()
+            to_remove = []
+            
+            with self.tasks_lock:
+                for task_id, progress in self.active_tasks.items():
+                    if progress.status in ['completed', 'error', 'stopped']:
+                        elapsed_hours = (current_time - progress.start_time).total_seconds() / 3600
+                        if elapsed_hours > max_age_hours:
+                            to_remove.append(task_id)
+                
+                for task_id in to_remove:
+                    del self.active_tasks[task_id]
+                    logger.info(f"清理优化任务: {task_id}")
+                    
+        except Exception as e:
+            logger.error(f"清理优化任务失败: {str(e)}")
+    
+    def get_match_result_details(self, match_id: str) -> Optional[Dict]:
+        """获取匹配结果详情"""
+        try:
+            collection = self.db_manager.get_collection('match_results')
+            
+            result = collection.find_one({'match_id': match_id})
+            
+            if result:
+                # 转换ObjectId为字符串
+                from src.utils.helpers import convert_objectid_to_str
+                return convert_objectid_to_str(result)
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"获取匹配结果详情失败: {str(e)}")
+            return None
+    
+    def update_review_status(self, match_id: str, review_status: str, 
+                           review_notes: str = '', reviewer: str = '') -> bool:
+        """更新审核状态"""
+        try:
+            collection = self.db_manager.get_collection('match_results')
+            
+            update_data = {
+                'review_status': review_status,
+                'review_notes': review_notes,
+                'reviewer': reviewer,
+                'review_time': datetime.now(),
+                'updated_time': datetime.now()
+            }
+            
+            result = collection.update_one(
+                {'match_id': match_id},
+                {'$set': update_data}
+            )
+            
+            if result.modified_count > 0:
+                logger.info(f"更新审核状态成功: {match_id} -> {review_status}")
+                return True
+            else:
+                logger.warning(f"未找到匹配记录: {match_id}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"更新审核状态失败: {str(e)}")
+            return False 

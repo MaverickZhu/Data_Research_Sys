@@ -22,7 +22,7 @@ def main():
             return False
         
         # 导入主程序
-        from main import main as main_program
+        from src.main import main as main_program
         
         # 运行主程序
         return main_program()

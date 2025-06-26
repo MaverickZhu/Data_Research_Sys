@@ -1,0 +1,29 @@
+{
+  "data_processing": {
+    "remove_data_limits": true,
+    "batch_size": 5000,
+    "parallel_workers": 8,
+    "streaming_mode": true,
+    "cache_enabled": true
+  },
+  "matching_algorithm": {
+    "fuzzy_threshold": 0.85,
+    "exact_match_priority": true,
+    "early_termination": true,
+    "cache_results": true,
+    "parallel_matching": true
+  },
+  "database_optimization": {
+    "connection_pool_size": 50,
+    "query_timeout": 60,
+    "use_indexes": true,
+    "batch_commit": true,
+    "read_preference": "primary"
+  },
+  "performance_tuning": {
+    "max_memory_usage": "16GB",
+    "cpu_cores": 32,
+    "io_threads": 16,
+    "gc_optimization": true
+  }
+}

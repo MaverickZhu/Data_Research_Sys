@@ -1,0 +1,26 @@
+{
+  "data_loading": {
+    "remove_limit": true,
+    "batch_size": 10000,
+    "streaming": true,
+    "prefetch": true
+  },
+  "matching_algorithm": {
+    "enable_cache": true,
+    "parallel_processing": true,
+    "smart_filtering": true,
+    "early_termination": true
+  },
+  "performance": {
+    "max_memory_usage": "8GB",
+    "connection_pool_size": 20,
+    "query_timeout": 30,
+    "batch_commit_size": 1000
+  },
+  "optimization": {
+    "skip_matched": true,
+    "region_grouping": true,
+    "fuzzy_threshold": 0.8,
+    "exact_match_first": true
+  }
+}

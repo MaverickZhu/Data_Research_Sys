@@ -1,0 +1,13 @@
+{
+  "fuzzy_matching_performance": {
+    "total_records": 10,
+    "successful_matches": 6,
+    "match_rate": 60.0,
+    "total_time": 0.8415734767913818,
+    "avg_time": 0.08415734767913818,
+    "avg_candidates": 10.1,
+    "target_records": 50000
+  },
+  "manual_review_api": true,
+  "web_api_connectivity": true
+}

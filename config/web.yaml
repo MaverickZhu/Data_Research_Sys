@@ -1,0 +1,30 @@
+# Flask Web应用配置
+
+flask:
+  host: "127.0.0.1"
+  port: 8888
+  debug: false
+  secret_key: "fire-safety-data-research-system-2024"
+  
+# CORS跨域配置
+cors:
+  origins: ["*"]
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+  allow_headers: ["Content-Type", "Authorization", "Accept"]
+
+# 分页配置
+pagination:
+  default_per_page: 20
+  max_per_page: 100
+
+# 文件上传配置
+upload:
+  max_file_size: 50MB
+  allowed_extensions: [".xlsx", ".xls", ".csv"]
+  upload_folder: "uploads"
+
+# 导出配置
+export:
+  max_records: 10000
+  formats: ["excel", "csv", "json"]
+  temp_folder: "temp" 

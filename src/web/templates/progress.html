@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>实时进度监控 - 消防单位建筑数据关联系统</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+        }
+
+        .main-container {
+            padding: 20px 0;
+        }
+
+        .card {
+            border: none;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            backdrop-filter: blur(10px);
+            background: rgba(255, 255, 255, 0.95);
+        }
+
+        .card-header {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border-radius: 15px 15px 0 0 !important;
+            padding: 15px 20px;
+            border: none;
+        }
+
+        .progress-card {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+
+        .task-card {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        }
+
+        .stats-card {
+            background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+        }
+
+        .progress {
+            height: 25px;
+            border-radius: 12px;
+            background: rgba(255,255,255,0.2);
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            border-radius: 12px;
+            transition: width 0.5s ease;
+        }
+
+        .task-item {
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-left: 4px solid #667eea;
+        }
+
+        .task-status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .status-running {
+            background: #28a745;
+            color: white;
+        }
+
+        .status-completed {
+            background: #007bff;
+            color: white;
+        }
+
+        .status-failed {
+            background: #dc3545;
+            color: white;
+        }
+
+        .status-stopped {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-action {
+            border-radius: 20px;
+            padding: 8px 20px;
+            font-weight: bold;
+            border: none;
+            transition: all 0.3s ease;
+        }
+
+        .btn-action:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+
+        .metric-card {
+            text-align: center;
+            padding: 20px;
+            border-radius: 10px;
+            background: rgba(255,255,255,0.1);
+            margin-bottom: 15px;
+        }
+
+        .metric-value {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+
+        .metric-label {
+            color: #7f8c8d;
+            font-size: 0.9rem;
+            margin-top: 5px;
+        }
+
+        .refresh-indicator {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(255,255,255,0.9);
+            padding: 10px 15px;
+            border-radius: 25px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            z-index: 1000;
+        }
+
+        .no-tasks {
+            text-align: center;
+            padding: 40px;
+            color: #7f8c8d;
+        }
+
+        .no-tasks i {
+            font-size: 4rem;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .loading {
+            animation: pulse 1.5s infinite;
+        }
+    </style>
+</head>
+<body>
+    <!-- 刷新指示器 -->
+    <div class="refresh-indicator">
+        <i class="fas fa-sync-alt" id="refreshIcon"></i>
+        <span id="refreshText">自动刷新</span>
+    </div>
+
+    <div class="container-fluid main-container">
+        <!-- 页面标题 -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="mb-0">
+                            <i class="fas fa-chart-line me-2"></i>
+                            实时进度监控
+                        </h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-3">
+                                <div class="metric-card">
+                                    <div class="metric-value" id="totalTasks">0</div>
+                                    <div class="metric-label">总任务数</div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="metric-card">
+                                    <div class="metric-value" id="runningTasks">0</div>
+                                    <div class="metric-label">运行中</div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="metric-card">
+                                    <div class="metric-value" id="completedTasks">0</div>
+                                    <div class="metric-label">已完成</div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="metric-card">
+                                    <div class="metric-value" id="totalMatches">0</div>
+                                    <div class="metric-label">总匹配数</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 当前运行任务 -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header progress-card">
+                        <h4 class="mb-0">
+                            <i class="fas fa-play-circle me-2"></i>
+                            当前运行任务
+                        </h4>
+                    </div>
+                    <div class="card-body" id="runningTasksContainer">
+                        <div class="no-tasks">
+                            <i class="fas fa-clock"></i>
+                            <h5>暂无运行中的匹配任务</h5>
+                            <p>点击下方按钮开始新的匹配任务</p>
+                            <button class="btn btn-primary btn-action" onclick="startNewTask()">
+                                <i class="fas fa-play me-2"></i>开始匹配
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 任务历史 -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header task-card">
+                        <h4 class="mb-0">
+                            <i class="fas fa-history me-2"></i>
+                            任务历史
+                        </h4>
+                    </div>
+                    <div class="card-body" id="taskHistoryContainer">
+                        <div class="loading text-center">
+                            <i class="fas fa-spinner fa-spin fa-2x"></i>
+                            <p class="mt-2">加载任务历史...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 系统统计 -->
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header stats-card">
+                        <h4 class="mb-0">
+                            <i class="fas fa-chart-bar me-2"></i>
+                            系统统计
+                        </h4>
+                    </div>
+                    <div class="card-body" id="systemStatsContainer">
+                        <div class="loading text-center">
+                            <i class="fas fa-spinner fa-spin fa-2x"></i>
+                            <p class="mt-2">加载系统统计...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 导航栏 -->
+    <nav class="navbar navbar-expand-lg navbar-dark fixed-bottom" style="background: rgba(0,0,0,0.8);">
+        <div class="container-fluid">
+            <div class="navbar-nav mx-auto">
+                <a class="nav-link" href="/">
+                    <i class="fas fa-home me-1"></i>首页
+                </a>
+                <a class="nav-link" href="/matching">
+                    <i class="fas fa-cogs me-1"></i>匹配任务
+                </a>
+                <a class="nav-link active" href="/progress">
+                    <i class="fas fa-chart-line me-1"></i>进度监控
+                </a>
+                <a class="nav-link" href="/results">
+                    <i class="fas fa-list me-1"></i>匹配结果
+                </a>
+                <a class="nav-link" href="/statistics">
+                    <i class="fas fa-chart-bar me-1"></i>统计分析
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 全局变量
+        let refreshInterval;
+        let currentTasks = new Map();
+
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('进度监控页面初始化');
+            initProgressMonitor();
+        });
+
+        // 初始化进度监控
+        function initProgressMonitor() {
+            console.log('初始化进度监控');
+            
+            // 立即加载数据
+            loadAllData();
+            
+            // 设置自动刷新
+            startAutoRefresh();
+        }
+
+        // 加载所有数据
+        function loadAllData() {
+            console.log('加载所有数据');
+            loadSystemStats();
+            loadTaskHistory();
+            checkRunningTasks();
+        }
+
+        // 加载系统统计
+        function loadSystemStats() {
+            console.log('加载系统统计');
+            
+            fetch('/api/stats')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('系统统计数据:', data);
+                    updateSystemStats(data);
+                })
+                .catch(error => {
+                    console.error('加载系统统计失败:', error);
+                    showError('加载系统统计失败');
+                });
+        }
+
+        // 更新系统统计显示
+        function updateSystemStats(data) {
+            // 更新指标卡片
+            document.getElementById('totalMatches').textContent = 
+                (data.match_results_count || 0).toLocaleString();
+            
+            // 更新详细统计
+            const container = document.getElementById('systemStatsContainer');
+            container.innerHTML = `
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="metric-card">
+                            <div class="metric-value">${(data.supervision_count || 0).toLocaleString()}</div>
+                            <div class="metric-label">监督管理系统</div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="metric-card">
+                            <div class="metric-value">${(data.inspection_count || 0).toLocaleString()}</div>
+                            <div class="metric-label">安全排查系统</div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="metric-card">
+                            <div class="metric-value">${(data.match_results_count || 0).toLocaleString()}</div>
+                            <div class="metric-label">匹配结果</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-12">
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle me-2"></i>
+                            <strong>数据更新时间:</strong> ${new Date().toLocaleString()}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 加载任务历史
+        function loadTaskHistory() {
+            console.log('加载任务历史');
+            
+            fetch('/api/task_history?page=1&per_page=10')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('任务历史数据:', data);
+                    if (data.success) {
+                        updateTaskHistory(data.tasks);
+                    } else {
+                        console.error('获取任务历史失败:', data.error);
+                        updateTaskHistory([]);
+                    }
+                })
+                .catch(error => {
+                    console.error('加载任务历史失败:', error);
+                    updateTaskHistory([]);
+                });
+        }
+
+        // 更新任务历史显示
+        function updateTaskHistory(tasks) {
+            const container = document.getElementById('taskHistoryContainer');
+            
+            if (!tasks || tasks.length === 0) {
+                container.innerHTML = `
+                    <div class="no-tasks">
+                        <i class="fas fa-history"></i>
+                        <h5>暂无任务历史</h5>
+                        <p>还没有执行过匹配任务</p>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = '';
+            tasks.forEach(task => {
+                const statusClass = `status-${task.status}`;
+                const statusText = getStatusText(task.status);
+                
+                html += `
+                    <div class="task-item">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <h6 class="mb-1">
+                                    <i class="fas fa-tasks me-2"></i>
+                                    任务 ${task.id}
+                                </h6>
+                                                                 <p class="mb-1">
+                                     <small class="text-muted">
+                                         开始: ${task.start_time} | 
+                                         结束: ${task.end_time || '进行中'} | 
+                                         处理: ${task.processed.toLocaleString()} 条 | 
+                                         匹配: ${task.matches} 条
+                                     </small>
+                                 </p>
+                            </div>
+                            <div class="text-end">
+                                <span class="task-status ${statusClass}">${statusText}</span>
+                                <div class="mt-2">
+                                    <div class="progress" style="width: 150px;">
+                                        <div class="progress-bar" style="width: ${task.progress}%"></div>
+                                    </div>
+                                    <small class="text-muted">${task.progress}%</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            container.innerHTML = html;
+            
+            // 更新任务统计
+            updateTaskStats(tasks);
+        }
+
+        // 更新任务统计
+        function updateTaskStats(tasks) {
+            const total = tasks.length;
+            const running = tasks.filter(t => t.status === 'running').length;
+            const completed = tasks.filter(t => t.status === 'completed').length;
+            
+            document.getElementById('totalTasks').textContent = total;
+            document.getElementById('runningTasks').textContent = running;
+            document.getElementById('completedTasks').textContent = completed;
+        }
+
+        // 检查运行中的任务
+        function checkRunningTasks() {
+            console.log('检查运行中的任务');
+            
+            fetch('/api/running_tasks')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('运行任务数据:', data);
+                    if (data.success && data.tasks && data.tasks.length > 0) {
+                        updateRunningTasks(data.tasks);
+                    } else {
+                        showNoRunningTasks();
+                    }
+                })
+                .catch(error => {
+                    console.error('检查运行任务失败:', error);
+                    showNoRunningTasks();
+                });
+        }
+
+        // 显示无运行任务
+        function showNoRunningTasks() {
+            const container = document.getElementById('runningTasksContainer');
+            container.innerHTML = `
+                <div class="no-tasks">
+                    <i class="fas fa-clock"></i>
+                    <h5>暂无运行中的匹配任务</h5>
+                    <p>点击下方按钮开始新的匹配任务</p>
+                    <button class="btn btn-primary btn-action" onclick="startNewTask()">
+                        <i class="fas fa-play me-2"></i>开始匹配
+                    </button>
+                </div>
+            `;
+        }
+
+        // 更新运行中的任务显示
+        function updateRunningTasks(tasks) {
+            const container = document.getElementById('runningTasksContainer');
+            
+            let html = '';
+            tasks.forEach(task => {
+                html += `
+                    <div class="task-item">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <h6 class="mb-1">
+                                    <i class="fas fa-play-circle me-2"></i>
+                                    任务 ${task.id}
+                                </h6>
+                                <p class="mb-1">
+                                    <small class="text-muted">
+                                        开始时间: ${task.start_time || '未知'} | 
+                                        类型: ${task.type || 'both'} | 
+                                        已处理: ${(task.processed || 0).toLocaleString()} 条
+                                    </small>
+                                </p>
+                            </div>
+                            <div class="text-end">
+                                <span class="task-status status-running">运行中</span>
+                                <div class="mt-2">
+                                    <div class="progress" style="width: 150px;">
+                                        <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                                             style="width: ${task.progress || 0}%"></div>
+                                    </div>
+                                    <small class="text-muted">${task.progress || 0}%</small>
+                                </div>
+                                <div class="mt-2">
+                                    <button class="btn btn-sm btn-danger" onclick="stopTask('${task.id}')">
+                                        <i class="fas fa-stop me-1"></i>停止
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            container.innerHTML = html;
+        }
+
+        // 停止任务
+        function stopTask(taskId) {
+            if (!confirm('确定要停止这个任务吗？')) {
+                return;
+            }
+            
+            fetch(`/api/stop_matching/${taskId}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showSuccess('任务已停止');
+                    // 刷新任务列表
+                    checkRunningTasks();
+                    loadTaskHistory();
+                } else {
+                    showError('停止任务失败: ' + (data.error || data.message));
+                }
+            })
+            .catch(error => {
+                console.error('停止任务失败:', error);
+                showError('停止任务失败');
+            });
+        }
+
+        // 获取状态文本
+        function getStatusText(status) {
+            const statusMap = {
+                'running': '运行中',
+                'completed': '已完成',
+                'failed': '失败',
+                'stopped': '已停止'
+            };
+            return statusMap[status] || status;
+        }
+
+        // 开始新任务
+        function startNewTask() {
+            console.log('开始新任务');
+            window.location.href = '/matching';
+        }
+
+        // 开始自动刷新
+        function startAutoRefresh() {
+            console.log('开始自动刷新');
+            
+            refreshInterval = setInterval(() => {
+                console.log('自动刷新数据');
+                
+                // 显示刷新动画
+                const refreshIcon = document.getElementById('refreshIcon');
+                refreshIcon.classList.add('fa-spin');
+                
+                // 刷新数据
+                loadAllData();
+                
+                // 停止刷新动画
+                setTimeout(() => {
+                    refreshIcon.classList.remove('fa-spin');
+                }, 1000);
+                
+            }, 5000); // 每5秒刷新一次
+        }
+
+        // 停止自动刷新
+        function stopAutoRefresh() {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+                refreshInterval = null;
+            }
+        }
+
+        // 显示错误信息
+        function showError(message) {
+            console.error('错误:', message);
+            showAlert(message, 'danger', 'fas fa-exclamation-triangle');
+        }
+
+        // 显示成功信息
+        function showSuccess(message) {
+            console.log('成功:', message);
+            showAlert(message, 'success', 'fas fa-check-circle');
+        }
+
+        // 显示通用提示
+        function showAlert(message, type, icon) {
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
+            alertDiv.style.position = 'fixed';
+            alertDiv.style.top = '80px';
+            alertDiv.style.right = '20px';
+            alertDiv.style.zIndex = '1050';
+            alertDiv.style.minWidth = '300px';
+            alertDiv.innerHTML = `
+                <i class="${icon} me-2"></i>
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            
+            document.body.appendChild(alertDiv);
+            
+            // 3秒后自动消失
+            setTimeout(() => {
+                if (alertDiv.parentNode) {
+                    alertDiv.remove();
+                }
+            }, 3000);
+        }
+
+        // 页面卸载时清理
+        window.addEventListener('beforeunload', function() {
+            stopAutoRefresh();
+        });
+    </script>
+</body>
+</html> 

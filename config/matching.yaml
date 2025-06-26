@@ -1,0 +1,100 @@
+# 数据匹配算法配置
+
+# 精确匹配字段配置
+exact_match:
+  fields:
+    unit_name:
+      source_field: "UNIT_NAME"      # 安全排查系统-单位名称
+      target_field: "dwmc"           # 消防监督系统-单位名称
+      priority: 2
+    credit_code:
+      source_field: "CREDIT_CODE"    # 安全排查系统-统一社会信用代码
+      target_field: "tyshxydm"       # 消防监督系统-统一社会信用代码
+      priority: 1                    # 最高优先级
+
+# 模糊匹配字段权重配置
+fuzzy_match:
+  # 相似度阈值
+  similarity_threshold: 0.75
+  
+  # 各字段权重配置
+  fields:
+    unit_name:
+      source_field: "UNIT_NAME"      # 安全排查系统-单位名称
+      target_field: "dwmc"           # 消防监督系统-单位名称
+      weight: 0.4
+      match_type: "string"
+      
+    address:
+      source_field: "ADDRESS"        # 安全排查系统-单位地址
+      target_field: "dwdz"           # 消防监督系统-单位地址
+      weight: 0.3
+      match_type: "address"
+      
+    legal_person:
+      source_field: "LEGAL_PEOPLE"   # 安全排查系统-法定代表人
+      target_field: "fddbr"          # 消防监督系统-法定代表人
+      weight: 0.15
+      match_type: "string"
+      
+    security_person:
+      source_field: "SECURITY_PEOPLE" # 安全排查系统-消防安全管理人
+      target_field: "xfaqglr"        # 消防监督系统-消防安全管理人
+      weight: 0.15
+      match_type: "string"
+
+# 字符串相似度算法配置
+string_similarity:
+  algorithms:
+    - name: "levenshtein"
+      weight: 0.3
+    - name: "jaro_winkler"  
+      weight: 0.3
+    - name: "cosine"
+      weight: 0.4
+      
+  # 中文处理配置
+  chinese_processing:
+    enable_pinyin: true              # 启用拼音相似度
+    enable_jieba: true               # 启用结巴分词
+    remove_punctuation: true         # 移除标点符号
+    normalize_spaces: true           # 标准化空格
+
+# 数值相似度配置
+numeric_similarity:
+  # 建筑面积相似度计算
+  building_area:
+    method: "percentage_diff"        # 百分比差异法
+    max_diff: 0.2                   # 最大允许20%差异
+    
+# 电话号码相似度配置
+phone_similarity:
+  normalize: true                    # 标准化电话号码格式
+  ignore_area_code: false           # 是否忽略区号
+  match_mobile_landline: true       # 手机和座机交叉匹配
+
+# 地址相似度配置  
+address_similarity:
+  enable_segmentation: true         # 启用地址分段
+  province_weight: 0.2             # 省份权重
+  city_weight: 0.3                 # 城市权重  
+  district_weight: 0.3             # 区县权重
+  detail_weight: 0.2               # 详细地址权重
+
+# 批处理配置
+batch_processing:
+  batch_size: 100                   # 每批处理记录数
+  max_workers: 4                    # 最大工作线程数
+  timeout: 300                      # 单批处理超时时间(秒)
+  retry_times: 3                    # 失败重试次数
+  
+# 结果保存配置
+result_saving:
+  save_interval: 10                 # 每处理10条记录保存一次
+  backup_interval: 1000             # 每处理1000条记录备份一次
+  
+# 日志配置
+logging:
+  level: "INFO"
+  log_similarity_details: true      # 记录详细相似度计算过程
+  log_match_decisions: true         # 记录匹配决策过程

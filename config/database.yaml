@@ -1,0 +1,31 @@
+mongodb:
+  auth_source: null
+  collections:
+    inspection_units: xfaqpc_jzdwxx
+    match_results: unit_match_results
+    supervision_units: xxj_shdwjbxx
+  connection_pool:
+    connect_timeout_ms: 60000
+    max_idle_time_ms: 300000
+    max_pool_size: 1000
+    min_pool_size: 128
+    server_selection_timeout_ms: 120000
+    socket_timeout_ms: 300000
+  database: Unit_Info
+  host: localhost
+  password: null
+  port: 27017
+  uri: mongodb://localhost:27017/Unit_Info
+  username: null
+redis:
+  cache_ttl:
+    match_progress: 60
+    processed_units: 3600
+    similarity_results: 1800
+    user_session: 7200
+  db: 0
+  decode_responses: true
+  host: localhost
+  password: difyai123456
+  port: 6379
+  username: null

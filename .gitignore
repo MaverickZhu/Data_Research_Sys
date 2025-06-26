@@ -1,0 +1,139 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+VENV/
+.env
+.env.*
+*.pyo
+
+# Logs
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Database
+*.db
+*.sqlite3
+
+# Temp files
+temp/
+tmp/
+*.tmp
+*.temp
+
+# Uploads/Exports
+uploads/
+exports/
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+
+# Test coverage
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# pytest
+.pytest_cache/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# VS Code
+.vscode/
+
+# Pycharm
+.idea/
+
+# Backup files
+*.backup
+*.bak
+*~
+
+# Local configuration
+config/local/
+local_*.yaml
+local_*.json
+
+# Test reports
+test_*.json
+*_report.json
+*_report.md
+test_*.html
+
+# Project specific
+*.optimization
+debug_*.py
+quick_*.py
+test_*.py
+verify_*.py
+update_*.py
+check_*.py
+fix_*.py
+simple_*.py
+optimize_*.py
+rollback_*.py
+*_optimization_*.md
+*_optimization_*.json
+*修复报告.md
+*测试报告.md
+*完成报告.md
+*工作进度*.md
+*备忘*.md 

@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>增强关联分析 - 消防单位建筑数据关联系统</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .card-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+        }
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
+        }
+        .stats-card {
+            border-left: 4px solid #667eea;
+            background: linear-gradient(135deg, #f8f9ff 0%, #f0f2ff 100%);
+        }
+        .association-strategy {
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 10px 0;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .association-strategy:hover {
+            border-color: #667eea;
+            background-color: #f8f9ff;
+        }
+        .association-strategy.selected {
+            border-color: #667eea;
+            background-color: #e7f3ff;
+        }
+        .result-table {
+            font-size: 0.9em;
+        }
+        .confidence-badge {
+            font-size: 0.8em;
+        }
+        .data-quality-bar {
+            height: 8px;
+            border-radius: 4px;
+            background-color: #e9ecef;
+            position: relative;
+            overflow: hidden;
+        }
+        .data-quality-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+        .quality-high { background-color: #28a745; }
+        .quality-medium { background-color: #ffc107; }
+        .quality-low { background-color: #dc3545; }
+        .association-details {
+            background-color: #f8f9fa;
+            border-radius: 6px;
+            padding: 10px;
+            margin: 5px 0;
+        }
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            display: none;
+            z-index: 9999;
+        }
+        .loading-content {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="/">
+                <i class="fas fa-fire"></i> 消防数据关联系统
+            </a>
+            <div class="navbar-nav ms-auto">
+                <a class="nav-link" href="/">首页</a>
+                <a class="nav-link" href="/matching">匹配管理</a>
+                <a class="nav-link" href="/results">匹配结果</a>
+                <a class="nav-link active" href="/enhanced_association">增强关联</a>
+                <a class="nav-link" href="/statistics">数据统计</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <!-- 页面标题 -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h4 class="mb-0">
+                            <i class="fas fa-project-diagram"></i> 增强关联分析
+                        </h4>
+                    </div>
+                    <div class="card-body">
+                        <p class="mb-0 text-muted">
+                            基于消防业务特点的智能关联策略，处理建筑级别和单位级别的多对多关系，
+                            提供全面的数据质量评估和关联分析。
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 统计信息 -->
+        <div class="row mb-4" id="statistics-section">
+            <div class="col-md-3">
+                <div class="card stats-card">
+                    <div class="card-body text-center">
+                        <h3 class="text-primary" id="total-associations">-</h3>
+                        <p class="mb-0">总关联数</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stats-card">
+                    <div class="card-body text-center">
+                        <h3 class="text-success" id="with-associations">-</h3>
+                        <p class="mb-0">有关联记录</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stats-card">
+                    <div class="card-body text-center">
+                        <h3 class="text-warning" id="association-rate">-</h3>
+                        <p class="mb-0">关联成功率</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stats-card">
+                    <div class="card-body text-center">
+                        <h3 class="text-info" id="avg-quality">-</h3>
+                        <p class="mb-0">平均数据质量</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 关联策略选择 -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="fas fa-cogs"></i> 关联策略配置
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="association-strategy" data-strategy="building_based">
+                                    <h6><i class="fas fa-building"></i> 建筑级关联</h6>
+                                    <p class="text-muted mb-0">一对一精确关联，每个建筑对应一个监督记录</p>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="association-strategy" data-strategy="unit_based">
+                                    <h6><i class="fas fa-sitemap"></i> 单位级关联</h6>
+                                    <p class="text-muted mb-0">一对多关联，单位对应多个检查记录</p>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="association-strategy selected" data-strategy="hybrid">
+                                    <h6><i class="fas fa-magic"></i> 智能混合</h6>
+                                    <p class="text-muted mb-0">根据数据特征自动选择最优策略</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row mt-3">
+                            <div class="col-md-6">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="clear-existing">
+                                    <label class="form-check-label" for="clear-existing">
+                                        清空现有关联结果
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-md-6 text-end">
+                                <button class="btn btn-primary" id="start-association">
+                                    <i class="fas fa-play"></i> 启动增强关联
+                                </button>
+                                <button class="btn btn-outline-secondary ms-2" id="refresh-stats">
+                                    <i class="fas fa-sync"></i> 刷新统计
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 关联结果 -->
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">
+                            <i class="fas fa-table"></i> 关联结果
+                        </h5>
+                        <div>
+                            <div class="btn-group btn-group-sm" role="group">
+                                <input type="radio" class="btn-check" name="filter-associations" id="filter-all" value="all" checked>
+                                <label class="btn btn-outline-primary" for="filter-all">全部</label>
+                                
+                                <input type="radio" class="btn-check" name="filter-associations" id="filter-with" value="with">
+                                <label class="btn btn-outline-success" for="filter-with">有关联</label>
+                                
+                                <input type="radio" class="btn-check" name="filter-associations" id="filter-without" value="without">
+                                <label class="btn btn-outline-warning" for="filter-without">无关联</label>
+                            </div>
+                            <button class="btn btn-outline-danger btn-sm ms-2" id="clear-results">
+                                <i class="fas fa-trash"></i> 清空结果
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-hover result-table" id="results-table">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>安全排查单位</th>
+                                        <th>建筑地址</th>
+                                        <th>法定代表人</th>
+                                        <th>信用代码</th>
+                                        <th>关联记录数</th>
+                                        <th>关联策略</th>
+                                        <th>置信度</th>
+                                        <th>数据质量</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="results-tbody">
+                                    <tr>
+                                        <td colspan="9" class="text-center text-muted">
+                                            <i class="fas fa-info-circle"></i> 暂无数据，请先启动增强关联分析
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        
+                        <!-- 分页 -->
+                        <nav aria-label="分页导航" id="pagination-nav" style="display: none;">
+                            <ul class="pagination justify-content-center" id="pagination">
+                            </ul>
+                        </nav>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 加载遮罩 -->
+    <div class="loading-overlay" id="loading-overlay">
+        <div class="loading-content">
+            <div class="spinner-border text-primary mb-3" role="status">
+                <span class="visually-hidden">加载中...</span>
+            </div>
+            <h5>正在执行增强关联分析...</h5>
+            <p class="text-muted mb-0">这可能需要几分钟时间，请耐心等待</p>
+        </div>
+    </div>
+
+    <!-- 详情模态框 -->
+    <div class="modal fade" id="detail-modal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">关联详情</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="detail-modal-body">
+                    <!-- 详情内容将通过JavaScript动态加载 -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 全局变量
+        let currentPage = 1;
+        let currentFilter = 'all';
+        let selectedStrategy = 'hybrid';
+
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            initializePage();
+            loadStatistics();
+            loadResults();
+        });
+
+        // 初始化页面事件
+        function initializePage() {
+            // 策略选择事件
+            document.querySelectorAll('.association-strategy').forEach(element => {
+                element.addEventListener('click', function() {
+                    document.querySelectorAll('.association-strategy').forEach(el => el.classList.remove('selected'));
+                    this.classList.add('selected');
+                    selectedStrategy = this.dataset.strategy;
+                });
+            });
+
+            // 启动关联按钮
+            document.getElementById('start-association').addEventListener('click', startAssociation);
+
+            // 刷新统计按钮
+            document.getElementById('refresh-stats').addEventListener('click', loadStatistics);
+
+            // 筛选按钮
+            document.querySelectorAll('input[name="filter-associations"]').forEach(radio => {
+                radio.addEventListener('change', function() {
+                    currentFilter = this.value;
+                    currentPage = 1;
+                    loadResults();
+                });
+            });
+
+            // 清空结果按钮
+            document.getElementById('clear-results').addEventListener('click', clearResults);
+        }
+
+        // 启动增强关联
+        async function startAssociation() {
+            const button = document.getElementById('start-association');
+            const clearExisting = document.getElementById('clear-existing').checked;
+            
+            try {
+                // 显示加载遮罩
+                document.getElementById('loading-overlay').style.display = 'block';
+                button.disabled = true;
+
+                const response = await fetch('/api/start_enhanced_association', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        strategy: selectedStrategy,
+                        clear_existing: clearExisting
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showAlert('success', `增强关联任务启动成功！任务ID: ${data.task_id}`);
+                    
+                    // 等待一段时间后刷新数据
+                    setTimeout(() => {
+                        loadStatistics();
+                        loadResults();
+                    }, 3000);
+                } else {
+                    showAlert('danger', `启动失败: ${data.error}`);
+                }
+
+            } catch (error) {
+                console.error('启动增强关联失败:', error);
+                showAlert('danger', `启动失败: ${error.message}`);
+            } finally {
+                // 隐藏加载遮罩
+                document.getElementById('loading-overlay').style.display = 'none';
+                button.disabled = false;
+            }
+        }
+
+        // 加载统计信息
+        async function loadStatistics() {
+            try {
+                const response = await fetch('/api/enhanced_association_statistics');
+                const data = await response.json();
+
+                if (data.success) {
+                    const stats = data.statistics;
+                    
+                    document.getElementById('total-associations').textContent = stats.total_associations || 0;
+                    document.getElementById('with-associations').textContent = stats.with_supervision_records || 0;
+                    document.getElementById('association-rate').textContent = (stats.association_rate || 0) + '%';
+                    document.getElementById('avg-quality').textContent = ((stats.avg_data_quality || 0) * 100).toFixed(1) + '%';
+                }
+            } catch (error) {
+                console.error('加载统计信息失败:', error);
+            }
+        }
+
+        // 加载关联结果
+        async function loadResults() {
+            try {
+                let url = `/api/enhanced_association_results?page=${currentPage}&page_size=20`;
+                
+                if (currentFilter === 'with') {
+                    url += '&has_associations=true';
+                } else if (currentFilter === 'without') {
+                    url += '&has_associations=false';
+                }
+
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (data.success) {
+                    displayResults(data.results);
+                    displayPagination(data.pagination);
+                } else {
+                    showAlert('danger', `加载结果失败: ${data.error}`);
+                }
+            } catch (error) {
+                console.error('加载结果失败:', error);
+                showAlert('danger', `加载结果失败: ${error.message}`);
+            }
+        }
+
+        // 显示结果
+        function displayResults(results) {
+            const tbody = document.getElementById('results-tbody');
+            
+            if (results.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="9" class="text-center text-muted">
+                            <i class="fas fa-info-circle"></i> 暂无符合条件的数据
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            tbody.innerHTML = results.map(result => {
+                const confidenceBadge = getConfidenceBadge(result.association_confidence);
+                const qualityBar = getQualityBar(result.data_quality_score);
+                const strategyText = getStrategyText(result.association_strategy);
+                
+                return `
+                    <tr>
+                        <td>
+                            <strong>${result.primary_unit_name || '-'}</strong>
+                            ${result.unit_building_count > 1 ? `<br><small class="text-muted">${result.unit_building_count}栋建筑</small>` : ''}
+                        </td>
+                        <td>${result.primary_unit_address || '-'}</td>
+                        <td>${result.primary_legal_person || '-'}</td>
+                        <td><small>${result.primary_credit_code || '-'}</small></td>
+                        <td>
+                            <span class="badge ${result.supervision_record_count > 0 ? 'bg-success' : 'bg-secondary'}">
+                                ${result.supervision_record_count}
+                            </span>
+                        </td>
+                        <td>${strategyText}</td>
+                        <td>${confidenceBadge}</td>
+                        <td>${qualityBar}</td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-primary" onclick="showDetail('${result.association_id}')">
+                                <i class="fas fa-eye"></i> 详情
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        // 显示分页
+        function displayPagination(pagination) {
+            const nav = document.getElementById('pagination-nav');
+            const paginationEl = document.getElementById('pagination');
+            
+            if (pagination.total_pages <= 1) {
+                nav.style.display = 'none';
+                return;
+            }
+
+            nav.style.display = 'block';
+            
+            let paginationHTML = '';
+            
+            // 上一页
+            if (pagination.page > 1) {
+                paginationHTML += `
+                    <li class="page-item">
+                        <a class="page-link" href="#" onclick="changePage(${pagination.page - 1})">上一页</a>
+                    </li>
+                `;
+            }
+            
+            // 页码
+            const startPage = Math.max(1, pagination.page - 2);
+            const endPage = Math.min(pagination.total_pages, pagination.page + 2);
+            
+            for (let i = startPage; i <= endPage; i++) {
+                paginationHTML += `
+                    <li class="page-item ${i === pagination.page ? 'active' : ''}">
+                        <a class="page-link" href="#" onclick="changePage(${i})">${i}</a>
+                    </li>
+                `;
+            }
+            
+            // 下一页
+            if (pagination.page < pagination.total_pages) {
+                paginationHTML += `
+                    <li class="page-item">
+                        <a class="page-link" href="#" onclick="changePage(${pagination.page + 1})">下一页</a>
+                    </li>
+                `;
+            }
+            
+            paginationEl.innerHTML = paginationHTML;
+        }
+
+        // 切换页面
+        function changePage(page) {
+            currentPage = page;
+            loadResults();
+        }
+
+        // 显示详情
+        async function showDetail(associationId) {
+            try {
+                const response = await fetch(`/api/association_result_detail/${associationId}`);
+                const data = await response.json();
+
+                if (data.success) {
+                    displayDetailModal(data.result);
+                } else {
+                    showAlert('danger', `加载详情失败: ${data.error}`);
+                }
+            } catch (error) {
+                console.error('加载详情失败:', error);
+                showAlert('danger', `加载详情失败: ${error.message}`);
+            }
+        }
+
+        // 显示详情模态框
+        function displayDetailModal(result) {
+            const modalBody = document.getElementById('detail-modal-body');
+            
+            const associatedRecordsHTML = result.associated_records.map(record => `
+                <tr>
+                    <td>${record.unit_name}</td>
+                    <td>${record.unit_address}</td>
+                    <td>${record.legal_person}</td>
+                    <td>${record.credit_code}</td>
+                    <td>${getMatchTypeBadge(record.match_type)}</td>
+                    <td>${(record.similarity_score * 100).toFixed(1)}%</td>
+                    <td>${record.inspection_date || '-'}</td>
+                </tr>
+            `).join('');
+
+            modalBody.innerHTML = `
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>基准记录信息（安全隐患排查系统）</h6>
+                        <table class="table table-sm">
+                            <tr><td>单位名称</td><td>${result.primary_unit_name}</td></tr>
+                            <tr><td>单位地址</td><td>${result.primary_unit_address}</td></tr>
+                            <tr><td>法定代表人</td><td>${result.primary_legal_person}</td></tr>
+                            <tr><td>信用代码</td><td>${result.primary_credit_code}</td></tr>
+                            <tr><td>建筑数量</td><td>${result.unit_building_count}</td></tr>
+                        </table>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>关联分析信息</h6>
+                        <table class="table table-sm">
+                            <tr><td>关联策略</td><td>${getStrategyText(result.association_strategy)}</td></tr>
+                            <tr><td>关联置信度</td><td>${(result.association_confidence * 100).toFixed(1)}%</td></tr>
+                            <tr><td>数据质量评分</td><td>${(result.data_quality_score * 100).toFixed(1)}%</td></tr>
+                            <tr><td>监督记录数</td><td>${result.supervision_record_count}</td></tr>
+                            <tr><td>最新检查日期</td><td>${result.latest_inspection_date || '-'}</td></tr>
+                        </table>
+                    </div>
+                </div>
+                
+                ${result.associated_records.length > 0 ? `
+                    <h6 class="mt-4">关联的监督检查记录</h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-striped">
+                            <thead>
+                                <tr>
+                                    <th>单位名称</th>
+                                    <th>单位地址</th>
+                                    <th>法定代表人</th>
+                                    <th>信用代码</th>
+                                    <th>匹配类型</th>
+                                    <th>相似度</th>
+                                    <th>检查日期</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${associatedRecordsHTML}
+                            </tbody>
+                        </table>
+                    </div>
+                ` : '<p class="text-muted mt-4">无关联的监督检查记录</p>'}
+            `;
+
+            new bootstrap.Modal(document.getElementById('detail-modal')).show();
+        }
+
+        // 清空结果
+        async function clearResults() {
+            if (!confirm('确定要清空所有增强关联结果吗？此操作不可撤销。')) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/clear_enhanced_association_results', {
+                    method: 'POST'
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showAlert('success', '增强关联结果已清空');
+                    loadStatistics();
+                    loadResults();
+                } else {
+                    showAlert('danger', `清空失败: ${data.error}`);
+                }
+            } catch (error) {
+                console.error('清空结果失败:', error);
+                showAlert('danger', `清空失败: ${error.message}`);
+            }
+        }
+
+        // 辅助函数
+        function getConfidenceBadge(confidence) {
+            const percentage = (confidence * 100).toFixed(1);
+            let badgeClass = 'bg-secondary';
+            
+            if (confidence >= 0.8) badgeClass = 'bg-success';
+            else if (confidence >= 0.6) badgeClass = 'bg-warning';
+            else if (confidence >= 0.3) badgeClass = 'bg-info';
+            
+            return `<span class="badge ${badgeClass} confidence-badge">${percentage}%</span>`;
+        }
+
+        function getQualityBar(quality) {
+            const percentage = (quality * 100).toFixed(1);
+            let fillClass = 'quality-low';
+            
+            if (quality >= 0.8) fillClass = 'quality-high';
+            else if (quality >= 0.6) fillClass = 'quality-medium';
+            
+            return `
+                <div class="data-quality-bar">
+                    <div class="data-quality-fill ${fillClass}" style="width: ${percentage}%"></div>
+                </div>
+                <small class="text-muted">${percentage}%</small>
+            `;
+        }
+
+        function getStrategyText(strategy) {
+            const strategies = {
+                'building_based': '建筑级',
+                'unit_based': '单位级',
+                'hybrid': '智能混合'
+            };
+            return strategies[strategy] || strategy;
+        }
+
+        function getMatchTypeBadge(matchType) {
+            const types = {
+                'exact_credit_code': '<span class="badge bg-success">精确(信用代码)</span>',
+                'exact_unit_name': '<span class="badge bg-success">精确(单位名称)</span>',
+                'fuzzy_unit_name': '<span class="badge bg-info">模糊(单位名称)</span>',
+                'fuzzy_comprehensive': '<span class="badge bg-warning">模糊(综合)</span>',
+                'fuzzy_partial': '<span class="badge bg-secondary">模糊(部分)</span>',
+                'weak_association': '<span class="badge bg-light text-dark">弱关联</span>'
+            };
+            return types[matchType] || `<span class="badge bg-secondary">${matchType}</span>`;
+        }
+
+        function showAlert(type, message) {
+            const alertHTML = `
+                <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+                    ${message}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            `;
+            
+            // 在页面顶部插入警告
+            const container = document.querySelector('.container');
+            container.insertAdjacentHTML('afterbegin', alertHTML);
+            
+            // 5秒后自动消失
+            setTimeout(() => {
+                const alert = container.querySelector('.alert');
+                if (alert) {
+                    alert.remove();
+                }
+            }, 5000);
+        }
+    </script>
+</body>
+</html>

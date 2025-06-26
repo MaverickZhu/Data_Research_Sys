@@ -1,0 +1,991 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>一对多匹配结果 - 消防单位建筑数据关联系统</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f5f7fa;
+            color: #333;
+            line-height: 1.6;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 1rem 0;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .header-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 1.8rem;
+            font-weight: 600;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 1.5rem;
+        }
+
+        .nav-links a {
+            color: white;
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+        }
+
+        .nav-links a:hover {
+            background-color: rgba(255,255,255,0.1);
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 2rem auto;
+            padding: 0 2rem;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-label {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .controls {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.3s;
+            text-decoration: none;
+            display: inline-block;
+            text-align: center;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5a6fd8;
+            transform: translateY(-2px);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #218838;
+        }
+
+        .search-box {
+            padding: 0.75rem;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 0.9rem;
+            width: 300px;
+        }
+
+        .results-table {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .table-header {
+            background: #f8f9fa;
+            padding: 1rem;
+            border-bottom: 1px solid #dee2e6;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .table-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .table-info {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 1rem;
+            text-align: left;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #333;
+        }
+
+        tr:hover {
+            background: #f8f9fa;
+        }
+
+        .status-badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 15px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+
+        .status-matched {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-unmatched {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .match-count {
+            background: #667eea;
+            color: white;
+            padding: 0.25rem 0.5rem;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+
+        .match-type {
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+
+        .match-exact {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .match-fuzzy {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 0.5rem;
+            margin-top: 2rem;
+        }
+
+        .pagination button {
+            padding: 0.5rem 1rem;
+            border: 1px solid #dee2e6;
+            background: white;
+            color: #333;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .pagination button:hover:not(:disabled) {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .pagination .current {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 3rem;
+            color: #666;
+        }
+
+        .loading::after {
+            content: '';
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #667eea;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 1s linear infinite;
+            margin-left: 10px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: #666;
+        }
+
+        .empty-state h3 {
+            margin-bottom: 1rem;
+            color: #333;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+
+        .modal-content {
+            background-color: white;
+            margin: 5% auto;
+            padding: 0;
+            border-radius: 10px;
+            width: 90%;
+            max-width: 800px;
+            max-height: 80vh;
+            overflow: hidden;
+            animation: modalSlideIn 0.3s ease-out;
+        }
+
+        @keyframes modalSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-50px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .modal-header {
+            background: #667eea;
+            color: white;
+            padding: 1rem 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+
+        .close {
+            color: white;
+            font-size: 1.5rem;
+            font-weight: bold;
+            cursor: pointer;
+            border: none;
+            background: none;
+        }
+
+        .close:hover {
+            opacity: 0.7;
+        }
+
+        .modal-body {
+            padding: 1.5rem;
+            max-height: 60vh;
+            overflow-y: auto;
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .detail-card {
+            background: #f8f9fa;
+            padding: 1rem;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+
+        .detail-card h4 {
+            color: #333;
+            margin-bottom: 0.5rem;
+            font-size: 1rem;
+        }
+
+        .detail-item {
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .detail-label {
+            font-weight: 600;
+            color: #666;
+            display: inline-block;
+            width: 120px;
+        }
+
+        .detail-value {
+            color: #333;
+        }
+
+        .history-timeline {
+            border-left: 3px solid #667eea;
+            padding-left: 1.5rem;
+            margin-left: 1rem;
+        }
+
+        .timeline-item {
+            position: relative;
+            margin-bottom: 2rem;
+            background: white;
+            padding: 1rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        .timeline-item::before {
+            content: '';
+            position: absolute;
+            left: -1.75rem;
+            top: 1rem;
+            width: 12px;
+            height: 12px;
+            background: #667eea;
+            border-radius: 50%;
+            border: 3px solid white;
+        }
+
+        .timeline-date {
+            color: #667eea;
+            font-weight: 600;
+            font-size: 0.9rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .timeline-content {
+            color: #333;
+        }
+
+        .alert {
+            padding: 1rem;
+            border-radius: 5px;
+            margin-bottom: 1rem;
+        }
+
+        .alert-info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border-left: 4px solid #17a2b8;
+        }
+
+        .alert-warning {
+            background: #fff3cd;
+            color: #856404;
+            border-left: 4px solid #ffc107;
+        }
+
+        @media (max-width: 768px) {
+            .header-content {
+                flex-direction: column;
+                gap: 1rem;
+                text-align: center;
+            }
+
+            .nav-links {
+                flex-wrap: wrap;
+                justify-content: center;
+            }
+
+            .container {
+                padding: 0 1rem;
+            }
+
+            .controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .search-box {
+                width: 100%;
+            }
+
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+
+            table {
+                font-size: 0.8rem;
+            }
+
+            th, td {
+                padding: 0.5rem;
+            }
+
+            .modal-content {
+                width: 95%;
+                margin: 2% auto;
+            }
+
+            .detail-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-content">
+            <h1>🔥 一对多匹配结果</h1>
+            <nav class="nav-links">
+                <a href="/">🏠 首页</a>
+                <a href="/matching">⚙️ 匹配管理</a>
+                <a href="/results">📊 原始结果</a>
+                <a href="/multi_results" class="active">🔗 一对多结果</a>
+                <a href="/statistics">📈 统计分析</a>
+            </nav>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- 统计卡片 -->
+        <div class="stats-grid" id="statsGrid">
+            <div class="stat-card">
+                <div class="stat-number" id="totalUnits">-</div>
+                <div class="stat-label">总单位数</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="matchedUnits">-</div>
+                <div class="stat-label">匹配成功</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="multipleMatches">-</div>
+                <div class="stat-label">多重匹配</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="totalInspections">-</div>
+                <div class="stat-label">总检查记录</div>
+            </div>
+        </div>
+
+        <!-- 控制面板 -->
+        <div class="controls">
+            <div style="display: flex; gap: 1rem; align-items: center;">
+                <button class="btn btn-primary" onclick="startMultiMatching()">🚀 开始一对多匹配</button>
+                <button class="btn btn-secondary" onclick="refreshData()">🔄 刷新数据</button>
+                <button class="btn btn-success" onclick="exportResults()">📤 导出结果</button>
+            </div>
+            <div style="display: flex; gap: 1rem; align-items: center;">
+                <input type="text" class="search-box" id="searchBox" placeholder="搜索单位名称..." onkeyup="searchResults()">
+                <select id="statusFilter" onchange="filterResults()" style="padding: 0.75rem; border: 1px solid #ddd; border-radius: 5px;">
+                    <option value="">全部状态</option>
+                    <option value="matched">已匹配</option>
+                    <option value="unmatched">未匹配</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- 结果表格 -->
+        <div class="results-table">
+            <div class="table-header">
+                <div class="table-title">一对多匹配结果</div>
+                <div class="table-info" id="tableInfo">正在加载...</div>
+            </div>
+            
+            <div id="tableContainer">
+                <div class="loading">正在加载匹配结果...</div>
+            </div>
+
+            <!-- 分页 -->
+            <div class="pagination" id="pagination" style="display: none;">
+                <button onclick="goToPage(1)" id="firstPage">首页</button>
+                <button onclick="goToPage(currentPage - 1)" id="prevPage">上一页</button>
+                <span id="pageInfo">第 1 页，共 1 页</span>
+                <button onclick="goToPage(currentPage + 1)" id="nextPage">下一页</button>
+                <button onclick="goToPage(totalPages)" id="lastPage">末页</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 单位详情模态框 -->
+    <div id="unitDetailModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title" id="modalTitle">单位详情</h2>
+                <button class="close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <div class="loading">正在加载详情...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 全局变量
+        let currentPage = 1;
+        let totalPages = 1;
+        let perPage = 20;
+        let allResults = [];
+        let filteredResults = [];
+
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🚀 一对多匹配结果页面加载完成');
+            loadStatistics();
+            loadResults();
+        });
+
+        // 加载统计信息
+        async function loadStatistics() {
+            try {
+                const response = await fetch('/api/multi_match_statistics');
+                const data = await response.json();
+                
+                if (data.success) {
+                    const stats = data.statistics;
+                    document.getElementById('totalUnits').textContent = stats.total_units || 0;
+                    document.getElementById('matchedUnits').textContent = stats.matched_units || 0;
+                    document.getElementById('multipleMatches').textContent = stats.multiple_matches || 0;
+                    document.getElementById('totalInspections').textContent = stats.total_matched_records || 0;
+                } else {
+                    console.error('加载统计信息失败:', data.error);
+                }
+            } catch (error) {
+                console.error('加载统计信息出错:', error);
+            }
+        }
+
+        // 加载匹配结果
+        async function loadResults(page = 1) {
+            try {
+                const response = await fetch(`/api/multi_match_results?page=${page}&per_page=${perPage}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    allResults = data.results;
+                    filteredResults = [...allResults];
+                    currentPage = page;
+                    
+                    displayResults(filteredResults);
+                    updatePagination();
+                    updateTableInfo();
+                } else {
+                    console.error('加载结果失败:', data.error);
+                    showEmptyState('加载失败：' + data.error);
+                }
+            } catch (error) {
+                console.error('加载结果出错:', error);
+                showEmptyState('网络错误，请检查连接');
+            }
+        }
+
+        // 显示结果表格
+        function displayResults(results) {
+            const container = document.getElementById('tableContainer');
+            
+            if (results.length === 0) {
+                showEmptyState('暂无匹配结果');
+                return;
+            }
+
+            const tableHTML = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>单位名称</th>
+                            <th>地址</th>
+                            <th>法定代表人</th>
+                            <th>匹配状态</th>
+                            <th>检查记录数</th>
+                            <th>匹配类型</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${results.map(result => `
+                            <tr>
+                                <td>
+                                    <strong>${result.unit_name || '-'}</strong>
+                                    ${result.credit_code ? `<br><small style="color: #666;">信用代码：${result.credit_code}</small>` : ''}
+                                </td>
+                                <td>${result.address || '-'}</td>
+                                <td>${result.legal_representative || '-'}</td>
+                                <td>
+                                    <span class="status-badge ${result.match_status === 'matched' ? 'status-matched' : 'status-unmatched'}">
+                                        ${result.match_status === 'matched' ? '已匹配' : '未匹配'}
+                                    </span>
+                                </td>
+                                <td>
+                                    ${result.total_matched_records > 0 ? 
+                                        `<span class="match-count">${result.total_matched_records}</span>` : 
+                                        '0'
+                                    }
+                                </td>
+                                <td>
+                                    ${getMatchTypeDisplay(result.match_summary)}
+                                </td>
+                                <td>
+                                    <button class="btn btn-primary" style="padding: 0.25rem 0.75rem; font-size: 0.8rem;" 
+                                            onclick="viewUnitDetail('${result.id}', '${result.unit_name}')">
+                                        查看详情
+                                    </button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+            
+            container.innerHTML = tableHTML;
+        }
+
+        // 获取匹配类型显示
+        function getMatchTypeDisplay(matchSummary) {
+            if (!matchSummary) return '-';
+            
+            const exactMatches = matchSummary.exact_matches || 0;
+            const fuzzyMatches = matchSummary.fuzzy_matches || 0;
+            
+            if (exactMatches > 0) {
+                return `<span class="match-type match-exact">精确匹配</span>`;
+            } else if (fuzzyMatches > 0) {
+                return `<span class="match-type match-fuzzy">模糊匹配</span>`;
+            } else {
+                return '-';
+            }
+        }
+
+        // 显示空状态
+        function showEmptyState(message) {
+            const container = document.getElementById('tableContainer');
+            container.innerHTML = `
+                <div class="empty-state">
+                    <h3>📭 ${message}</h3>
+                    <p>请尝试刷新页面或联系系统管理员</p>
+                </div>
+            `;
+        }
+
+        // 更新分页信息
+        function updatePagination() {
+            const pagination = document.getElementById('pagination');
+            const pageInfo = document.getElementById('pageInfo');
+            
+            // 简化分页逻辑，因为当前API返回的是固定数量
+            totalPages = Math.max(1, Math.ceil(filteredResults.length / perPage));
+            
+            pageInfo.textContent = `第 ${currentPage} 页，共 ${totalPages} 页`;
+            
+            document.getElementById('firstPage').disabled = currentPage === 1;
+            document.getElementById('prevPage').disabled = currentPage === 1;
+            document.getElementById('nextPage').disabled = currentPage === totalPages;
+            document.getElementById('lastPage').disabled = currentPage === totalPages;
+            
+            pagination.style.display = totalPages > 1 ? 'flex' : 'none';
+        }
+
+        // 更新表格信息
+        function updateTableInfo() {
+            const tableInfo = document.getElementById('tableInfo');
+            tableInfo.textContent = `共 ${filteredResults.length} 条记录`;
+        }
+
+        // 分页跳转
+        function goToPage(page) {
+            if (page >= 1 && page <= totalPages && page !== currentPage) {
+                loadResults(page);
+            }
+        }
+
+        // 搜索结果
+        function searchResults() {
+            const searchTerm = document.getElementById('searchBox').value.toLowerCase();
+            const statusFilter = document.getElementById('statusFilter').value;
+            
+            filteredResults = allResults.filter(result => {
+                const matchesSearch = !searchTerm || 
+                    (result.unit_name && result.unit_name.toLowerCase().includes(searchTerm)) ||
+                    (result.address && result.address.toLowerCase().includes(searchTerm)) ||
+                    (result.legal_representative && result.legal_representative.toLowerCase().includes(searchTerm));
+                
+                const matchesStatus = !statusFilter || result.match_status === statusFilter;
+                
+                return matchesSearch && matchesStatus;
+            });
+            
+            currentPage = 1;
+            displayResults(filteredResults);
+            updatePagination();
+            updateTableInfo();
+        }
+
+        // 筛选结果
+        function filterResults() {
+            searchResults(); // 重用搜索逻辑
+        }
+
+        // 开始一对多匹配
+        async function startMultiMatching() {
+            if (!confirm('确定要开始一对多匹配处理吗？这可能需要较长时间。')) {
+                return;
+            }
+
+            const button = event.target;
+            const originalText = button.textContent;
+            button.textContent = '🔄 处理中...';
+            button.disabled = true;
+
+            try {
+                const response = await fetch('/api/start_multi_matching', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        limit: 10 // 测试用，限制处理数量
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert('一对多匹配处理完成！');
+                    await loadStatistics();
+                    await loadResults();
+                } else {
+                    alert('匹配处理失败：' + data.error);
+                }
+            } catch (error) {
+                console.error('匹配处理出错:', error);
+                alert('网络错误，请稍后重试');
+            } finally {
+                button.textContent = originalText;
+                button.disabled = false;
+            }
+        }
+
+        // 刷新数据
+        async function refreshData() {
+            await loadStatistics();
+            await loadResults(currentPage);
+        }
+
+        // 导出结果
+        function exportResults() {
+            // TODO: 实现导出功能
+            alert('导出功能开发中...');
+        }
+
+        // 查看单位详情
+        async function viewUnitDetail(unitId, unitName) {
+            const modal = document.getElementById('unitDetailModal');
+            const modalTitle = document.getElementById('modalTitle');
+            const modalBody = document.getElementById('modalBody');
+            
+            modalTitle.textContent = `${unitName} - 检查历史记录`;
+            modalBody.innerHTML = '<div class="loading">正在加载详情...</div>';
+            modal.style.display = 'block';
+            
+            try {
+                const response = await fetch(`/api/unit_inspection_history/${unitId}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    displayUnitDetail(data.unit_info);
+                } else {
+                    modalBody.innerHTML = `<div class="alert alert-warning">加载失败：${data.error}</div>`;
+                }
+            } catch (error) {
+                console.error('加载单位详情出错:', error);
+                modalBody.innerHTML = '<div class="alert alert-warning">网络错误，请稍后重试</div>';
+            }
+        }
+
+        // 显示单位详情
+        function displayUnitDetail(unitInfo) {
+            const modalBody = document.getElementById('modalBody');
+            
+            const detailHTML = `
+                <div class="detail-grid">
+                    <div class="detail-card">
+                        <h4>🏢 基本信息</h4>
+                        <div class="detail-item">
+                            <span class="detail-label">单位名称：</span>
+                            <span class="detail-value">${unitInfo.unit_name || '-'}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">地址：</span>
+                            <span class="detail-value">${unitInfo.address || '-'}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">法定代表人：</span>
+                            <span class="detail-value">${unitInfo.legal_representative || '-'}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">信用代码：</span>
+                            <span class="detail-value">${unitInfo.credit_code || '-'}</span>
+                        </div>
+                    </div>
+                    
+                    <div class="detail-card">
+                        <h4>📊 匹配统计</h4>
+                        <div class="detail-item">
+                            <span class="detail-label">检查记录数：</span>
+                            <span class="detail-value">${unitInfo.total_inspections || 0}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">精确匹配：</span>
+                            <span class="detail-value">${unitInfo.match_summary?.exact_matches || 0}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">模糊匹配：</span>
+                            <span class="detail-value">${unitInfo.match_summary?.fuzzy_matches || 0}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">匹配方法：</span>
+                            <span class="detail-value">${unitInfo.match_summary?.match_method || '-'}</span>
+                        </div>
+                    </div>
+                </div>
+                
+                ${unitInfo.inspection_history && unitInfo.inspection_history.length > 0 ? `
+                    <h4 style="margin: 2rem 0 1rem 0; color: #333;">🕒 检查历史记录</h4>
+                    <div class="history-timeline">
+                        ${unitInfo.inspection_history.map(record => `
+                            <div class="timeline-item">
+                                <div class="timeline-date">
+                                    ${record.inspection_date || '日期未知'}
+                                    ${record.is_primary ? '<span style="background: #28a745; color: white; padding: 0.2rem 0.5rem; border-radius: 10px; font-size: 0.7rem; margin-left: 0.5rem;">主要记录</span>' : ''}
+                                </div>
+                                <div class="timeline-content">
+                                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; margin-top: 0.5rem;">
+                                        <div>
+                                            <strong>单位名称：</strong>${record.unit_name || '-'}<br>
+                                            <strong>地址：</strong>${record.address || '-'}<br>
+                                            <strong>法定代表人：</strong>${record.legal_representative || '-'}
+                                        </div>
+                                        <div>
+                                            <strong>联系电话：</strong>${record.contact_phone || '-'}<br>
+                                            <strong>匹配类型：</strong>${record.match_type || '-'}<br>
+                                            <strong>相似度：</strong>${(record.similarity_score * 100).toFixed(1)}%
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                ` : `
+                    <div class="alert alert-info">
+                        <strong>提示：</strong>该单位暂无检查历史记录。
+                    </div>
+                `}
+            `;
+            
+            modalBody.innerHTML = detailHTML;
+        }
+
+        // 关闭模态框
+        function closeModal() {
+            document.getElementById('unitDetailModal').style.display = 'none';
+        }
+
+        // 点击模态框外部关闭
+        window.onclick = function(event) {
+            const modal = document.getElementById('unitDetailModal');
+            if (event.target === modal) {
+                closeModal();
+            }
+        }
+
+        // ESC键关闭模态框
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                closeModal();
+            }
+        });
+    </script>
+</body>
+</html> 

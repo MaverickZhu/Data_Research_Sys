@@ -18,6 +18,8 @@ from .exact_matcher import ExactMatcher, MatchResult
 from .fuzzy_matcher import FuzzyMatcher
 from .optimized_fuzzy_matcher import OptimizedFuzzyMatcher, FuzzyMatchResult
 from .enhanced_fuzzy_matcher import EnhancedFuzzyMatcher, EnhancedFuzzyMatchResult
+from .graph_matcher import GraphMatcher
+from .prefilter_system import PrefilterSystem
 from src.utils.helpers import batch_iterator, generate_match_id, format_timestamp
 
 logger = logging.getLogger(__name__)
@@ -145,6 +147,17 @@ class OptimizedMatchProcessor:
         self.fuzzy_matcher = FuzzyMatcher(config)
         self.optimized_fuzzy_matcher = OptimizedFuzzyMatcher(config)
         self.enhanced_fuzzy_matcher = EnhancedFuzzyMatcher(config)  # 新增增强模糊匹配器
+        self.prefilter_system = PrefilterSystem(db_manager.get_db()) # 初始化预过滤器
+        
+        # 图匹配器配置
+        self.graph_config = config.get('graph_matching', {})
+        self.use_graph_matcher = self.graph_config.get('enabled', True)
+        if self.use_graph_matcher:
+            logger.info("图匹配器模块已启用。")
+            self.graph_matcher = GraphMatcher(self.db_manager.get_db(), self.config)
+            # 构建一个包含少量数据的热启动图
+            initial_build_limit = self.graph_config.get('initial_build_limit', 5000)
+            self.graph_matcher.build_graph(limit=initial_build_limit)
         
         # 批处理配置
         self.batch_config = config.get('batch_processing', {})
@@ -238,9 +251,9 @@ class OptimizedMatchProcessor:
         try:
             logger.info(f"开始执行优化匹配任务: {task_id}, 模式: {mode}")
             
-            # 获取目标数据（消防监督管理系统）- 作为全量匹配库
-            target_records = self._load_target_records()
-            logger.info(f"加载目标数据（消防监督管理系统）: {len(target_records)} 条")
+            # 获取目标数据（消防监督管理系统）- 不再全量加载
+            # target_records = self._load_target_records()
+            # logger.info(f"加载目标数据（消防监督管理系统）: {len(target_records)} 条")
             
             # 根据模式获取需要处理的源数据（安全排查系统）
             if mode == MatchingMode.INCREMENTAL:
@@ -264,8 +277,8 @@ class OptimizedMatchProcessor:
                     logger.info(f"任务停止信号检测到，停止处理新批次: {task_id}")
                     break
                 
-                # 处理当前批次
-                self._process_optimized_batch(task_id, source_batch, target_records, match_type, mode)
+                # 处理当前批次 (不再传入 target_records)
+                self._process_optimized_batch(task_id, source_batch, match_type, mode)
                 
                 # 检查任务是否在批次处理过程中被停止
                 if progress.status == "stopped":
@@ -375,7 +388,7 @@ class OptimizedMatchProcessor:
             yield []
     
     def _process_optimized_batch(self, task_id: str, source_batch: List[Dict], 
-                               target_records: List[Dict], match_type: str, mode: str):
+                               match_type: str, mode: str):
         """处理优化的批次数据"""
         progress = self.active_tasks.get(task_id)
         if not progress:
@@ -394,9 +407,9 @@ class OptimizedMatchProcessor:
                     logger.info(f"🛑 任务停止信号检测到，当前批次已处理 {len(batch_results)} 条记录")
                     break
                 
-                # 处理单条记录
+                # 处理单条记录 (不再传入 target_records)
                 result = self._process_optimized_single_record(
-                    source_record, target_records, match_type, mode
+                    source_record, match_type, mode
                 )
                 
                 # 详细记录结果处理
@@ -474,12 +487,20 @@ class OptimizedMatchProcessor:
             logger.info(f"任务在批次处理过程中被停止: {task_id}")
             progress.set_status("stopped")
     
-    def _process_optimized_single_record(self, source_record: Dict, target_records: List[Dict], 
+    def _process_optimized_single_record(self, source_record: Dict, 
                                        match_type: str, mode: str) -> Optional[Dict]:
         """处理优化的单条记录"""
         try:
             source_id = str(source_record.get('_id'))
             
+            # 1. 使用预过滤系统获取候选记录
+            target_candidates = self.prefilter_system.get_candidates(source_record)
+            if not target_candidates:
+                logger.info(f"预过滤未能找到任何候选记录: {source_record.get('UNIT_NAME', 'Unknown')}")
+                return self._format_optimized_no_match_result(source_record)
+            
+            logger.info(f"为 {source_record.get('UNIT_NAME', 'Unknown')} 找到 {len(target_candidates)} 个候选。")
+
             # 检查是否已存在匹配结果
             existing_result = self._get_existing_match_result(source_id)
             
@@ -488,7 +509,7 @@ class OptimizedMatchProcessor:
             
             # 精确匹配
             if match_type in ['exact', 'both']:
-                exact_result = self.exact_matcher.match_single_record(source_record, target_records)
+                exact_result = self.exact_matcher.match_single_record(source_record, target_candidates)
                 
                 if exact_result.matched:
                     match_result = self._format_optimized_match_result(
@@ -500,10 +521,31 @@ class OptimizedMatchProcessor:
             if match_type in ['fuzzy', 'both'] and not match_result:
                 # 优先使用增强的模糊匹配器（解决匹配幻觉问题）
                 enhanced_fuzzy_result = self.enhanced_fuzzy_matcher.match_single_record(
-                    source_record, target_records
+                    source_record, target_candidates
                 )
                 
                 if enhanced_fuzzy_result.matched:
+                    # 图匹配增强逻辑
+                    if self.use_graph_matcher and 0.7 < enhanced_fuzzy_result.similarity_score < 1.0:
+                        logger.info(f"触发图匹配二次验证，当前分数: {enhanced_fuzzy_result.similarity_score:.3f}")
+                        
+                        # 动态将当前比较的记录添加到图中，确保它们存在
+                        self.graph_matcher.add_unit_to_graph(source_record, 'xfaqpc', 'UNIT_NAME', 'UNIT_ADDRESS', 'LEGAL_PEOPLE')
+                        if enhanced_fuzzy_result.target_record:
+                            self.graph_matcher.add_unit_to_graph(enhanced_fuzzy_result.target_record, 'xxj', 'dwmc', 'dwdz', 'fddbr')
+                        
+                        graph_score = self.graph_matcher.calculate_graph_score(
+                            source_record, 
+                            enhanced_fuzzy_result.target_record
+                        )
+                        
+                        if graph_score > 0:
+                            original_score = enhanced_fuzzy_result.similarity_score
+                            enhanced_fuzzy_result.similarity_score = 0.98  # 提升分数
+                            warning_msg = f"图匹配增强: 共享属性发现，分数从 {original_score:.3f} 提升至 0.98"
+                            enhanced_fuzzy_result.match_warnings.append(warning_msg)
+                            logger.info(f"✅ {warning_msg} for {source_record.get('UNIT_NAME')}")
+
                     match_result = self._format_optimized_match_result(
                         enhanced_fuzzy_result, 'fuzzy_enhanced', source_record
                     )
@@ -516,7 +558,7 @@ class OptimizedMatchProcessor:
                 else:
                     # 如果增强模糊匹配失败，尝试使用优化的模糊匹配器作为备用
                     optimized_fuzzy_result = self.optimized_fuzzy_matcher.match_single_record_optimized(
-                        source_record, target_records
+                        source_record, target_candidates
                     )
                     
                     if optimized_fuzzy_result.get('matched', False):
@@ -620,8 +662,14 @@ class OptimizedMatchProcessor:
             'match_status': 'matched',
             'similarity_score': match_result.similarity_score if hasattr(match_result, 'similarity_score') else 0.0,
             'match_confidence': 'high' if match_type == 'exact' else 'medium',
-            'match_fields': []
+            'match_fields': [],
+            'match_details': {}
         }
+        
+        # 尝试获取explanation
+        explanation = getattr(match_result, 'explanation', None)
+        if explanation:
+            result['match_details']['explanation'] = explanation
         
         # 根据匹配类型添加详细信息
         if match_type == 'exact':
@@ -1057,34 +1105,6 @@ class OptimizedMatchProcessor:
         except Exception as e:
             logger.error(f"清空匹配结果失败: {str(e)}")
             return False
-    
-    def _load_target_records(self) -> List[Dict]:
-        """加载目标记录（消防监督管理系统）"""
-        try:
-            # 获取所有消防监督管理系统的记录
-            target_records = []
-            skip = 0
-            batch_size = 100000  # 使用较大的批次大小加载目标数据
-            
-            while True:
-                batch = self.db_manager.get_supervision_units(skip=skip, limit=batch_size)
-                if not batch:
-                    break
-                
-                target_records.extend(batch)
-                skip += batch_size
-                
-                # 避免内存溢出，限制最大记录数
-                if len(target_records) >= 2000000:  # 提高限制到200万条
-                    logger.warning("目标记录数量过大，使用前200万条数据")
-                    break
-            
-            logger.info(f"加载目标记录完成: {len(target_records)} 条")
-            return target_records
-            
-        except Exception as e:
-            logger.error(f"加载目标记录失败: {str(e)}")
-            return []
     
     def get_optimized_task_progress(self, task_id: str) -> Dict:
         """获取优化任务进度"""

@@ -1,429 +1,122 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>消防单位建筑数据关联系统</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        .dashboard-header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 2rem 0;
-            margin-bottom: 2rem;
-        }
-        .stats-card {
-            transition: transform 0.2s;
-            border: none;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        .stats-card:hover {
-            transform: translateY(-5px);
-        }
-        .progress-ring {
-            width: 120px;
-            height: 120px;
-        }
-        .status-indicator {
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            display: inline-block;
-            margin-right: 8px;
-        }
-        .status-running { background-color: #28a745; }
-        .status-warning { background-color: #ffc107; }
-        .status-error { background-color: #dc3545; }
-    </style>
-</head>
-<body>
-    <!-- 导航栏 -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-        <div class="container">
-            <a class="navbar-brand" href="/">
-                <i class="bi bi-fire"></i> 消防数据关联系统
-            </a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav">
-                    <li class="nav-item">
-                        <a class="nav-link active" href="/">首页</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/matching">匹配管理</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/results">匹配结果</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/statistics">数据统计</a>
-                    </li>
-                </ul>
+{% extends "base.html" %}
+
+{% block title %}系统概览 - {{ super() }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- Header -->
+    <div class="header bg-light p-5 rounded-3 mb-4 text-center">
+        <h1 class="display-4"><i class="fas fa-tachometer-alt"></i> 系统概览</h1>
+        <p class="lead text-muted">欢迎使用消防单位建筑数据智能关联系统。以下是当前系统的核心数据指标。</p>
+    </div>
+
+    <!-- Stats Cards -->
+    <div class="row">
+        <div class="col-lg-4 mb-4">
+            <div class="card h-100 shadow-sm">
+                <div class="card-body d-flex flex-column align-items-center justify-content-center text-center">
+                    <i class="fas fa-database fa-3x text-primary mb-3"></i>
+                    <h5 class="card-title">消防监督管理系统</h5>
+                    <p class="card-text fs-1 fw-bold" id="supervision-count">...</p>
+                    <p class="text-muted">条记录</p>
+                </div>
             </div>
         </div>
-    </nav>
-
-    <!-- 页头 -->
-    <div class="dashboard-header">
-        <div class="container">
-            <div class="row align-items-center">
-                <div class="col-md-6">
-                    <h1 class="mb-3"><i class="bi bi-speedometer2"></i> 系统概览</h1>
-                    <p class="lead mb-0">消防监督管理系统与安全排查系统数据关联匹配</p>
+        <div class="col-lg-4 mb-4">
+            <div class="card h-100 shadow-sm">
+                <div class="card-body d-flex flex-column align-items-center justify-content-center text-center">
+                    <i class="fas fa-tasks fa-3x text-info mb-3"></i>
+                    <h5 class="card-title">隐患安全排查系统</h5>
+                    <p class="card-text fs-1 fw-bold" id="inspection-count">...</p>
+                    <p class="text-muted">条记录</p>
                 </div>
-                <div class="col-md-6 text-end">
-                    <div class="row text-center">
-                        <div class="col-4">
-                            <h3 class="mb-0" id="totalUnits">{{ stats.data_sources.supervision_count + stats.data_sources.inspection_count }}</h3>
-                            <small>总单位数</small>
-                        </div>
-                        <div class="col-4">
-                            <h3 class="mb-0" id="matchedUnits">{{ stats.matching_stats.matched_count or 0 }}</h3>
-                            <small>已匹配</small>
-                        </div>
-                        <div class="col-4">
-                            <h3 class="mb-0" id="matchRate">{{ "%.1f"|format((stats.matching_stats.match_rate or 0) * 100) }}%</h3>
-                            <small>匹配率</small>
-                        </div>
-                    </div>
+            </div>
+        </div>
+        <div class="col-lg-4 mb-4">
+            <div class="card h-100 shadow-sm">
+                 <div class="card-body d-flex flex-column align-items-center justify-content-center text-center">
+                    <i class="fas fa-check-circle fa-3x text-success mb-3"></i>
+                    <h5 class="card-title">已生成匹配结果</h5>
+                    <p class="card-text fs-1 fw-bold" id="match-results-count">...</p>
+                    <p class="text-muted">条记录</p>
                 </div>
             </div>
         </div>
     </div>
 
-    <div class="container">
-        <!-- 系统状态卡片 -->
-        <div class="row mb-4">
-            <div class="col-md-3">
-                <div class="card stats-card h-100">
-                    <div class="card-body text-center">
-                        <i class="bi bi-database-fill-check text-primary" style="font-size: 2.5rem;"></i>
-                        <h4 class="mt-3">监督管理系统</h4>
-                        <h2 class="text-primary" id="supervisionCount">{{ stats.data_sources.supervision_count or 0 }}</h2>
-                        <p class="text-muted">单位数量</p>
-                    </div>
+    <!-- Matching Stats -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-header">
+            <h4><i class="fas fa-chart-line"></i> 匹配统计</h4>
+        </div>
+        <div class="card-body">
+            <div class="row text-center">
+                <div class="col-md-4 border-end">
+                    <h5>精确匹配</h5>
+                    <p class="fs-3 fw-bold text-success" id="exact-matches">...</p>
                 </div>
-            </div>
-            <div class="col-md-3">
-                <div class="card stats-card h-100">
-                    <div class="card-body text-center">
-                        <i class="bi bi-shield-fill-check text-success" style="font-size: 2.5rem;"></i>
-                        <h4 class="mt-3">安全排查系统</h4>
-                        <h2 class="text-success" id="inspectionCount">{{ stats.data_sources.inspection_count or 0 }}</h2>
-                        <p class="text-muted">单位数量</p>
-                    </div>
+                <div class="col-md-4 border-end">
+                    <h5>模糊匹配</h5>
+                    <p class="fs-3 fw-bold text-warning" id="fuzzy-matches">...</p>
                 </div>
-            </div>
-            <div class="col-md-3">
-                <div class="card stats-card h-100">
-                    <div class="card-body text-center">
-                        <i class="bi bi-link-45deg text-info" style="font-size: 2.5rem;"></i>
-                        <h4 class="mt-3">匹配结果</h4>
-                        <h2 class="text-info" id="matchResultsCount">{{ stats.data_sources.match_results_count or 0 }}</h2>
-                        <p class="text-muted">处理记录</p>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="card stats-card h-100">
-                    <div class="card-body text-center">
-                        <i class="bi bi-gear-fill text-warning" style="font-size: 2.5rem;"></i>
-                        <h4 class="mt-3">系统状态</h4>
-                        <div class="mt-3">
-                            <span class="status-indicator status-{{ 'running' if stats.system_info.status == 'running' else 'error' }}"></span>
-                            <span>{{ '运行中' if stats.system_info.status == 'running' else '异常' }}</span>
-                        </div>
-                        <small class="text-muted d-block mt-2">{{ stats.system_info.last_update }}</small>
-                    </div>
+                <div class="col-md-4">
+                    <h5>未匹配</h5>
+                    <p class="fs-3 fw-bold text-danger" id="no-matches">...</p>
                 </div>
             </div>
         </div>
-
-        <!-- 匹配进度和统计 -->
-        <div class="row mb-4">
-            <div class="col-md-8">
-                <div class="card">
-                    <div class="card-header">
-                        <h5><i class="bi bi-bar-chart-line"></i> 匹配统计分析</h5>
-                    </div>
-                    <div class="card-body">
-                        <canvas id="matchStatsChart" width="400" height="200"></canvas>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="card h-100">
-                    <div class="card-header">
-                        <h5><i class="bi bi-pie-chart"></i> 匹配类型分布</h5>
-                    </div>
-                    <div class="card-body">
-                        <canvas id="matchTypeChart" width="300" height="300"></canvas>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- 快速操作 -->
-        <div class="row mb-4">
-            <div class="col-md-12">
-                <div class="card">
-                    <div class="card-header">
-                        <h5><i class="bi bi-lightning-charge"></i> 快速操作</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="row">
-                            <div class="col-md-3">
-                                <button class="btn btn-primary btn-lg w-100" onclick="startMatching()">
-                                    <i class="bi bi-play-circle"></i><br>
-                                    开始匹配
-                                </button>
-                            </div>
-                            <div class="col-md-3">
-                                <button class="btn btn-success btn-lg w-100" onclick="viewResults()">
-                                    <i class="bi bi-table"></i><br>
-                                    查看结果
-                                </button>
-                            </div>
-                            <div class="col-md-3">
-                                <button class="btn btn-info btn-lg w-100" onclick="exportData()">
-                                    <i class="bi bi-download"></i><br>
-                                    导出数据
-                                </button>
-                            </div>
-                            <div class="col-md-3">
-                                <button class="btn btn-warning btn-lg w-100" onclick="systemSettings()">
-                                    <i class="bi bi-gear"></i><br>
-                                    系统设置
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- 最近活动 -->
-        <div class="row">
-            <div class="col-md-12">
-                <div class="card">
-                    <div class="card-header">
-                        <h5><i class="bi bi-clock-history"></i> 最近活动</h5>
-                    </div>
-                    <div class="card-body">
-                        <div id="recentActivities">
-                            <p class="text-muted">加载中...</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
+        <div class="card-footer text-muted" id="last-updated">
+            最后更新于: ...
         </div>
     </div>
+</div>
+{% endblock %}
 
-    <!-- Bootstrap JS -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    
-    <script>
-        // 页面加载完成后初始化
-        document.addEventListener('DOMContentLoaded', function() {
-            initCharts();
-            loadRecentActivities();
-            
-            // 立即加载一次数据
-            refreshStats();
-            
-            // 每30秒刷新一次数据
-            setInterval(refreshStats, 30000);
-        });
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        loadStatistics();
+        // 设置定时器，每30秒刷新一次数据
+        setInterval(loadStatistics, 30000);
+    });
 
-        // 全局变量存储图表实例
-        let matchStatsChart = null;
-        let matchTypeChart = null;
-
-        // 初始化图表
-        function initCharts() {
-            // 匹配统计图表
-            const ctx1 = document.getElementById('matchStatsChart').getContext('2d');
-            matchStatsChart = new Chart(ctx1, {
-                type: 'bar',
-                data: {
-                    labels: ['精确匹配', '模糊匹配', '未匹配'],
-                    datasets: [{
-                        label: '数量',
-                        data: [0, 0, 0], // 初始值为0，等待API数据更新
-                        backgroundColor: [
-                            'rgba(54, 162, 235, 0.8)',
-                            'rgba(255, 206, 86, 0.8)',
-                            'rgba(255, 99, 132, 0.8)'
-                        ],
-                        borderColor: [
-                            'rgba(54, 162, 235, 1)',
-                            'rgba(255, 206, 86, 1)',
-                            'rgba(255, 99, 132, 1)'
-                        ],
-                        borderWidth: 1
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    scales: {
-                        y: {
-                            beginAtZero: true
-                        }
-                    }
-                }
-            });
-
-            // 匹配类型饼图
-            const ctx2 = document.getElementById('matchTypeChart').getContext('2d');
-            matchTypeChart = new Chart(ctx2, {
-                type: 'doughnut',
-                data: {
-                    labels: ['精确匹配', '模糊匹配', '未匹配'],
-                    datasets: [{
-                        data: [0, 0, 0], // 初始值为0，等待API数据更新
-                        backgroundColor: [
-                            'rgba(54, 162, 235, 0.8)',
-                            'rgba(255, 206, 86, 0.8)',
-                            'rgba(255, 99, 132, 0.8)'
-                        ]
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false
-                }
-            });
-        }
-
-        // 刷新统计数据
-        function refreshStats() {
-            console.log('🔄 开始刷新统计数据...');
-            
-            fetch('/api/stats')
-                .then(response => {
-                    console.log('📡 API响应状态:', response.status);
-                    if (!response.ok) {
-                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    console.log('📊 收到数据:', data);
-                    updateStatsDisplay(data);
-                })
-                .catch(error => {
-                    console.error('❌ 刷新统计数据失败:', error);
-                    // 显示错误提示
-                    document.querySelectorAll('[id$="Count"]').forEach(el => {
-                        if (el.textContent === '加载中...') {
-                            el.textContent = '加载失败';
-                            el.style.color = '#dc3545';
-                        }
-                    });
-                });
-        }
-
-        // 更新统计显示
-        function updateStatsDisplay(stats) {
-            console.log('📊 开始更新统计显示，数据:', stats);
-            
-            // 更新页头统计
-            const totalUnits = (stats.data_sources.supervision_count || 0) + (stats.data_sources.inspection_count || 0);
-            document.getElementById('totalUnits').textContent = totalUnits.toLocaleString();
-            
-            // 计算匹配数量和匹配率
-            const totalMatches = stats.matching_stats.total_matches || 0;
-            const matchRate = totalUnits > 0 ? (totalMatches / totalUnits * 100).toFixed(1) : 0;
-            
-            document.getElementById('matchedUnits').textContent = totalMatches.toLocaleString();
-            document.getElementById('matchRate').textContent = matchRate + '%';
-            
-            // 更新卡片数据
-            document.getElementById('supervisionCount').textContent = (stats.data_sources.supervision_count || 0).toLocaleString();
-            document.getElementById('inspectionCount').textContent = (stats.data_sources.inspection_count || 0).toLocaleString();
-            document.getElementById('matchResultsCount').textContent = (stats.data_sources.match_results_count || 0).toLocaleString();
-            
-            // 更新图表数据
-            updateChartData(stats);
-            
-            console.log('✅ 统计数据已更新:', stats);
-        }
-
-        // 更新图表数据
-        function updateChartData(stats) {
-            console.log('📈 开始更新图表数据...');
-            
-            try {
-                // 从API数据中提取匹配统计
-                const matchingStats = stats.matching_stats || {};
-                
-                // 根据修复后的API数据结构获取数据
-                const exactMatches = matchingStats.exact || 0;
-                const fuzzyMatches = matchingStats.fuzzy || 0; 
-                const unmatched = matchingStats.none || 0;
-                
-                console.log('📊 图表数据:', { exactMatches, fuzzyMatches, unmatched });
-                
-                // 更新柱状图
-                if (matchStatsChart) {
-                    matchStatsChart.data.datasets[0].data = [exactMatches, fuzzyMatches, unmatched];
-                    matchStatsChart.update();
-                    console.log('✅ 柱状图已更新');
-                }
-                
-                // 更新饼图
-                if (matchTypeChart) {
-                    matchTypeChart.data.datasets[0].data = [exactMatches, fuzzyMatches, unmatched];
-                    matchTypeChart.update();
-                    console.log('✅ 饼图已更新');
-                }
-                
-            } catch (error) {
-                console.error('❌ 更新图表数据失败:', error);
+    async function loadStatistics() {
+        try {
+            const response = await fetch('/api/stats');
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
             }
+            const data = await response.json();
+            updateUI(data);
+        } catch (error) {
+            console.error("无法加载统计数据:", error);
+            // 可以添加一些UI提示，比如显示错误信息
         }
+    }
 
-        // 加载最近活动
-        function loadRecentActivities() {
-            const activities = [
-                '系统启动完成',
-                '数据库连接正常',
-                '匹配算法已加载',
-                '等待用户操作...'
-            ];
-            
-            const activitiesHtml = activities.map(activity => 
-                `<div class="d-flex align-items-center mb-2">
-                    <i class="bi bi-check-circle-fill text-success me-2"></i>
-                    <span>${activity}</span>
-                </div>`
-            ).join('');
-            
-            document.getElementById('recentActivities').innerHTML = activitiesHtml;
+    function formatNumber(num) {
+        if (num === null || num === undefined || num === '...') {
+            return '...';
         }
+        return new Intl.NumberFormat('en-US').format(num);
+    }
 
-        // 快速操作函数
-        function startMatching() {
-            window.location.href = '/matching';
-        }
+    function updateUI(stats) {
+        // 更新数据源统计
+        const dataSources = stats.data_sources || {};
+        document.getElementById('supervision-count').textContent = formatNumber(dataSources.supervision_count);
+        document.getElementById('inspection-count').textContent = formatNumber(dataSources.inspection_count);
+        document.getElementById('match-results-count').textContent = formatNumber(dataSources.match_results_count);
 
-        function viewResults() {
-            window.location.href = '/results';
-        }
+        // 更新匹配统计
+        const matchingStats = stats.matching_stats || {};
+        document.getElementById('exact-matches').textContent = formatNumber(matchingStats.exact);
+        document.getElementById('fuzzy-matches').textContent = formatNumber(matchingStats.fuzzy);
+        document.getElementById('no-matches').textContent = formatNumber(matchingStats.none);
 
-        function exportData() {
-            if (confirm('确定要导出匹配结果吗？')) {
-                window.open('/api/export_results?format=excel', '_blank');
-            }
-        }
-
-        function systemSettings() {
-            alert('系统设置功能开发中...');
-        }
-    </script>
-</body>
-</html>
+        // 更新时间
+        const systemInfo = stats.system_info || {};
+        document.getElementById('last-updated').textContent = `最后更新于: ${systemInfo.last_update || new Date().toLocaleString()}`;
+    }
+</script>
+{% endblock %}

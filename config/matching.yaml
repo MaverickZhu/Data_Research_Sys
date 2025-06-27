@@ -84,8 +84,8 @@ address_similarity:
 # 批处理配置
 batch_processing:
   batch_size: 100                   # 每批处理记录数
-  max_workers: 4                    # 最大工作线程数
-  timeout: 300                      # 单批处理超时时间(秒)
+  max_workers: 8                    # 最大工作线程数
+  timeout: 600                      # 单批处理超时时间(秒)
   retry_times: 3                    # 失败重试次数
   
 # 结果保存配置
@@ -98,3 +98,11 @@ logging:
   level: "INFO"
   log_similarity_details: true      # 记录详细相似度计算过程
   log_match_decisions: true         # 记录匹配决策过程
+
+# 新增图匹配配置
+graph_matching:
+  enabled: true             # 是否启用图匹配器作为二次验证
+  initial_build_limit: 5000 # 初始化时预加载的记录数，用于构建热启动图
+  attribute_weights:
+    address: 0.6            # 共享地址的基础权重
+    legal_person: 1.0       # 共享法人的基础权重

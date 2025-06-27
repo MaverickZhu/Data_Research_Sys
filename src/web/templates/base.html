@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}消防数据关联系统{% endblock %}</title>
+    <!-- Bootstrap 5.3.3 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome 6.5.2 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <style>
+        :root {
+            --primary-color: #4a5568;
+            --secondary-color: #718096;
+            --background-color: #f7fafc;
+            --sidebar-bg: #1a202c;
+            --sidebar-text: #a0aec0;
+            --sidebar-text-hover: #ffffff;
+            --sidebar-active-bg: #4a5568;
+        }
+
+        body {
+            background-color: var(--background-color);
+            display: flex;
+        }
+
+        #sidebar {
+            width: 250px;
+            background-color: var(--sidebar-bg);
+            color: var(--sidebar-text);
+            min-height: 100vh;
+            position: fixed;
+            transition: all 0.3s;
+        }
+
+        #sidebar .sidebar-header {
+            padding: 20px;
+            text-align: center;
+            border-bottom: 1px solid #2d3748;
+        }
+        
+        #sidebar .sidebar-header h3 {
+            color: white;
+            font-size: 1.5rem;
+        }
+
+        #sidebar ul.components {
+            padding: 20px 0;
+            border-bottom: 1px solid #2d3748;
+        }
+
+        #sidebar ul p {
+            color: white;
+            padding: 10px;
+            text-transform: uppercase;
+            font-weight: bold;
+        }
+
+        #sidebar ul li a {
+            padding: 15px 20px;
+            font-size: 1.1em;
+            display: block;
+            color: var(--sidebar-text);
+            transition: all 0.3s;
+            text-decoration: none;
+        }
+
+        #sidebar ul li a:hover {
+            color: var(--sidebar-text-hover);
+            background: var(--sidebar-active-bg);
+        }
+
+        #sidebar ul li.active > a,
+        a[aria-expanded="true"] {
+            color: white;
+            background: var(--sidebar-bg);
+        }
+        
+        #content {
+            width: calc(100% - 250px);
+            padding: 40px;
+            min-height: 100vh;
+            transition: all 0.3s;
+            margin-left: 250px;
+        }
+        
+        .card {
+            border: none;
+            border-radius: .75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+
+        .btn-primary {
+            background-color: var(--primary-color);
+            border-color: var(--primary-color);
+        }
+        .btn-primary:hover {
+            background-color: #2d3748;
+            border-color: #2d3748;
+        }
+
+    </style>
+</head>
+<body>
+    <nav id="sidebar">
+        <div class="sidebar-header">
+            <h3><i class="fas fa-fire-extinguisher"></i> 关联系统</h3>
+        </div>
+
+        <ul class="list-unstyled components">
+            <p>核心功能</p>
+            <li class="{% if request.path == '/' %}active{% endif %}">
+                <a href="/"><i class="fas fa-chart-pie"></i> 系统概览</a>
+            </li>
+            <li class="{% if request.path == '/matching' %}active{% endif %}">
+                <a href="/matching"><i class="fas fa-tasks"></i> 匹配管理</a>
+            </li>
+            <li class="{% if request.path == '/results' %}active{% endif %}">
+                <a href="/results"><i class="fas fa-list-alt"></i> 匹配结果</a>
+            </li>
+            <li class="{% if request.path == '/enhanced_association' %}active{% endif %}">
+                <a href="/enhanced_association"><i class="fas fa-link"></i> 增强关联</a>
+            </li>
+            <li class="{% if request.path == '/statistics' %}active{% endif %}">
+                <a href="/statistics"><i class="fas fa-chart-bar"></i> 数据统计</a>
+            </li>
+        </ul>
+    </nav>
+
+    <div id="content">
+        {% block content %}{% endblock %}
+    </div>
+
+    <!-- Bootstrap 5.3.3 JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html> 

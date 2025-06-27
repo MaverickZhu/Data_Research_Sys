@@ -7,6 +7,7 @@ import pymongo
 from typing import Dict, List
 import logging
 from rapidfuzz import process, fuzz
+import jieba
 
 logger = logging.getLogger(__name__)
 
@@ -14,9 +15,10 @@ logger = logging.getLogger(__name__)
 class PrefilterSystem:
     """预筛选系统"""
     
-    def __init__(self, db_manager):
-        self.db_manager = db_manager
-        self.db = db_manager.db
+    def __init__(self, db: pymongo.database.Database):
+        if db is None:
+            raise ValueError("Database instance 'db' is required.")
+        self.db = db
         
         # 预筛选配置
         self.config = {
@@ -76,18 +78,21 @@ class PrefilterSystem:
             return candidates
             
         except Exception as e:
-            logger.debug(f"文本搜索失败，使用正则表达式: {e}")
+            logger.debug(f"文本搜索失败，回退到正则表达式搜索: {e}")
             
-            # 备用方案：正则表达式搜索
-            # 提取关键词
+            # 备用方案：基于jieba分词的OR查询
             keywords = self._extract_keywords(source_name)
-            if keywords:
-                regex_pattern = '|'.join(keywords)
-                query = {'dwmc': {'$regex': regex_pattern, '$options': 'i'}}
-                candidates = list(self.db['xxj_shdwjbxx'].find(query).limit(self.config['max_candidates_per_method']))
-                return candidates
+            if not keywords:
+                return []
+
+            # 为每个关键词构建一个正则表达式查询
+            regex_queries = [{'dwmc': {'$regex': keyword, '$options': 'i'}} for keyword in keywords]
             
-            return []
+            # 使用$or操作符组合查询
+            query = {'$or': regex_queries}
+            
+            candidates = list(self.db['xxj_shdwjbxx'].find(query).limit(self.config['max_candidates_per_method']))
+            return candidates
     
     def _filter_by_address(self, source_record: Dict) -> List[Dict]:
         """基于地址筛选"""
@@ -100,9 +105,9 @@ class PrefilterSystem:
         if not keywords:
             return []
         
-        # 构建查询
-        regex_pattern = '|'.join(keywords)
-        query = {'dwdz': {'$regex': regex_pattern, '$options': 'i'}}
+        # 使用$or操作符为每个关键词构建查询
+        regex_queries = [{'dwdz': {'$regex': keyword, '$options': 'i'}} for keyword in keywords]
+        query = {'$or': regex_queries}
         
         candidates = list(self.db['xxj_shdwjbxx'].find(query).limit(self.config['max_candidates_per_method']))
         return candidates
@@ -119,54 +124,72 @@ class PrefilterSystem:
         return candidates
     
     def _extract_keywords(self, text: str) -> List[str]:
-        """提取关键词"""
+        """
+        使用jieba分词提取关键词，并过滤掉停用词和通用词。
+        """
         if not text:
             return []
-        
-        # 移除常见的公司后缀
+
+        # 定义停用词和通用后缀
+        stop_words = {'公司', '有限', '责任', '股份', '集团', '发展', '实业', '科技'}
         suffixes = ['有限公司', '股份有限公司', '有限责任公司', '公司', '厂', '店', '部', '中心', '所']
-        clean_text = text
+
+        # 1. 移除常见后缀，以帮助jieba更好地识别核心名称
         for suffix in suffixes:
-            clean_text = clean_text.replace(suffix, '')
+            if text.endswith(suffix):
+                text = text[:-len(suffix)]
+                break
         
-        # 如果清理后的文本太短，使用原文本
-        if len(clean_text) < 3:
-            clean_text = text
+        # 2. 使用jieba进行分词
+        words = jieba.lcut(text, cut_all=False)
         
-        # 提取长度大于1的子字符串作为关键词
+        # 3. 过滤关键词
         keywords = []
-        if len(clean_text) >= 2:
-            keywords.append(clean_text)
-        
-        # 如果文本较长，提取前半部分作为关键词
-        if len(clean_text) > 6:
-            keywords.append(clean_text[:len(clean_text)//2])
-        
-        return keywords
+        for word in words:
+            # 过滤掉单字、数字、停用词和过短的词
+            if len(word) > 1 and not word.isdigit() and word not in stop_words:
+                keywords.append(word)
+
+        # 4. 如果没有提取到关键词，则使用原始文本中最长的连续非后缀部分作为最后的尝试
+        if not keywords:
+            clean_text = text
+            # 再次尝试移除后缀
+            for suffix in suffixes:
+                clean_text = clean_text.replace(suffix, '')
+            
+            if len(clean_text) > 1:
+                keywords.append(clean_text.strip())
+
+        logger.debug(f"为 '{text}' 提取的关键词: {keywords}")
+        return list(set(keywords)) # 返回去重后的关键词列表
     
     def _extract_address_keywords(self, address: str) -> List[str]:
-        """提取地址关键词"""
+        """
+        使用jieba分词提取地址中的关键词。
+        """
         if not address:
             return []
+
+        # 定义地址停用词
+        stop_words = {'市', '区', '县', '镇', '乡', '村', '街道', '路', '号', '弄', '室', '栋', '座'}
         
+        # 使用jieba进行分词
+        words = jieba.lcut(address, cut_all=False)
+        
+        # 过滤关键词
         keywords = []
-        
-        # 提取区县信息
-        import re
-        district_match = re.search(r'(\w+[区县市])', address)
-        if district_match:
-            keywords.append(district_match.group(1))
-        
-        # 提取街道信息
-        street_match = re.search(r'(\w+[街道路弄巷])', address)
-        if street_match:
-            keywords.append(street_match.group(1))
-        
-        # 如果没有提取到关键词，使用前半部分地址
-        if not keywords and len(address) > 6:
-            keywords.append(address[:len(address)//2])
-        
-        return keywords
+        for word in words:
+            # 过滤掉单字、数字、停用词
+            if len(word) > 1 and not word.isdigit() and word not in stop_words:
+                # 进一步移除末尾的常见单位词，如'路', '号'
+                if word.endswith(('路', '号', '弄', '街', '巷')):
+                    word = word[:-1]
+
+                if len(word) > 1: # 再次检查长度
+                    keywords.append(word)
+
+        logger.debug(f"为地址 '{address}' 提取的关键词: {keywords}")
+        return list(set(keywords))
     
     def _to_id_set(self, records: List[Dict]) -> set:
         """转换记录列表为ID集合"""

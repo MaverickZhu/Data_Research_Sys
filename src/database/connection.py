@@ -162,6 +162,17 @@ class DatabaseManager:
             raise Exception("Redis未连接")
         return self._redis_client
         
+    def get_db(self) -> Database:
+        """
+        获取MongoDB数据库实例
+        
+        Returns:
+            Database: MongoDB数据库实例
+        """
+        if self._mongo_db is None:
+            raise Exception("MongoDB未连接")
+        return self._mongo_db
+        
     def get_collection_count(self, collection_name: str) -> int:
         """
         获取集合记录数

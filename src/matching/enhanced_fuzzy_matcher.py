@@ -21,7 +21,7 @@ class EnhancedFuzzyMatchResult(FuzzyMatchResult):
     """增强的模糊匹配结果"""
     structured_match_used: bool = False
     structured_match_details: Optional[Dict] = None
-    match_warnings: Optional[List[str]] = None
+    explanation: Optional[Dict] = None  # 使用explanation替代warnings
 
 
 class EnhancedFuzzyMatcher(FuzzyMatcher):
@@ -85,7 +85,7 @@ class EnhancedFuzzyMatcher(FuzzyMatcher):
                     continue
             
             # 2. 计算增强的相似度分数
-            score, field_similarities, warnings = self._calculate_enhanced_similarity(
+            score, field_similarities, explanation = self._calculate_enhanced_similarity(
                 source_record, target_record, structured_result
             )
             
@@ -102,7 +102,7 @@ class EnhancedFuzzyMatcher(FuzzyMatcher):
                     'score': score,
                     'field_similarities': field_similarities,
                     'structured_result': structured_result,
-                    'warnings': warnings
+                    'explanation': explanation
                 })
         
         if not candidates:
@@ -131,7 +131,7 @@ class EnhancedFuzzyMatcher(FuzzyMatcher):
             field_similarities=best_candidate['field_similarities'],
             structured_match_used=best_candidate.get('structured_result') is not None,
             structured_match_details=self._extract_structured_details(best_candidate.get('structured_result')),
-            match_warnings=best_candidate.get('warnings', []),
+            explanation=best_candidate.get('explanation', {}),
             match_details={
                 'threshold': self.threshold,
                 'candidates_count': len(target_records),
@@ -170,7 +170,7 @@ class EnhancedFuzzyMatcher(FuzzyMatcher):
             return None
     
     def _calculate_enhanced_similarity(self, source_record: Dict, target_record: Dict, 
-                                     structured_result: Optional[StructuredMatchResult]) -> Tuple[float, Dict, List[str]]:
+                                     structured_result: Optional[StructuredMatchResult]) -> Tuple[float, Dict, Dict]:
         """
         计算增强的相似度分数
         
@@ -180,19 +180,24 @@ class EnhancedFuzzyMatcher(FuzzyMatcher):
             structured_result: 结构化匹配结果
             
         Returns:
-            Tuple[float, Dict, List[str]]: (总分数, 字段相似度, 警告列表)
+            Tuple[float, Dict, Dict]: (总分数, 字段相似度, 解释)
         """
-        warnings = []
+        explanation = {"positive": [], "negative": []}
         
         # 1. 使用基础模糊匹配计算初始分数
         base_score, field_similarities = self._calculate_record_similarity(source_record, target_record)
-        
+        explanation['positive'].append(f"基础模糊匹配得分: {base_score:.2f}")
+
         # 2. 如果有结构化匹配结果，进行增强调整
         if structured_result:
             # 核心名称权重提升
             if structured_result.core_name_similarity >= 0.9:
                 core_boost = self.enhanced_config['core_name_weight_boost']
-                base_score = min(1.0, base_score * core_boost)
+                boosted_score = min(1.0, base_score * core_boost)
+                if boosted_score > base_score:
+                    explanation['positive'].append(f"核心名称高度相似({structured_result.core_name_similarity:.2f})，分数提升至 {boosted_score:.2f}")
+                    base_score = boosted_score
+                
                 field_similarities['core_name_boost'] = {
                     'similarity': structured_result.core_name_similarity,
                     'boost_factor': core_boost
@@ -202,7 +207,7 @@ class EnhancedFuzzyMatcher(FuzzyMatcher):
             if structured_result.match_details.get('business_conflict', False):
                 penalty = self.enhanced_config['business_conflict_penalty']
                 base_score = max(0.0, base_score - penalty)
-                warnings.append(f"业务类型冲突: {structured_result.source_structure.business_type} vs {structured_result.target_structure.business_type}")
+                explanation['negative'].append(f"业务类型冲突: '{structured_result.source_structure.business_type}' vs '{structured_result.target_structure.business_type}' (扣分: {penalty})")
                 field_similarities['business_conflict_penalty'] = penalty
             
             # 添加结构化匹配信息到字段相似度
@@ -221,16 +226,18 @@ class EnhancedFuzzyMatcher(FuzzyMatcher):
             # 限制最高分数
             max_allowed_score = self.enhanced_config['address_mismatch_max_score']
             if base_score > max_allowed_score:
-                warnings.append(f"地址差异过大，分数限制在 {max_allowed_score}")
+                explanation['negative'].append(f"地址相似度低({address_sim:.2f})，分数限制为 {max_allowed_score}")
                 base_score = max_allowed_score
                 field_similarities['address_penalty_applied'] = True
+        elif address_sim > 0.8:
+             explanation['positive'].append(f"地址相似度高: {address_sim:.2f}")
         
         # 4. 核心名称差异检查
         if structured_result and structured_result.core_name_similarity < 0.7:
             # 核心名称差异过大，即使其他字段相似也要降低分数
             core_penalty = 0.2
             base_score = max(0.0, base_score - core_penalty)
-            warnings.append(f"核心名称差异: {structured_result.source_structure.core_name} vs {structured_result.target_structure.core_name}")
+            explanation['negative'].append(f"核心名称差异大: '{structured_result.source_structure.core_name}' vs '{structured_result.target_structure.core_name}' (扣分: {core_penalty})")
             field_similarities['core_name_penalty'] = core_penalty
         
         # 5. 增强的核心名称严格检查（新增）
@@ -251,7 +258,7 @@ class EnhancedFuzzyMatcher(FuzzyMatcher):
                             # 短名称中有字不同，严重惩罚
                             severe_penalty = 0.5
                             base_score = max(0.0, base_score - severe_penalty)
-                            warnings.append(f"核心名称关键字不同: '{source_core}' vs '{target_core}'")
+                            explanation['negative'].append(f"短核心名称存在差异: '{source_core}' vs '{target_core}' (扣分: {severe_penalty})")
                             field_similarities['core_name_severe_penalty'] = severe_penalty
                 
                 # 拼音检查（防止音近字不同的误匹配）
@@ -266,7 +273,7 @@ class EnhancedFuzzyMatcher(FuzzyMatcher):
                         # 字形相似但读音不同，可能是误匹配
                         pinyin_penalty = 0.2
                         base_score = max(0.0, base_score - pinyin_penalty)
-                        warnings.append(f"核心名称读音差异过大: {source_pinyin} vs {target_pinyin}")
+                        explanation['negative'].append(f"核心名称拼音差异大: '{source_pinyin}' vs '{target_pinyin}' (扣分: {pinyin_penalty})")
                         field_similarities['pinyin_penalty'] = pinyin_penalty
                 except:
                     pass
@@ -277,11 +284,11 @@ class EnhancedFuzzyMatcher(FuzzyMatcher):
             if structured_result.core_name_similarity < 0.8:
                 max_allowed = self.enhanced_config.get('core_name_mismatch_max_score', 0.50)
                 if base_score > max_allowed:
-                    warnings.append(f"核心名称差异过大，分数限制在 {max_allowed}")
+                    explanation['negative'].append(f"核心名称相似度低({structured_result.core_name_similarity:.2f})，分数限制为 {max_allowed}")
                     base_score = max_allowed
                     field_similarities['core_name_max_score_limited'] = True
         
-        return base_score, field_similarities, warnings
+        return base_score, field_similarities, explanation
     
     def _select_best_enhanced_match(self, source_record: Dict, candidates: List[Dict]) -> Dict:
         """
@@ -334,7 +341,7 @@ class EnhancedFuzzyMatcher(FuzzyMatcher):
                     reasons.append(f"核心名称完美匹配({core_name_sim:.2f})")
             
             # 2. 无警告加分 (20分)
-            if not candidate.get('warnings'):
+            if not candidate.get('explanation', {}).get('negative'):
                 secondary_score += 20
                 reasons.append("无匹配警告")
             

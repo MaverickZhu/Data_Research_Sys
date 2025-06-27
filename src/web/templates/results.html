@@ -1,977 +1,327 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>匹配结果 - 消防单位建筑数据关联系统</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+{% extends "base.html" %}
 
-        body {
-            font-family: 'Microsoft YaHei', Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 20px;
-        }
+{% block title %}匹配结果 - {{ super() }}{% endblock %}
 
-        .container {
-            max-width: 1600px;
-            margin: 0 auto;
-        }
+{% block content %}
+<div class="container-fluid">
+    <!-- Header -->
+    <div class="header bg-light p-5 rounded-3 mb-4">
+        <h1 class="display-5"><i class="fas fa-list-alt"></i> 匹配结果</h1>
+        <p class="lead text-muted">查看、筛选和审核所有匹配数据。</p>
+    </div>
 
-        .header {
-            background: white;
-            border-radius: 15px;
-            padding: 30px;
-            margin-bottom: 30px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-            text-align: center;
-        }
-
-        .header h1 {
-            color: #2c3e50;
-            font-size: 32px;
-            margin-bottom: 10px;
-        }
-
-        .header p {
-            color: #7f8c8d;
-            font-size: 16px;
-        }
-
-        .controls {
-            background: white;
-            border-radius: 15px;
-            padding: 20px;
-            margin-bottom: 30px;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-            display: flex;
-            gap: 15px;
-            align-items: center;
-            flex-wrap: wrap;
-        }
-
-        .form-control {
-            padding: 10px 15px;
-            border: 2px solid #ecf0f1;
-            border-radius: 8px;
-            font-size: 14px;
-        }
-
-        .btn {
-            padding: 10px 20px;
-            border: none;
-            border-radius: 20px;
-            font-size: 14px;
-            font-weight: bold;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-
-        .btn-primary {
-            background: linear-gradient(45deg, #667eea, #764ba2);
-            color: white;
-        }
-
-        .btn-secondary {
-            background: #95a5a6;
-            color: white;
-        }
-
-        .results-container {
-            background: white;
-            border-radius: 15px;
-            padding: 30px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-            overflow-x: auto;
-        }
-
-        .results-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-            font-size: 13px;
-            min-width: 1400px;
-        }
-
-        .results-table th,
-        .results-table td {
-            padding: 12px 8px;
-            text-align: left;
-            border: 1px solid #ecf0f1;
-            vertical-align: top;
-        }
-
-        .results-table th {
-            background: #f8f9fa;
-            font-weight: bold;
-            color: #2c3e50;
-            position: sticky;
-            top: 0;
-            z-index: 10;
-        }
-
-        .match-type {
-            padding: 4px 8px;
-            border-radius: 12px;
-            font-size: 11px;
-            font-weight: bold;
-            display: inline-block;
-        }
-
-        .match-exact {
-            background: #27ae60;
-            color: white;
-        }
-
-        .match-fuzzy {
-            background: #3498db;
-            color: white;
-        }
-
-        .match-none {
-            background: #95a5a6;
-            color: white;
-        }
-
-        .dual-content {
-            line-height: 1.4;
-        }
-
-        .source-data {
-            color: #2c3e50;
-            font-weight: 500;
-            margin-bottom: 4px;
-        }
-
-        .target-data {
-            color: #7f8c8d;
-            font-size: 12px;
-        }
-
-        .data-label {
-            font-size: 10px;
-            color: #95a5a6;
-            font-weight: normal;
-        }
-
-        .confidence-score {
-            font-weight: bold;
-            padding: 3px 6px;
-            border-radius: 8px;
-            font-size: 12px;
-        }
-
-        .confidence-high { background: #d4edda; color: #155724; }
-        .confidence-medium { background: #fff3cd; color: #856404; }
-        .confidence-low { background: #f8d7da; color: #721c24; }
-
-        .pagination {
-            display: flex;
-            justify-content: center;
-            margin-top: 30px;
-            gap: 10px;
-        }
-
-        .pagination button {
-            padding: 8px 15px;
-            border: 1px solid #ddd;
-            background: white;
-            cursor: pointer;
-            border-radius: 5px;
-        }
-
-        .pagination button.active {
-            background: #667eea;
-            color: white;
-        }
-
-        .loading {
-            text-align: center;
-            padding: 50px;
-            color: #7f8c8d;
-        }
-
-        .no-data {
-            color: #bdc3c7;
-            font-style: italic;
-        }
-
-        .table-wrapper {
-            max-height: 600px;
-            overflow-y: auto;
-        }
-
-        /* 审核状态编辑模态框 */
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 1000;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0,0,0,0.4);
-        }
-
-        .modal-content {
-            background-color: #fefefe;
-            margin: 15% auto;
-            padding: 20px;
-            border: 1px solid #888;
-            width: 400px;
-            border-radius: 8px;
-        }
-
-        .modal-header {
-            border-bottom: 1px solid #eee;
-            padding-bottom: 10px;
-            margin-bottom: 20px;
-        }
-
-        .modal-header h3 {
-            margin: 0;
-            color: #333;
-        }
-
-        .close {
-            color: #aaa;
-            float: right;
-            font-size: 28px;
-            font-weight: bold;
-            cursor: pointer;
-        }
-
-        .modal-body {
-            margin-bottom: 15px;
-        }
-
-        .modal-body div {
-            margin-bottom: 15px;
-        }
-
-        .modal-body label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: bold;
-        }
-
-        .modal-body select,
-        .modal-body textarea {
-            width: 100%;
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-        }
-
-        .modal-footer {
-            border-top: 1px solid #eee;
-            padding-top: 15px;
-            text-align: right;
-        }
-
-        .modal-footer button {
-            background: #6c757d;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
-            margin-right: 10px;
-            cursor: pointer;
-        }
-
-        /* 审核确认对话框 */
-        .confirm-dialog {
-            display: none;
-            position: fixed;
-            z-index: 1001;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0,0,0,0.4);
-        }
-
-        .confirm-content {
-            background-color: #fefefe;
-            margin: 20% auto;
-            padding: 20px;
-            border: 1px solid #888;
-            width: 350px;
-            border-radius: 8px;
-            text-align: center;
-        }
-
-        .confirm-content h4 {
-            margin-top: 0;
-            color: #333;
-        }
-
-        .confirm-content p {
-            margin: 20px 0;
-            color: #666;
-        }
-
-        .confirm-content button {
-            background: #6c757d;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
-            margin-right: 10px;
-            cursor: pointer;
-        }
-
-        .confirm-content button:last-child {
-            background: #28a745;
-            color: white;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <!-- 页面标题 -->
-        <div class="header">
-            <h1>📊 匹配结果</h1>
-            <p>消防单位建筑数据关联匹配结果查看与管理</p>
-        </div>
-
-        <!-- 控制面板 -->
-        <div class="controls">
-            <label>匹配类型:</label>
-            <select id="match-type-filter" class="form-control">
-                <option value="">全部</option>
-                <option value="exact">精确匹配</option>
-                <option value="fuzzy">模糊匹配</option>
-                <option value="none">未匹配</option>
-            </select>
-
-            <label>每页显示:</label>
-            <select id="per-page" class="form-control">
-                <option value="20">20条</option>
-                <option value="50">50条</option>
-                <option value="100">100条</option>
-            </select>
-
-            <button class="btn btn-primary" onclick="loadResults()">🔍 查询</button>
-            <button class="btn btn-secondary" onclick="exportResults()">📥 导出</button>
-            <button class="btn btn-secondary" onclick="location.href='/'">🏠 返回首页</button>
-        </div>
-
-        <!-- 结果容器 -->
-        <div class="results-container">
-            <div id="loading" class="loading">
-                正在加载匹配结果...
-            </div>
-
-            <div id="results-content" style="display: none;">
-                <div id="results-summary"></div>
-                
-                <div class="table-wrapper">
-                    <table id="results-table" class="results-table">
-                        <thead>
-                            <tr>
-                                <th style="width: 150px;">源单位名称</th>
-                                <th style="width: 150px;">目标单位名称</th>
-                                <th style="width: 100px;">匹配类型</th>
-                                <th style="width: 80px;">匹配度</th>
-                                <th style="width: 200px;">单位地址</th>
-                                <th style="width: 120px;">法定代表人</th>
-                                <th style="width: 120px;">消防安全管理人</th>
-                                <th style="width: 120px;">匹配时间</th>
-                            </tr>
-                        </thead>
-                        <tbody id="results-tbody">
-                        </tbody>
-                    </table>
+    <!-- Controls -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-body">
+            <div class="row g-3 align-items-center">
+                <div class="col-md-3">
+                    <label for="match-type-filter" class="form-label">匹配类型</label>
+                    <select id="match-type-filter" class="form-select">
+                        <option value="">全部</option>
+                        <option value="exact">精确匹配</option>
+                        <option value="fuzzy">模糊匹配</option>
+                        <option value="none">未匹配</option>
+                    </select>
                 </div>
-
-                <div id="pagination" class="pagination">
+                <div class="col-md-2">
+                    <label for="per-page" class="form-label">每页显示</label>
+                    <select id="per-page" class="form-select">
+                        <option value="20">20</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                    </select>
                 </div>
-            </div>
-        </div>
-
-        <!-- 审核状态编辑模态框 -->
-        <div id="reviewModal" class="modal" style="display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.4);">
-            <div class="modal-content" style="background-color: #fefefe; margin: 15% auto; padding: 20px; border: 1px solid #888; width: 400px; border-radius: 8px;">
-                <div class="modal-header" style="border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 20px;">
-                    <h3 style="margin: 0; color: #333;">人工审核</h3>
-                    <span class="close" onclick="closeReviewModal()" style="color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer;">&times;</span>
+                <div class="col-md-4">
+                    <label for="search-term" class="form-label">单位名称搜索</label>
+                    <input type="text" id="search-term" class="form-control" placeholder="输入关键词...">
                 </div>
-                <div class="modal-body">
-                    <div style="margin-bottom: 15px;">
-                        <label style="display: block; margin-bottom: 5px; font-weight: bold;">审核结果:</label>
-                        <select id="reviewStatusSelect" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                            <option value="">请选择审核结果</option>
-                            <option value="approved">✅ 审核通过</option>
-                            <option value="rejected">❌ 审核未通过</option>
-                            <option value="pending">⏳ 待审核</option>
-                        </select>
-                    </div>
-                    <div id="reviewNotesDiv" style="margin-bottom: 15px; display: none;">
-                        <label style="display: block; margin-bottom: 5px; font-weight: bold;">审核备注:</label>
-                        <textarea id="reviewNotesInput" placeholder="请输入审核备注或未通过原因..." style="width: 100%; height: 80px; padding: 8px; border: 1px solid #ddd; border-radius: 4px; resize: vertical;"></textarea>
-                    </div>
-                    <div style="margin-bottom: 15px;">
-                        <label style="display: block; margin-bottom: 5px; font-weight: bold;">单位信息:</label>
-                        <div id="reviewUnitInfo" style="background: #f8f9fa; padding: 10px; border-radius: 4px; font-size: 14px;"></div>
-                    </div>
-                </div>
-                <div class="modal-footer" style="border-top: 1px solid #eee; padding-top: 15px; text-align: right;">
-                    <button onclick="closeReviewModal()" style="background: #6c757d; color: white; border: none; padding: 8px 16px; border-radius: 4px; margin-right: 10px; cursor: pointer;">取消</button>
-                    <button onclick="confirmReview()" style="background: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">确认</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- 审核确认对话框 -->
-        <div id="confirmDialog" class="modal" style="display: none; position: fixed; z-index: 1001; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.4);">
-            <div class="modal-content" style="background-color: #fefefe; margin: 20% auto; padding: 20px; border: 1px solid #888; width: 350px; border-radius: 8px; text-align: center;">
-                <h4 style="margin-top: 0; color: #333;">确认审核操作</h4>
-                <p id="confirmMessage" style="margin: 20px 0; color: #666;"></p>
-                <div style="margin-top: 20px;">
-                    <button onclick="closeConfirmDialog()" style="background: #6c757d; color: white; border: none; padding: 8px 16px; border-radius: 4px; margin-right: 10px; cursor: pointer;">取消</button>
-                    <button onclick="executeReview()" style="background: #28a745; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">确认</button>
+                <div class="col-md-3 d-flex align-items-end">
+                    <button class="btn btn-primary w-100" onclick="loadResults(1)"><i class="fas fa-search"></i> 查询</button>
+                    <button class="btn btn-secondary ms-2" onclick="exportResults()"><i class="fas fa-download"></i></button>
                 </div>
             </div>
         </div>
     </div>
 
-    <script>
-        let currentPage = 1;
-        let totalPages = 1;
+    <!-- Results -->
+    <div class="card shadow-sm">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">结果列表</h5>
+            <div id="results-summary" class="text-muted small"></div>
+        </div>
+        <div class="card-body">
+            <div id="loading" class="text-center p-5">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mt-2">正在加载...</p>
+            </div>
+            <div id="results-content" style="display: none;">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover table-bordered align-middle">
+                        <thead class="table-dark sticky-top">
+                            <tr>
+                                <th>源单位</th>
+                                <th>匹配单位</th>
+                                <th>匹配类型</th>
+                                <th>匹配度 / 状态</th>
+                                <th>地址</th>
+                                <th>法人</th>
+                                <th style="width: 120px;">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="results-tbody"></tbody>
+                    </table>
+                </div>
+                <nav id="pagination-nav" aria-label="Page navigation" class="mt-4 d-flex justify-content-center"></nav>
+            </div>
+        </div>
+    </div>
+</div>
 
-        // 页面加载时自动加载结果
-        document.addEventListener('DOMContentLoaded', function() {
-            loadResults();
-        });
+<!-- 审核模态框 -->
+<div class="modal fade" id="reviewModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">人工审核</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="reviewUnitInfo" class="mb-3"></div>
+                <div class="mb-3">
+                    <label for="reviewStatusSelect" class="form-label">审核结果</label>
+                    <select id="reviewStatusSelect" class="form-select">
+                        <option value="approved">✅ 审核通过</option>
+                        <option value="rejected">❌ 审核未通过</option>
+                        <option value="pending">⏳ 设为待审核</option>
+                    </select>
+                </div>
+                <div id="reviewNotesDiv" class="mb-3">
+                    <label for="reviewNotesInput" class="form-label">审核备注</label>
+                    <textarea id="reviewNotesInput" class="form-control" rows="3"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary" onclick="confirmReview()">保存</button>
+            </div>
+        </div>
+    </div>
+</div>
 
-        // 加载匹配结果
-        async function loadResults() {
-            const matchType = document.getElementById('match-type-filter').value;
-            const perPage = document.getElementById('per-page').value;
-
-            document.getElementById('loading').style.display = 'block';
-            document.getElementById('results-content').style.display = 'none';
-
-            try {
-                const params = new URLSearchParams({
-                    page: currentPage,
-                    per_page: perPage
-                });
-
-                if (matchType) {
-                    params.append('match_type', matchType);
-                }
-
-                const response = await fetch(`/api/match_results?${params}`);
-                const data = await response.json();
-
-                if (response.ok) {
-                    displayResults(data);
-                } else {
-                    showError('加载结果失败: ' + data.error);
-                }
-            } catch (error) {
-                showError('请求失败: ' + error.message);
-            }
-        }
-
-        // 安全获取字段值，避免显示"-"
-        function safeGetValue(value, defaultText = '暂无数据') {
-            if (value === null || value === undefined || value === '' || value === '-') {
-                return `<span class="no-data">${defaultText}</span>`;
-            }
-            return value;
-        }
-
-        // 安全获取纯文本值，用于JavaScript参数传递
-        function safeGetText(value, defaultText = '暂无数据') {
-            if (value === null || value === undefined || value === '' || value === '-') {
-                return defaultText;
-            }
-            return String(value).replace(/'/g, "\\'").replace(/"/g, '\\"');
-        }
-
-        // 格式化双行显示内容
-        function formatDualContent(sourceValue, targetValue, sourceLabel = '源', targetLabel = '目标') {
-            const source = sourceValue && sourceValue !== '-' ? sourceValue : '暂无数据';
-            const target = targetValue && targetValue !== '-' ? targetValue : '暂无数据';
-            
-            return `
-                <div class="dual-content">
-                    <div class="source-data">
-                        <span class="data-label">${sourceLabel}:</span> ${source}
+<!-- 分析模态框 -->
+<div class="modal fade" id="analysisModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-info-circle"></i> 决策分析</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="analysisUnitInfo" class="mb-4"></div>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="card h-100">
+                            <div class="card-header bg-success-subtle">✅ 支持匹配的理由</div>
+                            <ul id="positive-evidence" class="list-group list-group-flush"></ul>
+                        </div>
                     </div>
-                    <div class="target-data">
-                        <span class="data-label">${targetLabel}:</span> ${target}
+                    <div class="col-md-6">
+                        <div class="card h-100">
+                             <div class="card-header bg-danger-subtle">⚠️ 反对匹配的理由</div>
+                            <ul id="negative-evidence" class="list-group list-group-flush"></ul>
+                        </div>
                     </div>
                 </div>
-            `;
-        }
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
 
-        // 获取置信度样式
-        function getConfidenceClass(score) {
-            if (score >= 0.8) return 'confidence-high';
-            if (score >= 0.6) return 'confidence-medium';
-            return 'confidence-low';
-        }
+{% block scripts %}
+<script>
+    let currentPage = 1;
+    let currentReviewData = {};
+    let reviewModalInstance = null;
+    let analysisModalInstance = null;
 
-        // 格式化匹配时间
-        function formatMatchTime(matchTime, updatedTime, createdTime) {
-            // 优先使用match_time，然后是updated_time，最后是created_time
-            const timeValue = matchTime || updatedTime || createdTime;
-            
-            if (!timeValue) {
-                return safeGetValue(null, '未记录');
-            }
-            
-            try {
-                const date = new Date(timeValue);
-                if (isNaN(date.getTime())) {
-                    return safeGetValue(null, '时间格式错误');
-                }
-                
-                return date.toLocaleString('zh-CN', {
-                    year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit'
-                });
-            } catch (error) {
-                console.error('时间格式化错误:', error);
-                return safeGetValue(null, '时间解析失败');
-            }
+    document.addEventListener('DOMContentLoaded', function() {
+        loadResults(1);
+        const reviewModalElement = document.getElementById('reviewModal');
+        if (reviewModalElement) {
+            reviewModalInstance = new bootstrap.Modal(reviewModalElement);
         }
+        const analysisModalElement = document.getElementById('analysisModal');
+        if (analysisModalElement) {
+            analysisModalInstance = new bootstrap.Modal(analysisModalElement);
+        }
+    });
 
-        // 显示结果
-        function displayResults(data) {
+    async function loadResults(page = 1) {
+        currentPage = page;
+        const matchType = document.getElementById('match-type-filter').value;
+        const perPage = document.getElementById('per-page').value;
+        const searchTerm = document.getElementById('search-term').value;
+
+        document.getElementById('loading').style.display = 'block';
+        document.getElementById('results-content').style.display = 'none';
+
+        const params = new URLSearchParams({ page, per_page: perPage });
+        if (matchType) params.append('match_type', matchType);
+        if (searchTerm) params.append('search_term', searchTerm);
+
+        try {
+            const response = await fetch(`/api/match_results?${params}`);
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Failed to load results');
+            displayResults(data);
+        } catch (error) {
+            document.getElementById('results-tbody').innerHTML = `<tr><td colspan="7" class="text-center text-danger">加载失败: ${error.message}</td></tr>`;
+        } finally {
             document.getElementById('loading').style.display = 'none';
             document.getElementById('results-content').style.display = 'block';
+        }
+    }
 
-            // 显示摘要
-            const summary = document.getElementById('results-summary');
-            summary.innerHTML = `
-                <p><strong>总计:</strong> ${data.total || 0} 条结果 | 
-                <strong>当前页:</strong> ${data.page || 1}/${data.pages || 1}</p>
-            `;
+    function displayResults(data) {
+        const tbody = document.getElementById('results-tbody');
+        tbody.innerHTML = '';
 
-            // 显示表格数据
-            const tbody = document.getElementById('results-tbody');
-            tbody.innerHTML = '';
+        if (!data.results || data.results.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted p-5">未找到匹配的结果。</td></tr>';
+        } else {
+            data.results.forEach(result => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${formatDualContent(result.primary_unit_name, result.primary_credit_code, '名称', '信用代码')}</td>
+                    <td>${formatDualContent(result.matched_unit_name, result.matched_credit_code, '名称', '信用代码')}</td>
+                    <td>${getMatchTypeBadge(result.match_type)}</td>
+                    <td>${getMatchStatusBadge(result)}</td>
+                    <td>${formatDualContent(result.primary_unit_address, result.matched_unit_address, '源', '目标')}</td>
+                    <td>${formatDualContent(result.primary_legal_person, result.matched_legal_person, '源', '目标')}</td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-info" onclick="showDetailsModal('${result.match_id}')" title="查看分析"><i class="fas fa-info-circle"></i></button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="openReviewModal('${result.match_id}', \`${safeJS(result.primary_unit_name)}\`, \`${safeJS(result.matched_unit_name)}\`, '${result.review_status}')" title="人工审核"><i class="fas fa-edit"></i></button>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+        updatePagination(data.pagination);
+        document.getElementById('results-summary').textContent = `共 ${data.pagination.total_count} 条记录`;
+    }
 
-            if (data.results && data.results.length > 0) {
-                data.results.forEach(result => {
-                    const row = document.createElement('tr');
-                    
-                    // 计算匹配度显示 - 优先显示人工审核状态，但对于高相似度优先显示分数
-                    const reviewStatus = result.review_status;
-                    const similarityScore = result.similarity_score || 0;
-                    const matchType = result.match_type || '';
-                    const confidenceClass = getConfidenceClass(similarityScore);
-                    const matchId = result._id || result.match_id;
-                    
-                    let similarityDisplay;
-                    let isEditable = false;  // 是否可编辑
-                    
-                    // 对于已审核的记录，优先显示审核状态，但仍然支持修改
-                    if (reviewStatus === 'approved') {
-                        similarityDisplay = `<span class="confidence-score confidence-high">✅ 人工审核通过</span>`;
-                        isEditable = true;  // 已审核通过的记录也可以修改
-                    } else if (reviewStatus === 'rejected') {
-                        const reviewNotes = result.review_notes || '';
-                        const notesText = reviewNotes ? ` (${reviewNotes})` : '';
-                        similarityDisplay = `<span class="confidence-score confidence-low">❌ 人工审核未通过${notesText}</span>`;
-                        isEditable = true;  // 已审核未通过的记录也可以修改
-                    } 
-                    // 特殊处理模糊匹配(完美)类型 - 无论相似度分数如何都显示100%
-                    else if (matchType === 'fuzzy_perfect') {
-                        similarityDisplay = `<span class="confidence-score confidence-high">100.0%</span>`;
-                        // 如果是待审核状态，仍然可以进行人工审核
-                        if (reviewStatus === 'pending') {
-                            isEditable = true;
-                        }
-                    }
-                    // 对于有相似度分数的记录，显示分数
-                    else if (similarityScore > 0) {
-                        // 高相似度记录显示100%
-                        if (similarityScore >= 0.99) {
-                            similarityDisplay = `<span class="confidence-score confidence-high">100.0%</span>`;
-                        } else {
-                            similarityDisplay = `<span class="confidence-score ${confidenceClass}">${(similarityScore * 100).toFixed(1)}%</span>`;
-                        }
-                        
-                        // 如果是待审核的模糊匹配，在分数后添加待审核标识和编辑按钮
-                        if (reviewStatus === 'pending' && (matchType.includes('fuzzy') || matchType === 'fuzzy')) {
-                            similarityDisplay += ` <small style="color: #f39c12;">(待审核)</small>`;
-                            isEditable = true;
-                        }
-                    }
-                    // 对于精确匹配但没有相似度分数的记录
-                    else if (matchType && (matchType.includes('exact') || matchType === 'exact')) {
-                        similarityDisplay = `<span class="confidence-score confidence-high">精确匹配</span>`;
-                    }
-                    // 对于待审核的模糊匹配但没有分数的记录
-                    else if (reviewStatus === 'pending' && (matchType.includes('fuzzy') || matchType === 'fuzzy')) {
-                        similarityDisplay = `<span class="confidence-score confidence-medium">⏳ 待人工审核</span>`;
-                        isEditable = true;
-                    }
-                    // 其他情况
-                    else {
-                        similarityDisplay = safeGetValue(null, '未评分');
-                    }
+    function getMatchTypeBadge(type) {
+        const typeMap = { 'exact': 'success', 'fuzzy': 'primary', 'none': 'secondary' };
+        const typeText = { 'exact': '精确', 'fuzzy': '模糊', 'none': '未匹配' };
+        const badgeClass = typeMap[type] || 'light';
+        return `<span class="badge bg-${badgeClass}">${typeText[type] || '未知'}</span>`;
+    }
 
-                    // 如果可编辑，添加编辑按钮
-                    if (isEditable && matchId) {
-                        const primaryName = safeGetText(result.primary_unit_name || result.source_unit_name);
-                        const matchedName = safeGetText(result.matched_unit_name || result.target_unit_name);
-                        const currentStatus = reviewStatus || 'pending';
-                        
-                        // 根据当前状态设置按钮文本和样式
-                        let buttonText = '审核';
-                        let buttonStyle = 'background: #007bff; color: white; border: none; padding: 2px 6px; border-radius: 3px; font-size: 12px; cursor: pointer; margin-left: 5px;';
-                        let buttonTitle = '点击进行人工审核';
-                        
-                        if (reviewStatus === 'approved') {
-                            buttonText = '修改';
-                            buttonStyle = 'background: #28a745; color: white; border: none; padding: 2px 6px; border-radius: 3px; font-size: 12px; cursor: pointer; margin-left: 5px;';
-                            buttonTitle = '点击修改审核状态';
-                        } else if (reviewStatus === 'rejected') {
-                            buttonText = '修改';
-                            buttonStyle = 'background: #dc3545; color: white; border: none; padding: 2px 6px; border-radius: 3px; font-size: 12px; cursor: pointer; margin-left: 5px;';
-                            buttonTitle = '点击修改审核状态';
-                        }
-                        
-                        similarityDisplay += ` <button onclick="openReviewModal('${matchId}', '${primaryName}', '${matchedName}', '${currentStatus}')" 
-                            style="${buttonStyle}" 
-                            title="${buttonTitle}">${buttonText}</button>`;
-                    }
+    function getMatchStatusBadge(result) {
+        const statusMap = { 'approved': 'success', 'rejected': 'danger', 'pending': 'warning' };
+        if (statusMap[result.review_status]) {
+            return `<span class="badge bg-${statusMap[result.review_status]}">${result.review_status}</span>`;
+        }
+        return `<span class="badge rounded-pill bg-primary">${(result.similarity_score * 100).toFixed(1)}%</span>`;
+    }
 
-                    row.innerHTML = `
-                        <td>${safeGetValue(result.primary_unit_name || result.source_unit_name)}</td>
-                        <td>${safeGetValue(result.matched_unit_name || result.target_unit_name)}</td>
-                        <td><span class="match-type match-${result.match_type || 'none'}">${getMatchTypeText(result.match_type)}</span></td>
-                        <td>${similarityDisplay}</td>
-                        <td>${formatDualContent(
-                            result.primary_unit_address || result.source_address,
-                            result.matched_unit_address || result.target_address,
-                            '源地址', '目标地址'
-                        )}</td>
-                        <td>${formatDualContent(
-                            result.primary_legal_person || result.source_legal_person,
-                            result.matched_legal_person || result.target_legal_person,
-                            '源法人', '目标法人'
-                        )}</td>
-                        <td>${formatDualContent(
-                            result.primary_security_manager || result.source_security_manager,
-                            result.matched_security_manager || result.target_security_manager,
-                            '源管理人', '目标管理人'
-                        )}</td>
-                        <td>${formatMatchTime(result.match_time, result.updated_time, result.created_time)}</td>
-                    `;
-                    tbody.appendChild(row);
+    function formatDualContent(val1, val2, label1, label2) {
+        const v1 = val1 || '<span class="text-muted small">无</span>';
+        const v2 = val2 || '<span class="text-muted small">无</span>';
+        return `<div class="small"><strong>${label1}:</strong> ${v1}<br><strong>${label2}:</strong> ${v2}</div>`;
+    }
+    
+    function safeJS(text) {
+        return (text || '').replace(/`/g, "\\`");
+    }
+
+    function updatePagination(pagination) {
+        const nav = document.getElementById('pagination-nav');
+        nav.innerHTML = '';
+        if (pagination.total_pages <= 1) return;
+        
+        let html = '<ul class="pagination">';
+        // Previous
+        html += `<li class="page-item ${pagination.page === 1 ? 'disabled' : ''}"><a class="page-link" href="#" onclick="loadResults(${pagination.page - 1})">上一页</a></li>`;
+        // Pages
+        for(let i=1; i<=pagination.total_pages; i++){
+             if(i === pagination.page) {
+                html += `<li class="page-item active"><span class="page-link">${i}</span></li>`;
+             } else {
+                html += `<li class="page-item"><a class="page-link" href="#" onclick="loadResults(${i})">${i}</a></li>`;
+             }
+        }
+        // Next
+        html += `<li class="page-item ${pagination.page === pagination.total_pages ? 'disabled' : ''}"><a class="page-link" href="#" onclick="loadResults(${pagination.page + 1})">下一页</a></li>`;
+        html += '</ul>';
+        nav.innerHTML = html;
+    }
+
+    function openReviewModal(matchId, pName, mName, status) {
+        currentReviewData = { matchId, pName, mName };
+        document.getElementById('reviewUnitInfo').innerHTML = `<p><strong>源:</strong> ${pName}</p><p><strong>目标:</strong> ${mName}</p>`;
+        document.getElementById('reviewStatusSelect').value = status;
+        document.getElementById('reviewNotesInput').value = '';
+        reviewModalInstance.show();
+    }
+    
+    async function confirmReview() {
+        const { matchId } = currentReviewData;
+        const review_status = document.getElementById('reviewStatusSelect').value;
+        const review_notes = document.getElementById('reviewNotesInput').value;
+
+        try {
+            const response = await fetch('/api/update_review_status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ match_id: matchId, review_status, review_notes, reviewer: 'web_user' })
+            });
+            const result = await response.json();
+            if (!result.success) throw new Error(result.error);
+            reviewModalInstance.hide();
+            loadResults(currentPage); // Refresh
+        } catch (error) {
+            alert(`审核失败: ${error.message}`);
+        }
+    }
+    
+    async function showDetailsModal(matchId) {
+        const unitInfo = document.getElementById('analysisUnitInfo');
+        const positiveList = document.getElementById('positive-evidence');
+        const negativeList = document.getElementById('negative-evidence');
+
+        unitInfo.innerHTML = '<p class="text-center text-muted">加载中...</p>';
+        positiveList.innerHTML = '';
+        negativeList.innerHTML = '';
+        analysisModalInstance.show();
+
+        try {
+            const response = await fetch(`/api/match_result_details/${matchId}`);
+            const result = await response.json();
+
+            if (result.success) {
+                const details = result.details;
+                unitInfo.innerHTML = `<p><strong>源:</strong> ${details.unit_name}</p><p><strong>目标:</strong> ${details.matched_unit_name}</p><p><strong>得分:</strong> <span class="badge bg-primary fs-6">${(details.similarity_score * 100).toFixed(1)}%</span></p><hr>`;
+                
+                const explanation = details.match_details.explanation || {};
+                const positive = explanation.positive || ['无'];
+                const negative = explanation.negative || ['无'];
+
+                positive.forEach(item => {
+                    positiveList.innerHTML += `<li class="list-group-item"><i class="fas fa-check-circle text-success me-2"></i>${item}</li>`;
+                });
+                negative.forEach(item => {
+                    negativeList.innerHTML += `<li class="list-group-item"><i class="fas fa-exclamation-triangle text-danger me-2"></i>${item}</li>`;
                 });
             } else {
-                tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #7f8c8d; padding: 40px;">暂无匹配结果</td></tr>';
+                 unitInfo.innerHTML = `<div class="alert alert-danger">加载失败: ${result.message}</div>`;
             }
-
-            // 更新分页
-            updatePagination(data.page || 1, data.pages || 1);
+        } catch (error) {
+            unitInfo.innerHTML = `<div class="alert alert-danger">请求失败: ${error.message}</div>`;
         }
-
-        // 获取匹配类型文本
-        function getMatchTypeText(type) {
-            const typeMap = {
-                'exact': '精确匹配',
-                'exact_credit_code': '精确匹配(信用代码)',
-                'exact_unit_name': '精确匹配(单位名称)',
-                'fuzzy': '模糊匹配',
-                'fuzzy_credit_code': '模糊匹配(信用代码)',
-                'fuzzy_unit_name': '模糊匹配(单位名称)',
-                'fuzzy_legal_person': '模糊匹配(法定代表人)',
-                'fuzzy_address': '模糊匹配(地址)',
-                'fuzzy_comprehensive': '模糊匹配(综合)',
-                'fuzzy_perfect': '模糊匹配(完美)',
-                'fuzzy_high': '模糊匹配(高)',
-                'fuzzy_medium': '模糊匹配(中)',
-                'fuzzy_low': '模糊匹配(低)',
-                'none': '未匹配',
-                'manual': '人工匹配'
-            };
-            return typeMap[type] || (type || '未知类型');
-        }
-
-        // 更新分页
-        function updatePagination(page, pages) {
-            currentPage = page;
-            totalPages = pages;
-
-            const pagination = document.getElementById('pagination');
-            pagination.innerHTML = '';
-
-            if (pages <= 1) return;
-
-            // 上一页
-            if (page > 1) {
-                const prevBtn = document.createElement('button');
-                prevBtn.textContent = '上一页';
-                prevBtn.onclick = () => {
-                    currentPage = page - 1;
-                    loadResults();
-                };
-                pagination.appendChild(prevBtn);
-            }
-
-            // 页码
-            const startPage = Math.max(1, page - 2);
-            const endPage = Math.min(pages, page + 2);
-
-            for (let i = startPage; i <= endPage; i++) {
-                const pageBtn = document.createElement('button');
-                pageBtn.textContent = i;
-                pageBtn.className = i === page ? 'active' : '';
-                pageBtn.onclick = () => {
-                    currentPage = i;
-                    loadResults();
-                };
-                pagination.appendChild(pageBtn);
-            }
-
-            // 下一页
-            if (page < pages) {
-                const nextBtn = document.createElement('button');
-                nextBtn.textContent = '下一页';
-                nextBtn.onclick = () => {
-                    currentPage = page + 1;
-                    loadResults();
-                };
-                pagination.appendChild(nextBtn);
-            }
-        }
-
-        // 导出结果
-        async function exportResults() {
-            const matchType = document.getElementById('match-type-filter').value;
-
-            try {
-                const params = new URLSearchParams({
-                    format: 'csv'
-                });
-
-                if (matchType) {
-                    params.append('match_type', matchType);
-                }
-
-                const response = await fetch(`/api/export_results?${params}`);
-                const data = await response.json();
-
-                if (data.success) {
-                    alert('导出成功！文件路径: ' + data.file_path);
-                } else {
-                    alert('导出失败: ' + data.error);
-                }
-            } catch (error) {
-                alert('导出失败: ' + error.message);
-            }
-        }
-
-        // 显示错误
-        function showError(message) {
-            document.getElementById('loading').style.display = 'none';
-            document.getElementById('results-content').innerHTML = `
-                <div style="text-align: center; padding: 50px; color: #e74c3c;">
-                    <h3>加载失败</h3>
-                    <p>${message}</p>
-                    <button class="btn btn-primary" onclick="loadResults()">重试</button>
-                </div>
-            `;
-            document.getElementById('results-content').style.display = 'block';
-        }
-
-        // 全局变量存储当前审核信息
-        let currentReviewData = {};
-
-        // 打开审核模态框
-        function openReviewModal(matchId, primaryUnitName, matchedUnitName, currentStatus) {
-            currentReviewData = {
-                matchId: matchId,
-                primaryUnitName: primaryUnitName,
-                matchedUnitName: matchedUnitName,
-                currentStatus: currentStatus
-            };
-
-            // 设置单位信息
-            document.getElementById('reviewUnitInfo').innerHTML = `
-                <div><strong>源单位:</strong> ${primaryUnitName}</div>
-                <div><strong>匹配单位:</strong> ${matchedUnitName}</div>
-            `;
-
-            // 设置当前状态
-            document.getElementById('reviewStatusSelect').value = currentStatus || 'pending';
-            
-            // 根据当前状态显示/隐藏备注框
-            toggleReviewNotes();
-            
-            // 显示模态框
-            document.getElementById('reviewModal').style.display = 'block';
-        }
-
-        // 关闭审核模态框
-        function closeReviewModal() {
-            document.getElementById('reviewModal').style.display = 'none';
-            document.getElementById('reviewNotesInput').value = '';
-            currentReviewData = {};
-        }
-
-        // 审核状态变化时的处理
-        document.addEventListener('DOMContentLoaded', function() {
-            const reviewStatusSelect = document.getElementById('reviewStatusSelect');
-            if (reviewStatusSelect) {
-                reviewStatusSelect.addEventListener('change', toggleReviewNotes);
-            }
-        });
-
-        // 切换备注框显示
-        function toggleReviewNotes() {
-            const status = document.getElementById('reviewStatusSelect').value;
-            const notesDiv = document.getElementById('reviewNotesDiv');
-            
-            if (status === 'rejected') {
-                notesDiv.style.display = 'block';
-                document.getElementById('reviewNotesInput').setAttribute('required', 'required');
-                document.getElementById('reviewNotesInput').placeholder = '请输入审核未通过的原因...';
-            } else if (status === 'approved') {
-                notesDiv.style.display = 'block';
-                document.getElementById('reviewNotesInput').removeAttribute('required');
-                document.getElementById('reviewNotesInput').placeholder = '可选：输入审核备注...';
-            } else {
-                notesDiv.style.display = 'none';
-                document.getElementById('reviewNotesInput').removeAttribute('required');
-            }
-        }
-
-        // 确认审核
-        function confirmReview() {
-            const status = document.getElementById('reviewStatusSelect').value;
-            const notes = document.getElementById('reviewNotesInput').value.trim();
-            
-            if (!status) {
-                alert('请选择审核结果');
-                return;
-            }
-            
-            if (status === 'rejected' && !notes) {
-                alert('审核未通过时必须填写原因');
-                return;
-            }
-
-            // 显示确认对话框
-            const statusText = {
-                'approved': '✅ 审核通过',
-                'rejected': '❌ 审核未通过',
-                'pending': '⏳ 待审核'
-            };
-            
-            let message = `确认将 "${currentReviewData.primaryUnitName}" 的审核状态设置为 "${statusText[status]}"？`;
-            if (notes) {
-                message += `\n备注: ${notes}`;
-            }
-            
-            document.getElementById('confirmMessage').innerHTML = message.replace(/\n/g, '<br>');
-            document.getElementById('confirmDialog').style.display = 'block';
-        }
-
-        // 关闭确认对话框
-        function closeConfirmDialog() {
-            document.getElementById('confirmDialog').style.display = 'none';
-        }
-
-        // 执行审核操作
-        async function executeReview() {
-            const status = document.getElementById('reviewStatusSelect').value;
-            const notes = document.getElementById('reviewNotesInput').value.trim();
-            
-            try {
-                // 关闭确认对话框
-                closeConfirmDialog();
-                
-                // 显示加载状态
-                const loadingMessage = document.createElement('div');
-                loadingMessage.innerHTML = '<div style="text-align: center; padding: 20px;">正在保存审核结果...</div>';
-                loadingMessage.style.position = 'fixed';
-                loadingMessage.style.top = '50%';
-                loadingMessage.style.left = '50%';
-                loadingMessage.style.transform = 'translate(-50%, -50%)';
-                loadingMessage.style.background = 'white';
-                loadingMessage.style.border = '1px solid #ddd';
-                loadingMessage.style.borderRadius = '8px';
-                loadingMessage.style.zIndex = '1002';
-                loadingMessage.id = 'loadingMessage';
-                document.body.appendChild(loadingMessage);
-
-                const response = await fetch('/api/update_review_status', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        match_id: currentReviewData.matchId,
-                        review_status: status,
-                        review_notes: notes,
-                        reviewer: 'web_user'
-                    })
-                });
-
-                const result = await response.json();
-                
-                // 移除加载消息
-                const loadingEl = document.getElementById('loadingMessage');
-                if (loadingEl) {
-                    loadingEl.remove();
-                }
-
-                if (result.success) {
-                    // 关闭模态框
-                    closeReviewModal();
-                    
-                    // 显示成功消息
-                    alert('审核状态更新成功！');
-                    
-                    // 重新加载结果
-                    loadResults();
-                } else {
-                    alert('审核状态更新失败: ' + (result.error || result.message));
-                }
-            } catch (error) {
-                // 移除加载消息
-                const loadingEl = document.getElementById('loadingMessage');
-                if (loadingEl) {
-                    loadingEl.remove();
-                }
-                
-                closeConfirmDialog();
-                alert('审核操作失败: ' + error.message);
-                console.error('审核操作失败:', error);
-            }
-        }
-
-        // 点击模态框外部关闭
-        window.onclick = function(event) {
-            const reviewModal = document.getElementById('reviewModal');
-            const confirmDialog = document.getElementById('confirmDialog');
-            
-            if (event.target === reviewModal) {
-                closeReviewModal();
-            } else if (event.target === confirmDialog) {
-                closeConfirmDialog();
-            }
-        }
-    </script>
-</body>
-</html> 
+    }
+</script>
+{% endblock %} 

@@ -169,6 +169,55 @@ class EnhancedFuzzyMatcher(FuzzyMatcher):
             logger.error(f"结构化匹配失败: {str(e)}")
             return None
     
+    def _calculate_record_similarity(self, source_record: Dict, target_record: Dict) -> Tuple[float, Dict]:
+        """
+        计算两条记录的相似度 (重写父类方法以进行双向消毒)
+        """
+        field_similarities = {}
+        weighted_score = 0.0
+        total_weight = 0.0
+        
+        # 动态权重分配准备
+        base_weights = {
+            'unit_name': 0.5, 'address': 0.35,
+            'legal_person': 0.1, 'security_person': 0.05
+        }
+        available_fields = [
+            name for name, cfg in self.fields_config.items()
+            if name == 'unit_name' or (source_record.get(cfg['source_field']) and target_record.get(cfg.get('target_field')))
+        ]
+        
+        total_base_weight = sum(base_weights[k] for k in available_fields)
+        weights = {k: base_weights[k] / total_base_weight for k in available_fields} if total_base_weight > 0 else {}
+        
+        for field_name, field_config in self.fields_config.items():
+            if field_name not in available_fields:
+                continue
+
+            source_field = field_config['source_field']
+            target_field = field_config['target_field']
+            match_type = field_config['match_type']
+
+            # 终极防御：在进入相似度计算前，对源和目标的值进行强制字符串转换
+            source_value = str(source_record.get(source_field, ''))
+            target_value = str(target_record.get(target_field, ''))
+
+            similarity = 0.0
+            if match_type == 'string':
+                similarity = self.similarity_calculator.calculate_string_similarity(source_value, target_value)
+            elif match_type == 'address':
+                similarity = self.similarity_calculator.calculate_address_similarity(source_value, target_value)
+            
+            field_similarities[field_name] = {
+                'similarity': similarity,
+                'weight': weights.get(field_name, 0.0)
+            }
+            weighted_score += similarity * weights.get(field_name, 0.0)
+            total_weight += weights.get(field_name, 0.0)
+            
+        final_score = weighted_score / total_weight if total_weight > 0 else 0.0
+        return final_score, field_similarities
+    
     def _calculate_enhanced_similarity(self, source_record: Dict, target_record: Dict, 
                                      structured_result: Optional[StructuredMatchResult]) -> Tuple[float, Dict, Dict]:
         """
@@ -184,7 +233,7 @@ class EnhancedFuzzyMatcher(FuzzyMatcher):
         """
         explanation = {"positive": [], "negative": []}
         
-        # 1. 使用基础模糊匹配计算初始分数
+        # 1. 使用重写的、安全的基础模糊匹配计算初始分数
         base_score, field_similarities = self._calculate_record_similarity(source_record, target_record)
         explanation['positive'].append(f"基础模糊匹配得分: {base_score:.2f}")
 

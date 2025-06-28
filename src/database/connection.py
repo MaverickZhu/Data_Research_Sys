@@ -10,33 +10,56 @@ from pymongo.collection import Collection
 from pymongo.database import Database
 import redis
 from datetime import datetime
+from threading import Lock
 from src.utils.helpers import convert_objectid_to_str
 
 logger = logging.getLogger(__name__)
 
 
 class DatabaseManager:
-    """数据库管理器"""
+    """数据库管理器（单例模式）"""
+    _instance = None
+    _lock = Lock()
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            with cls._lock:
+                # Double-check locking
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+        return cls._instance
     
-    def __init__(self, config: Dict):
+    def __init__(self, config: Dict = None):
         """
         初始化数据库管理器
         
         Args:
-            config: 数据库配置
+            config: 数据库配置。仅在首次创建实例时需要。
         """
-        self.config = config
-        self.mongodb_config = config.get('mongodb', {})
-        self.redis_config = config.get('redis', {})
+        # 防止重复初始化
+        if hasattr(self, '_initialized') and self._initialized:
+            return
         
-        # 初始化连接
-        self._mongo_client = None
-        self._mongo_db = None
-        self._redis_client = None
-        
-        # 建立连接
-        self._connect_mongodb()
-        self._connect_redis()
+        if config is None:
+            raise ValueError("Configuration is required for the first initialization.")
+            
+        with self._lock:
+            if hasattr(self, '_initialized') and self._initialized:
+                return
+
+            self.config = config
+            self.mongodb_config = config.get('mongodb', {})
+            self.redis_config = config.get('redis', {})
+            
+            # 初始化连接
+            self._mongo_client = None
+            self._mongo_db = None
+            self._redis_client = None
+            
+            # 建立连接
+            self._connect_mongodb()
+            self._connect_redis()
+            self._initialized = True
         
     def _connect_mongodb(self):
         """连接MongoDB"""
@@ -58,16 +81,11 @@ class DatabaseManager:
                     serverSelectionTimeoutMS=pool_config.get('server_selection_timeout_ms', 30000)
                 )
                 
-                # 从URI中提取数据库名
-                if '/' in mongo_uri:
-                    db_name = mongo_uri.split('/')[-1]
-                    if '?' in db_name:  # 如果URI包含查询参数
-                        db_name = db_name.split('?')[0]
-                else:
-                    db_name = self.mongodb_config.get('database', 'Unit_Info')
-                    
-                self._mongo_db = self._mongo_client[db_name]
-                connection_info = f"URI: {mongo_uri}"
+                # 从客户端获取数据库，更稳健
+                self._mongo_db = self._mongo_client.get_database()
+                db_name = self._mongo_db.name
+                
+                connection_info = f"URI: {mongo_uri} (DB: {db_name})"
                 
             else:
                 # 使用传统的host/port方式连接
@@ -268,7 +286,9 @@ class DatabaseManager:
             logger.error(f"保存匹配结果失败: {str(e)}")
             return False
             
-    def get_match_results(self, page: int = 1, per_page: int = 20, match_type: Optional[str] = None) -> Dict:
+    def get_match_results(self, page: int = 1, per_page: int = 20, 
+                          match_type: Optional[str] = None, 
+                          search_term: Optional[str] = None) -> Dict:
         """
         获取匹配结果
         
@@ -276,6 +296,7 @@ class DatabaseManager:
             page: 页码
             per_page: 每页记录数
             match_type: 匹配类型筛选
+            search_term: 单位名称搜索关键词
             
         Returns:
             Dict: 分页结果
@@ -300,6 +321,13 @@ class DatabaseManager:
                 else:
                     # 其他情况：精确匹配
                     query['match_type'] = match_type
+            
+            if search_term:
+                # 使用正则表达式进行模糊搜索，不区分大小写，同时搜索源单位和匹配单位
+                query['$or'] = [
+                    {'unit_name': {'$regex': search_term, '$options': 'i'}},
+                    {'matched_unit_name': {'$regex': search_term, '$options': 'i'}}
+                ]
                 
             # 计算跳过记录数
             skip = (page - 1) * per_page
@@ -313,14 +341,14 @@ class DatabaseManager:
             
             # 转换ObjectId为字符串，确保JSON序列化正常
             response_data = {
-                'results': results,
+                'results': convert_objectid_to_str(results),
                 'total': total,
                 'page': page,
                 'per_page': per_page,
                 'pages': (total + per_page - 1) // per_page
             }
             
-            return convert_objectid_to_str(response_data)
+            return response_data
             
         except Exception as e:
             logger.error(f"获取匹配结果失败: {str(e)}")
@@ -421,16 +449,16 @@ class DatabaseManager:
             review_cursor = collection.aggregate(review_pipeline)
             review_stats = list(review_cursor)
             
-            # 转换ObjectId为字符串，确保JSON序列化正常
+            # 转换ObjectId和datetime为JSON兼容格式
             response_data = {
                 'total_matches': total_matches,
                 'stats_by_type': stats_by_type,
-                'raw_stats_by_type': raw_stats_by_type,  # 保留原始统计供调试
-                'review_stats': review_stats,
-                'last_updated': datetime.now()
+                'raw_stats_by_type': convert_objectid_to_str(raw_stats_by_type),
+                'review_stats': convert_objectid_to_str(review_stats),
+                'last_updated': datetime.now().isoformat()
             }
             
-            return convert_objectid_to_str(response_data)
+            return response_data
             
         except Exception as e:
             logger.error(f"获取匹配统计失败: {str(e)}")
@@ -439,7 +467,7 @@ class DatabaseManager:
                 'stats_by_type': [],
                 'raw_stats_by_type': [],
                 'review_stats': [],
-                'last_updated': datetime.now()
+                'last_updated': datetime.now().isoformat()
             }
             
     def set_cache(self, key: str, value: str, ttl: Optional[int] = None):

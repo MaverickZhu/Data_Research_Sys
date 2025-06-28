@@ -15,26 +15,61 @@ sys.path.insert(0, str(project_root))
 def main():
     """主函数"""
     try:
-        # 检查Python版本
-        if sys.version_info < (3, 8):
-            print("❌ 错误: 需要Python 3.8或更高版本")
-            print(f"当前版本: {sys.version}")
+        # 打印启动横幅
+        from src.main import print_banner
+        print_banner()
+
+        # 环境和依赖检查
+        from src.main import check_environment, check_dependencies
+        logger.info("系统环境检查...")
+        if not check_environment():
             return False
         
-        # 导入主程序
-        from src.main import main as main_program
+        logger.info("依赖项检查...")
+        if not check_dependencies():
+            return False
+            
+        # 导入并运行初始化主程序
+        from src.main import main as initialize_system
         
-        # 运行主程序
-        return main_program()
+        initialized_app, config_manager = initialize_system()
+        
+        if not initialized_app or not config_manager:
+            logger.error("❌ 系统初始化失败，请检查日志获取详细信息。")
+            return False
+        
+        # 从配置中获取Web服务参数
+        web_config = config_manager.get_web_config()
+        flask_config = web_config.get('flask', {})
+        
+        host = flask_config.get('host', '0.0.0.0')
+        port = flask_config.get('port', 8888) # 修正端口为8888
+        debug = flask_config.get('debug', False)
+
+        logger.info(f"🚀 准备在 http://{host}:{port} 上启动Web服务...")
+        
+        # 启动Flask应用
+        initialized_app.run(
+            host=host,
+            port=port,
+            debug=debug,
+            threaded=True
+        )
+        
+        return True
         
     except ImportError as e:
-        print(f"❌ 导入错误: {e}")
-        print("请确保已安装所有依赖: pip install -r requirements.txt")
+        logger.error(f"❌ 导入错误: {e}")
+        logger.error("请确保已安装所有依赖: pip install -r requirements.txt")
         return False
     except Exception as e:
-        print(f"❌ 启动失败: {e}")
+        logger.error(f"❌ 启动失败: {e}", exc_info=True)
         return False
 
 if __name__ == "__main__":
+    # 需要一个基础的logger来捕获早期错误
+    from src.utils.logger import setup_logger
+    logger = setup_logger(__name__)
+
     success = main()
     sys.exit(0 if success else 1) 

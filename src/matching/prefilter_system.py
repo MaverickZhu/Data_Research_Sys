@@ -8,6 +8,8 @@ from typing import Dict, List
 import logging
 from rapidfuzz import process, fuzz
 import jieba
+import json
+import re  # 导入re模块
 
 logger = logging.getLogger(__name__)
 
@@ -85,11 +87,14 @@ class PrefilterSystem:
             if not keywords:
                 return []
 
-            # 为每个关键词构建一个正则表达式查询
-            regex_queries = [{'dwmc': {'$regex': keyword, '$options': 'i'}} for keyword in keywords]
+            # 为每个关键词构建一个正则表达式查询，并对特殊字符进行转义
+            regex_queries = [{'dwmc': {'$regex': re.escape(keyword), '$options': 'i'}} for keyword in keywords]
             
             # 使用$or操作符组合查询
             query = {'$or': regex_queries}
+            
+            # 在执行前记录查询
+            logger.info(f"正在执行名称预过滤查询: {json.dumps(query, ensure_ascii=False)}")
             
             candidates = list(self.db['xxj_shdwjbxx'].find(query).limit(self.config['max_candidates_per_method']))
             return candidates
@@ -105,9 +110,12 @@ class PrefilterSystem:
         if not keywords:
             return []
         
-        # 使用$or操作符为每个关键词构建查询
-        regex_queries = [{'dwdz': {'$regex': keyword, '$options': 'i'}} for keyword in keywords]
+        # 使用$or操作符为每个关键词构建查询，并对特殊字符进行转义
+        regex_queries = [{'dwdz': {'$regex': re.escape(keyword), '$options': 'i'}} for keyword in keywords]
         query = {'$or': regex_queries}
+        
+        # 在执行前记录查询
+        logger.info(f"正在执行地址预过滤查询: {json.dumps(query, ensure_ascii=False)}")
         
         candidates = list(self.db['xxj_shdwjbxx'].find(query).limit(self.config['max_candidates_per_method']))
         return candidates
@@ -118,8 +126,12 @@ class PrefilterSystem:
         if not source_legal:
             return []
         
-        # 精确匹配法定代表人
-        query = {'fddbr': source_legal}
+        # 精确匹配法定代表人，对特殊字符进行转义
+        query = {'fddbr': re.escape(source_legal)}
+        
+        # 在执行前记录查询
+        logger.info(f"正在执行法人预过滤查询: {json.dumps(query, ensure_ascii=False)}")
+        
         candidates = list(self.db['xxj_shdwjbxx'].find(query).limit(self.config['max_candidates_per_method']))
         return candidates
     
@@ -127,6 +139,8 @@ class PrefilterSystem:
         """
         使用jieba分词提取关键词，并过滤掉停用词和通用词。
         """
+        # 防御性编程：在处理前，确保输入值是字符串类型，以处理数字等异常数据。
+        text = str(text) if text is not None else ''
         if not text:
             return []
 
@@ -167,6 +181,8 @@ class PrefilterSystem:
         """
         使用jieba分词提取地址中的关键词。
         """
+        # 防御性编程：在处理前，确保输入值是字符串类型。
+        address = str(address) if address is not None else ''
         if not address:
             return []
 

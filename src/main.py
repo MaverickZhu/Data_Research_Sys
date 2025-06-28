@@ -32,12 +32,13 @@ def main():
         
         if not all(validation_results.values()):
             logger.error(f"配置验证失败: {validation_results}")
-            return False
+            return None # 返回None表示失败
         
         logger.info("配置验证通过")
         
         # 测试数据库连接
         logger.info("测试数据库连接...")
+        # 确保db_manager是全局的，或通过create_app传递
         db_manager = DatabaseManager(config_manager.get_database_config())
         
         # 获取数据统计
@@ -50,41 +51,16 @@ def main():
         
         # 初始化Flask应用
         logger.info("初始化Web应用...")
-        create_app()
+        initialized_app = create_app()
         
-        # 获取Web配置
-        web_config = config_manager.get_web_config()
-        flask_config = web_config.get('flask', {})
+        logger.info("系统已准备就绪，等待启动Web服务! 🚀")
         
-        host = flask_config.get('host', '0.0.0.0')
-        port = flask_config.get('port', 5000)
-        debug = flask_config.get('debug', False)
+        # 返回已初始化的app和配置
+        return initialized_app, config_manager
         
-        logger.info(f"Web服务启动: http://{host}:{port}")
-        logger.info("系统已就绪! 🚀")
-        
-        # 启动Flask应用
-        app.run(
-            host=host,
-            port=port,
-            debug=debug,
-            threaded=True
-        )
-        
-    except KeyboardInterrupt:
-        logger.info("系统正在关闭...")
-        return True
     except Exception as e:
-        logger.error(f"系统启动失败: {str(e)}")
-        return False
-    finally:
-        # 清理资源
-        try:
-            if 'db_manager' in locals():
-                db_manager.close()
-                logger.info("数据库连接已关闭")
-        except Exception as e:
-            logger.error(f"清理资源失败: {str(e)}")
+        logger.error(f"系统初始化失败: {str(e)}")
+        return None, None
 
 
 def check_dependencies():
@@ -178,8 +154,8 @@ if __name__ == "__main__":
             sys.exit(1)
         
         # 启动主程序
-        success = main()
-        sys.exit(0 if success else 1)
+        # 这个文件现在只负责检查和初始化，不直接运行
+        logger.info("系统环境检查完成。请通过 run.py 启动服务。")
         
     except Exception as e:
         logger.error(f"程序异常退出: {str(e)}")

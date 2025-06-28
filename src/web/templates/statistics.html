@@ -1,452 +1,222 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>数据统计 - 消防单位建筑数据关联系统</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+{% extends "base.html" %}
 
-        body {
-            font-family: 'Microsoft YaHei', Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 20px;
-        }
+{% block title %}数据统计 - {{ super() }}{% endblock %}
 
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
+{% block content %}
+<div class="container-fluid">
+    <!-- Header -->
+    <div class="header bg-light p-5 rounded-3 mb-4">
+        <h1 class="display-5"><i class="fas fa-chart-bar"></i> 数据统计</h1>
+        <p class="lead text-muted">深入洞察数据关联任务的宏观表现与细节分布。</p>
+    </div>
 
-        .header {
-            background: white;
-            border-radius: 15px;
-            padding: 30px;
-            margin-bottom: 30px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-            text-align: center;
-        }
+    <!-- Controls -->
+    <div class="d-flex justify-content-end mb-4">
+        <button class="btn btn-primary" onclick="loadStatistics()">
+            <i class="fas fa-sync-alt me-2"></i>刷新数据
+        </button>
+    </div>
 
-        .header h1 {
-            color: #2c3e50;
-            font-size: 32px;
-            margin-bottom: 10px;
-        }
-
-        .header p {
-            color: #7f8c8d;
-            font-size: 16px;
-        }
-
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 30px;
-            margin-bottom: 30px;
-        }
-
-        .stat-card {
-            background: white;
-            border-radius: 15px;
-            padding: 30px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-            text-align: center;
-            transition: transform 0.3s ease;
-        }
-
-        .stat-card:hover {
-            transform: translateY(-5px);
-        }
-
-        .stat-icon {
-            font-size: 48px;
-            margin-bottom: 15px;
-        }
-
-        .stat-value {
-            font-size: 36px;
-            font-weight: bold;
-            color: #2c3e50;
-            margin-bottom: 10px;
-        }
-
-        .stat-label {
-            font-size: 16px;
-            color: #7f8c8d;
-            margin-bottom: 15px;
-        }
-
-        .stat-change {
-            font-size: 14px;
-            padding: 5px 15px;
-            border-radius: 15px;
-            font-weight: bold;
-        }
-
-        .stat-increase {
-            background: #e8f5e8;
-            color: #27ae60;
-        }
-
-        .stat-decrease {
-            background: #ffebee;
-            color: #e74c3c;
-        }
-
-        .chart-container {
-            background: white;
-            border-radius: 15px;
-            padding: 30px;
-            margin-bottom: 30px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-        }
-
-        .chart-title {
-            font-size: 24px;
-            font-weight: bold;
-            color: #2c3e50;
-            margin-bottom: 20px;
-            text-align: center;
-        }
-
-        .chart-placeholder {
-            height: 300px;
-            background: #f8f9fa;
-            border-radius: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #7f8c8d;
-            font-size: 18px;
-        }
-
-        .controls {
-            background: white;
-            border-radius: 15px;
-            padding: 20px;
-            margin-bottom: 30px;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-            display: flex;
-            gap: 15px;
-            align-items: center;
-            flex-wrap: wrap;
-        }
-
-        .btn {
-            padding: 10px 20px;
-            border: none;
-            border-radius: 20px;
-            font-size: 14px;
-            font-weight: bold;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-
-        .btn-primary {
-            background: linear-gradient(45deg, #667eea, #764ba2);
-            color: white;
-        }
-
-        .btn-secondary {
-            background: #95a5a6;
-            color: white;
-        }
-
-        .progress-section {
-            background: white;
-            border-radius: 15px;
-            padding: 30px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-        }
-
-        .progress-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 15px 0;
-            border-bottom: 1px solid #ecf0f1;
-        }
-
-        .progress-item:last-child {
-            border-bottom: none;
-        }
-
-        .progress-label {
-            font-weight: bold;
-            color: #2c3e50;
-        }
-
-        .progress-bar {
-            flex: 1;
-            height: 10px;
-            background: #ecf0f1;
-            border-radius: 5px;
-            margin: 0 20px;
-            overflow: hidden;
-        }
-
-        .progress-fill {
-            height: 100%;
-            background: linear-gradient(45deg, #667eea, #764ba2);
-            transition: width 0.3s ease;
-        }
-
-        .progress-value {
-            font-weight: bold;
-            color: #2c3e50;
-            min-width: 60px;
-            text-align: right;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <!-- 页面标题 -->
-        <div class="header">
-            <h1>📈 数据统计</h1>
-            <p>消防单位建筑数据关联系统统计分析</p>
-        </div>
-
-        <!-- 控制面板 -->
-        <div class="controls">
-            <button class="btn btn-primary" onclick="refreshStats()">🔄 刷新数据</button>
-            <button class="btn btn-secondary" onclick="exportStats()">📥 导出报告</button>
-            <button class="btn btn-secondary" onclick="location.href='/'">🏠 返回首页</button>
-        </div>
-
-        <!-- 统计卡片 -->
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-icon">🏢</div>
-                <div id="supervision-count" class="stat-value">-</div>
-                <div class="stat-label">监督管理系统单位</div>
-                <div class="stat-change stat-increase">+0 本月新增</div>
-            </div>
-
-            <div class="stat-card">
-                <div class="stat-icon">🔍</div>
-                <div id="inspection-count" class="stat-value">-</div>
-                <div class="stat-label">隐患排查系统单位</div>
-                <div class="stat-change stat-increase">+0 本月新增</div>
-            </div>
-
-            <div class="stat-card">
-                <div class="stat-icon">🔗</div>
-                <div id="match-count" class="stat-value">-</div>
-                <div class="stat-label">成功匹配单位</div>
-                <div class="stat-change stat-increase">+0 本月新增</div>
-            </div>
-
-            <div class="stat-card">
-                <div class="stat-icon">📊</div>
-                <div id="match-rate" class="stat-value">-</div>
-                <div class="stat-label">总体匹配率</div>
-                <div class="stat-change stat-increase">+0% 较上月</div>
+    <!-- Stats Cards -->
+    <div class="row" id="stats-cards-container">
+        <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card h-100 shadow-sm border-start-primary">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col me-2">
+                            <div class="text-xs fw-bold text-primary text-uppercase mb-1">总记录</div>
+                            <div id="supervision-count" class="h5 mb-0 fw-bold text-gray-800">...</div>
+                        </div>
+                        <div class="col-auto"><i class="fas fa-database fa-2x text-gray-300"></i></div>
+                    </div>
+                </div>
             </div>
         </div>
-
-        <!-- 匹配进度 -->
-        <div class="progress-section">
-            <h3 class="chart-title">匹配进度统计</h3>
-            
-            <div class="progress-item">
-                <div class="progress-label">精确匹配</div>
-                <div class="progress-bar">
-                    <div id="exact-progress" class="progress-fill" style="width: 0%"></div>
+        <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card h-100 shadow-sm border-start-success">
+                <div class="card-body">
+                     <div class="row no-gutters align-items-center">
+                        <div class="col me-2">
+                            <div class="text-xs fw-bold text-success text-uppercase mb-1">匹配成功</div>
+                            <div id="inspection-count" class="h5 mb-0 fw-bold text-gray-800">...</div>
+                        </div>
+                        <div class="col-auto"><i class="fas fa-check-circle fa-2x text-gray-300"></i></div>
+                    </div>
                 </div>
-                <div id="exact-value" class="progress-value">0</div>
-            </div>
-
-            <div class="progress-item">
-                <div class="progress-label">模糊匹配</div>
-                <div class="progress-bar">
-                    <div id="fuzzy-progress" class="progress-fill" style="width: 0%"></div>
-                </div>
-                <div id="fuzzy-value" class="progress-value">0</div>
-            </div>
-
-            <div class="progress-item">
-                <div class="progress-label">未匹配</div>
-                <div class="progress-bar">
-                    <div id="none-progress" class="progress-fill" style="width: 0%; background: #95a5a6;"></div>
-                </div>
-                <div id="none-value" class="progress-value">0</div>
             </div>
         </div>
-
-        <!-- 审核进度统计 -->
-        <div id="review-progress-section" class="progress-section" style="margin-top:30px;display:none;">
-            <h3 class="chart-title">审核进度统计</h3>
-            <div class="progress-item">
-                <div class="progress-label">待审核</div>
-                <div class="progress-bar">
-                    <div id="pending-progress" class="progress-fill" style="width: 0%; background: #f1c40f;"></div>
+         <div class="col-xl-3 col-md-6 mb-4">
+             <div class="card h-100 shadow-sm border-start-danger">
+                <div class="card-body">
+                     <div class="row no-gutters align-items-center">
+                        <div class="col me-2">
+                            <div class="text-xs fw-bold text-danger text-uppercase mb-1">未匹配</div>
+                            <div id="match-count" class="h5 mb-0 fw-bold text-gray-800">...</div>
+                        </div>
+                        <div class="col-auto"><i class="fas fa-times-circle fa-2x text-gray-300"></i></div>
+                    </div>
                 </div>
-                <div id="pending-value" class="progress-value">0</div>
-            </div>
-            <div class="progress-item">
-                <div class="progress-label">已确认</div>
-                <div class="progress-bar">
-                    <div id="approved-progress" class="progress-fill" style="width: 0%; background: #27ae60;"></div>
-                </div>
-                <div id="approved-value" class="progress-value">0</div>
-            </div>
-            <div class="progress-item">
-                <div class="progress-label">已拒绝</div>
-                <div class="progress-bar">
-                    <div id="rejected-progress" class="progress-fill" style="width: 0%; background: #e74c3c;"></div>
-                </div>
-                <div id="rejected-value" class="progress-value">0</div>
             </div>
         </div>
-
-        <!-- 图表区域 -->
-        <div class="chart-container">
-            <h3 class="chart-title">匹配趋势图</h3>
-            <div class="chart-placeholder">
-                📈 图表功能开发中，敬请期待
-            </div>
-        </div>
-
-        <div class="chart-container">
-            <h3 class="chart-title">匹配类型分布</h3>
-            <div class="chart-placeholder">
-                🥧 饼图功能开发中，敬请期待
+        <div class="col-xl-3 col-md-6 mb-4">
+             <div class="card h-100 shadow-sm border-start-info">
+                <div class="card-body">
+                     <div class="row no-gutters align-items-center">
+                        <div class="col me-2">
+                            <div class="text-xs fw-bold text-info text-uppercase mb-1">匹配率</div>
+                            <div id="match-rate" class="h5 mb-0 fw-bold text-gray-800">...</div>
+                        </div>
+                        <div class="col-auto"><i class="fas fa-percentage fa-2x text-gray-300"></i></div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
+    
+    <!-- Progress and Charts -->
+    <div class="row">
+        <div class="col-lg-6 mb-4">
+            <div class="card shadow-sm h-100">
+                <div class="card-header py-3">
+                    <h6 class="m-0 fw-bold text-primary">匹配类型分布</h6>
+                </div>
+                <div class="card-body" id="match-type-distribution">
+                    <!-- Progress bars will be injected here by JS -->
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-6 mb-4">
+            <div class="card shadow-sm h-100">
+                <div class="card-header py-3">
+                    <h6 class="m-0 fw-bold text-primary">审核状态分布</h6>
+                </div>
+                <div class="card-body" id="review-chart-container">
+                    <canvas id="reviewStatusChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
 
-    <script>
-        // 页面加载时自动加载统计数据
-        document.addEventListener('DOMContentLoaded', function() {
-            loadStatistics();
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    let reviewStatusChart = null;
+
+    document.addEventListener('DOMContentLoaded', function () {
+        loadStatistics();
+        setInterval(loadStatistics, 30000);
+    });
+
+    async function loadStatistics() {
+        try {
+            const response = await fetch('/api/optimized_match_statistics');
+            if (!response.ok) throw new Error('Network response was not ok');
+            const data = await response.json();
+            updateUI(data);
+        } catch (error) {
+            console.error("Failed to load statistics:", error);
+            // 在UI上显示错误
+            document.getElementById('stats-cards-container').innerHTML = `<div class="col"><div class="alert alert-danger">加载统计数据失败: ${error.message}</div></div>`;
+        }
+    }
+
+    function formatNumber(num) {
+        return (num !== null && num !== undefined) ? new Intl.NumberFormat('en-US').format(num) : '0';
+    }
+
+    function updateUI(stats) {
+        // 修正：确保使用正确的ID填充卡片
+        document.getElementById('supervision-count').textContent = formatNumber(stats.total_results);
+        document.getElementById('inspection-count').textContent = formatNumber(stats.matched_results);
+        document.getElementById('match-count').textContent = formatNumber(stats.unmatched_results);
+        document.getElementById('match-rate').textContent = `${stats.match_rate || 0}%`;
+
+        const matchTypes = stats.match_type_stats || [];
+        const total = stats.total_results || 1;
+        
+        const matchTypeDistribution = document.getElementById('match-type-distribution');
+        if (matchTypeDistribution && matchTypes.length > 0) {
+            matchTypeDistribution.innerHTML = ''; 
+            updateProgressBar(matchTypeDistribution, '精确匹配', 'exact', stats, 'primary');
+            updateProgressBar(matchTypeDistribution, '模糊匹配', 'fuzzy', stats, 'info');
+            updateProgressBar(matchTypeDistribution, '未匹配', 'none', stats, 'secondary');
+        } else if (matchTypeDistribution) {
+            matchTypeDistribution.innerHTML = '<p class="text-muted text-center p-4">暂无匹配类型分布数据</p>';
+        }
+
+        const reviewStats = stats.review_stats || [];
+        const reviewChartContainer = document.getElementById('review-chart-container');
+        if (reviewChartContainer && reviewStats.length > 0) {
+            reviewChartContainer.style.display = 'block';
+            createReviewChart(reviewStats);
+        } else if (reviewChartContainer) {
+            reviewChartContainer.innerHTML = '<p class="text-muted text-center p-4">暂无审核状态分布数据</p>';
+        }
+        
+        const lastUpdatedEl = document.getElementById('last-updated');
+        if (lastUpdatedEl) {
+             lastUpdatedEl.textContent = `最后更新于: ${new Date(stats.last_updated).toLocaleString()}`;
+        }
+    }
+
+    function updateProgressBar(container, label, typePrefix, stats, color) {
+         const relevantStats = (stats.match_type_stats || []).filter(s => s._id && s._id.startsWith(typePrefix));
+         const count = relevantStats.reduce((sum, s) => sum + s.count, 0);
+         const total = stats.total_results || 1;
+         const percent = total > 0 ? ((count / total) * 100) : 0;
+
+         const progressHtml = `
+            <div class="mb-3">
+                <h4 class="small fw-bold">${label} <span class="float-end">${formatNumber(count)}</span></h4>
+                <div class="progress" style="height: 20px;">
+                    <div class="progress-bar bg-${color}" role="progressbar" style="width: ${percent.toFixed(1)}%" aria-valuenow="${percent}" aria-valuemin="0" aria-valuemax="100">${percent.toFixed(1)}%</div>
+                </div>
+            </div>`;
+        container.innerHTML += progressHtml;
+    }
+
+    function createReviewChart(reviewData) {
+        const ctx = document.getElementById('reviewStatusChart').getContext('2d');
+        const labels = reviewData.map(item => item._id);
+        const data = reviewData.map(item => item.count);
+
+        const backgroundColors = labels.map(label => {
+            if (label === 'approved') return 'rgba(40, 167, 69, 0.7)';
+            if (label === 'rejected') return 'rgba(220, 53, 69, 0.7)';
+            if (label === 'pending') return 'rgba(255, 193, 7, 0.7)';
+            return 'rgba(108, 117, 125, 0.7)';
         });
 
-        // 加载统计数据
-        async function loadStatistics() {
-            try {
-                const response = await fetch('/api/stats');
-                const data = await response.json();
-
-                if (response.ok) {
-                    updateStatistics(data);
-                } else {
-                    console.error('加载统计数据失败:', data.error);
-                }
-            } catch (error) {
-                console.error('请求失败:', error);
-            }
-        }
-
-        // 更新统计显示
-        function updateStatistics(data) {
-            // 更新基础统计
-            if (data.data_sources) {
-                document.getElementById('supervision-count').textContent = 
-                    (data.data_sources.supervision_count || 0).toLocaleString();
-                document.getElementById('inspection-count').textContent = 
-                    (data.data_sources.inspection_count || 0).toLocaleString();
-                document.getElementById('match-count').textContent = 
-                    (data.data_sources.match_results_count || 0).toLocaleString();
-            }
-
-            // 计算匹配率
-            const totalSupervision = data.data_sources?.supervision_count || 0;
-            const totalMatches = data.data_sources?.match_results_count || 0;
-            const matchRate = totalSupervision > 0 ? (totalMatches / totalSupervision * 100).toFixed(1) : 0;
-            document.getElementById('match-rate').textContent = matchRate + '%';
-
-            // 更新匹配类型统计
-            if (data.matching_stats && data.matching_stats.stats_by_type) {
-                const stats = data.matching_stats.stats_by_type;
-                let exactCount = 0;
-                let fuzzyCount = 0;
-                let noneCount = 0;
-
-                stats.forEach(stat => {
-                    switch (stat._id) {
-                        case 'exact':
-                            exactCount = stat.count;
-                            break;
-                        case 'fuzzy':
-                            fuzzyCount = stat.count;
-                            break;
-                        case 'none':
-                            noneCount = stat.count;
-                            break;
+        if (reviewStatusChart) {
+            reviewStatusChart.data.labels = labels;
+            reviewStatusChart.data.datasets[0].data = data;
+            reviewStatusChart.data.datasets[0].backgroundColor = backgroundColors;
+            reviewStatusChart.update();
+        } else {
+            reviewStatusChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: data,
+                        backgroundColor: backgroundColors,
+                        borderColor: '#fff',
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                        }
                     }
-                });
-
-                const total = exactCount + fuzzyCount + noneCount;
-
-                // 更新进度条
-                if (total > 0) {
-                    const exactPercent = (exactCount / total * 100);
-                    const fuzzyPercent = (fuzzyCount / total * 100);
-                    const nonePercent = (noneCount / total * 100);
-
-                    document.getElementById('exact-progress').style.width = exactPercent + '%';
-                    document.getElementById('fuzzy-progress').style.width = fuzzyPercent + '%';
-                    document.getElementById('none-progress').style.width = nonePercent + '%';
-
-                    document.getElementById('exact-value').textContent = exactCount.toLocaleString();
-                    document.getElementById('fuzzy-value').textContent = fuzzyCount.toLocaleString();
-                    document.getElementById('none-value').textContent = noneCount.toLocaleString();
                 }
-            }
-
-            // 审核进度统计
-            const reviewStats = data.matching_stats && data.matching_stats.review_stats ? data.matching_stats.review_stats : null;
-            const section = document.getElementById('review-progress-section');
-            if(reviewStats && reviewStats.length>0){
-                let pending=0, approved=0, rejected=0, total=0;
-                reviewStats.forEach(stat=>{
-                    if(stat._id==='pending'||stat._id===undefined) pending=stat.count;
-                    if(stat._id==='approved') approved=stat.count;
-                    if(stat._id==='rejected') rejected=stat.count;
-                });
-                total = pending+approved+rejected;
-                if(total>0){
-                    section.style.display='block';
-                    document.getElementById('pending-progress').style.width = (pending/total*100).toFixed(1)+'%';
-                    document.getElementById('approved-progress').style.width = (approved/total*100).toFixed(1)+'%';
-                    document.getElementById('rejected-progress').style.width = (rejected/total*100).toFixed(1)+'%';
-                    document.getElementById('pending-value').textContent = pending;
-                    document.getElementById('approved-value').textContent = approved;
-                    document.getElementById('rejected-value').textContent = rejected;
-                }else{
-                    section.style.display='none';
-                }
-            }else{
-                section.style.display='none';
-            }
+            });
         }
-
-        // 刷新统计数据
-        function refreshStats() {
-            loadStatistics();
-            
-            // 显示刷新提示
-            const btn = event.target;
-            const originalText = btn.textContent;
-            btn.textContent = '🔄 刷新中...';
-            btn.disabled = true;
-            
-            setTimeout(() => {
-                btn.textContent = originalText;
-                btn.disabled = false;
-            }, 2000);
-        }
-
-        // 导出统计报告
-        function exportStats() {
-            alert('导出功能开发中，敬请期待！');
-        }
-    </script>
-</body>
-</html> 
+    }
+</script>
+{% endblock %} 

@@ -22,5 +22,9 @@
     "region_grouping": true,
     "fuzzy_threshold": 0.8,
     "exact_match_first": true
+  },
+  "logging": {
+    "level": "INFO",
+    "log_file": "logs/optimized_matching.log"
   }
 }

@@ -11,8 +11,9 @@ import json
 from typing import Dict, List, Optional, Union, Tuple
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from threading import Lock
+from threading import Lock, Semaphore
 import time
+import functools
 
 from .exact_matcher import ExactMatcher, MatchResult
 from .fuzzy_matcher import FuzzyMatcher
@@ -20,7 +21,9 @@ from .optimized_fuzzy_matcher import OptimizedFuzzyMatcher, FuzzyMatchResult
 from .enhanced_fuzzy_matcher import EnhancedFuzzyMatcher, EnhancedFuzzyMatchResult
 from .graph_matcher import GraphMatcher
 from .prefilter_system import PrefilterSystem
+from ..database.connection import DatabaseManager
 from src.utils.helpers import batch_iterator, generate_match_id, format_timestamp
+from src.utils.config import ConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -131,42 +134,39 @@ class OptimizedMatchProgress:
 class OptimizedMatchProcessor:
     """优化的匹配处理器"""
     
-    def __init__(self, db_manager, config: Dict):
+    def __init__(self, db_manager, config_manager: ConfigManager):
         """
         初始化优化匹配处理器
         
         Args:
             db_manager: 数据库管理器
-            config: 匹配配置
+            config_manager: 配置管理器
         """
         self.db_manager = db_manager
-        self.config = config
+        self.config_manager = config_manager
+        config = config_manager.get_matching_config()
+        perf_config = config_manager.get_performance_config().get('parallel_processing', {})
         
-        # 初始化匹配器
+        # 初始化非资源密集型匹配器
         self.exact_matcher = ExactMatcher(config)
         self.fuzzy_matcher = FuzzyMatcher(config)
         self.optimized_fuzzy_matcher = OptimizedFuzzyMatcher(config)
-        self.enhanced_fuzzy_matcher = EnhancedFuzzyMatcher(config)  # 新增增强模糊匹配器
-        self.prefilter_system = PrefilterSystem(db_manager.get_db()) # 初始化预过滤器
+        self.enhanced_fuzzy_matcher = EnhancedFuzzyMatcher(config)
+        self.prefilter_system = PrefilterSystem(db_manager.get_db())
         
-        # 图匹配器配置
+        # 图匹配器配置 - 不再在此处初始化
         self.graph_config = config.get('graph_matching', {})
         self.use_graph_matcher = self.graph_config.get('enabled', True)
-        if self.use_graph_matcher:
-            logger.info("图匹配器模块已启用。")
-            self.graph_matcher = GraphMatcher(self.db_manager.get_db(), self.config)
-            # 构建一个包含少量数据的热启动图
-            initial_build_limit = self.graph_config.get('initial_build_limit', 5000)
-            self.graph_matcher.build_graph(limit=initial_build_limit)
+        self.graph_matcher = None # 显式设置为空
         
         # 批处理配置
         self.batch_config = config.get('batch_processing', {})
         self.batch_size = self.batch_config.get('batch_size', 100)
-        self.max_workers = self.batch_config.get('max_workers', 4)
+        self.max_workers = perf_config.get('max_workers', 4)
         self.timeout = self.batch_config.get('timeout', 300)
         
         # 任务管理
-        self.active_tasks = {}  # task_id -> OptimizedMatchProgress
+        self.active_tasks = {}
         self.tasks_lock = Lock()
     
     def _safe_str(self, value, default: str = '') -> str:
@@ -251,11 +251,6 @@ class OptimizedMatchProcessor:
         try:
             logger.info(f"开始执行优化匹配任务: {task_id}, 模式: {mode}")
             
-            # 获取目标数据（消防监督管理系统）- 不再全量加载
-            # target_records = self._load_target_records()
-            # logger.info(f"加载目标数据（消防监督管理系统）: {len(target_records)} 条")
-            
-            # 根据模式获取需要处理的源数据（安全排查系统）
             if mode == MatchingMode.INCREMENTAL:
                 source_records_generator = self._get_unmatched_records_generator()
             else:
@@ -263,35 +258,38 @@ class OptimizedMatchProcessor:
             
             batch_count = 0
             
-            # 分批处理
             for source_batch in source_records_generator:
                 if not source_batch:
                     break
+                
+                # --- 终极修复：在每个批次开始时，重新初始化GraphMatcher ---
+                if self.use_graph_matcher:
+                    logger.info("批处理级资源管理：重新创建图匹配器...")
+                    self.graph_matcher = GraphMatcher(self.db_manager.get_db(), self.config_manager.get_matching_config())
+                    # 可以选择为每个批次的图进行小的热启动
+                    initial_build_limit = self.graph_config.get('initial_build_limit', 1000)
+                    self.graph_matcher.build_graph(limit=initial_build_limit)
+                # ---------------------------------------------------------
                 
                 batch_count += 1
                 progress.set_current_batch(batch_count)
                 logger.info(f"处理第 {batch_count} 批数据: {len(source_batch)} 条")
                 
-                # 检查任务是否被停止 - 在处理批次之前检查
                 if progress.status == "stopped":
                     logger.info(f"任务停止信号检测到，停止处理新批次: {task_id}")
                     break
                 
-                # 处理当前批次 (不再传入 target_records)
                 self._process_optimized_batch(task_id, source_batch, match_type, mode)
                 
-                # 检查任务是否在批次处理过程中被停止
                 if progress.status == "stopped":
                     logger.info(f"任务在批次处理过程中被停止: {task_id}")
                     break
             
-            # 任务完成 - 确保最后的数据保存
             if progress.status != "stopped":
                 progress.set_status("completed")
                 logger.info(f"优化匹配任务完成: {task_id}")
             else:
                 logger.info(f"优化匹配任务已停止: {task_id}")
-                # 强制最终数据保存检查
                 final_save_count = self._force_final_save_check()
                 logger.info(f"任务停止时最终保存检查完成: 保存了 {final_save_count} 条记录")
             
@@ -395,65 +393,60 @@ class OptimizedMatchProcessor:
             return
         
         batch_results = []
-        task_stopped = False
-        
-        logger.info(f"🔄 开始处理批次: {len(source_batch)} 条记录，模式: {mode}")
-        
-        for source_record in source_batch:
-            try:
-                # 检查任务状态
-                if progress.status == "stopped":
-                    task_stopped = True
-                    logger.info(f"🛑 任务停止信号检测到，当前批次已处理 {len(batch_results)} 条记录")
-                    break
-                
-                # 处理单条记录 (不再传入 target_records)
-                result = self._process_optimized_single_record(
-                    source_record, match_type, mode
-                )
-                
-                # 详细记录结果处理
-                if result:
-                    operation = result.get('operation', 'unknown')
-                    unit_name = source_record.get('UNIT_NAME', 'Unknown')
-                    
-                    if operation == 'skipped':
-                        logger.info(f"📝 记录跳过: {unit_name} - {result.get('reason', 'unknown')}")
+        logger.info(f"🔄 开始并行处理批次: {len(source_batch)} 条记录，模式: {mode}")
+
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            # functools.partial 用于向工作函数传递固定参数
+            # 我们将把实例 self 传递给工作函数，确保所有线程共享同一个db_manager
+            worker_func = functools.partial(self._worker, match_type=match_type, mode=mode)
+            
+            future_to_record = {executor.submit(worker_func, record): record for record in source_batch}
+            
+            for future in as_completed(future_to_record):
+                source_record = future_to_record[future]
+                try:
+                    result = future.result()
+                    if result:
+                        operation = result.get('operation', 'unknown')
+                        unit_name = source_record.get('UNIT_NAME', 'Unknown')
+                        
+                        if operation == 'skipped':
+                            logger.info(f"📝 记录跳过: {unit_name} - {result.get('reason', 'unknown')}")
+                        else:
+                            batch_results.append(result)
+                            logger.info(f"📝 记录添加到批次: {unit_name} - 操作: {operation}")
+                        
+                        # 更新进度
+                        if operation == 'matched':
+                            progress.update_progress(processed=1, matched=1, last_id=str(source_record.get('_id')))
+                        elif operation == 'updated':
+                            progress.update_progress(processed=1, updated=1, last_id=str(source_record.get('_id')))
+                        elif operation == 'skipped':
+                            progress.update_progress(processed=1, skipped=1, last_id=str(source_record.get('_id')))
+                        else:
+                            progress.update_progress(processed=1, last_id=str(source_record.get('_id')))
                     else:
-                        batch_results.append(result)
-                        logger.info(f"📝 记录添加到批次: {unit_name} - 操作: {operation}")
+                        logger.warning(f"📝 记录处理失败: {source_record.get('UNIT_NAME', 'Unknown')}")
+                        progress.update_progress(processed=1, error=1, last_id=str(source_record.get('_id')))
+                except Exception as exc:
+                    # 终极日志记录：手动格式化堆栈，并对内容进行消毒，防止日志系统自身崩溃
+                    import traceback
+                    import reprlib
                     
-                    # 更新进度
-                    if operation == 'matched':
-                        progress.update_progress(
-                            processed=1, matched=1, 
-                            last_id=str(source_record.get('_id'))
-                        )
-                    elif operation == 'updated':
-                        progress.update_progress(
-                            processed=1, updated=1,
-                            last_id=str(source_record.get('_id'))
-                        )
-                    elif operation == 'skipped':
-                        progress.update_progress(
-                            processed=1, skipped=1,
-                            last_id=str(source_record.get('_id'))
-                        )
-                    else:
-                        progress.update_progress(
-                            processed=1,
-                            last_id=str(source_record.get('_id'))
-                        )
-                else:
-                    logger.warning(f"📝 记录处理失败: {source_record.get('UNIT_NAME', 'Unknown')}")
-                    progress.update_progress(
-                        processed=1, error=1,
-                        last_id=str(source_record.get('_id'))
-                    )
+                    # 使用reprlib确保即使堆栈信息中有异常字符，也能安全地记录
+                    safe_exc_str = reprlib.repr(str(exc))
                     
-            except Exception as e:
-                logger.error(f"处理记录失败: {str(e)}")
-                progress.update_progress(processed=1, error=1)
+                    logger.error(f"处理记录 {source_record.get('_id')} 时产生异常: {safe_exc_str}")
+                    
+                    # 手动获取并记录堆栈
+                    try:
+                        tb_str = traceback.format_exc()
+                        safe_tb_str = reprlib.repr(tb_str)
+                        logger.error(f"详细错误堆栈: {safe_tb_str}")
+                    except Exception as log_exc:
+                        logger.error(f"记录堆栈信息时再次发生错误: {reprlib.repr(str(log_exc))}")
+
+                    progress.update_progress(processed=1, error=1)
         
         # 批量保存结果 - 无论是否停止都要保存已处理的结果
         logger.info(f"💾 准备保存批次结果: {len(batch_results)} 条记录")
@@ -467,14 +460,14 @@ class OptimizedMatchProcessor:
             
             save_success = self._batch_save_optimized_results(batch_results)
             if save_success:
-                if task_stopped:
+                if progress.status == "stopped":
                     logger.info(f"✅ 任务停止前成功保存 {len(batch_results)} 条匹配结果")
                 else:
                     logger.info(f"✅ 批次处理完成，成功保存 {len(batch_results)} 条匹配结果")
             else:
                 logger.error(f"❌ 保存 {len(batch_results)} 条匹配结果失败")
         else:
-            if task_stopped:
+            if progress.status == "stopped":
                 logger.warning("⚠️ 任务停止，当前批次无需保存的匹配结果")
             else:
                 logger.warning("⚠️ 批次处理完成，但没有生成任何匹配结果")
@@ -483,23 +476,51 @@ class OptimizedMatchProcessor:
             logger.info(f"🔍 调试信息: 批次大小={len(source_batch)}, 结果数量={len(batch_results)}, 模式={mode}")
             
         # 如果任务停止，标记任务状态
-        if task_stopped:
+        if progress.status == "stopped":
             logger.info(f"任务在批次处理过程中被停止: {task_id}")
             progress.set_status("stopped")
     
+    def _worker(self, source_record: Dict, match_type: str, mode: str) -> Optional[Dict]:
+        """
+        线程池的工作函数。
+        这个方法可以直接访问 self，包括 self.db_manager, self.prefilter_system 等。
+        由于这是实例方法，它自然可以访问 self.db_manager，而 self.db_manager 是单例。
+        因此，所有线程都将通过同一个 DatabaseManager 实例与数据库交互。
+        """
+        return self._process_optimized_single_record(source_record, match_type, mode)
+
     def _process_optimized_single_record(self, source_record: Dict, 
                                        match_type: str, mode: str) -> Optional[Dict]:
-        """处理优化的单条记录"""
+        """处理优化的单条记录（核心逻辑）"""
+        # 终极防御：在任何处理开始前，对所有可能用到的字段进行类型强转，防止C扩展崩溃
         try:
-            source_id = str(source_record.get('_id'))
+            safe_source_record = {
+                'UNIT_NAME': str(source_record.get('UNIT_NAME', '')),
+                'ADDRESS': str(source_record.get('ADDRESS', '')),
+                'LEGAL_PEOPLE': str(source_record.get('LEGAL_PEOPLE', '')),
+                'CREDIT_CODE': str(source_record.get('CREDIT_CODE', '')),
+                'SECURITY_PEOPLE': str(source_record.get('SECURITY_PEOPLE', '')),
+                '_id': source_record.get('_id') # ID保持原样
+            }
+        except Exception as e:
+            logger.error(f"处理记录 {source_record.get('_id')} 时数据预处理失败: {e}")
+            return None # 无法安全处理此记录，跳过
+
+        try:
+            # 在进行任何操作前，首先记录正在处理的记录信息，以定位"毒丸数据"
+            unit_name_for_log = safe_source_record.get('UNIT_NAME', 'NAME_NOT_FOUND')
+            source_id_for_log = safe_source_record.get('_id', 'ID_NOT_FOUND')
+            logger.info(f"💣 开始处理记录: ID={source_id_for_log}, 名称='{unit_name_for_log}'")
+
+            source_id = str(safe_source_record.get('_id'))
             
             # 1. 使用预过滤系统获取候选记录
-            target_candidates = self.prefilter_system.get_candidates(source_record)
+            target_candidates = self.prefilter_system.get_candidates(safe_source_record)
             if not target_candidates:
-                logger.info(f"预过滤未能找到任何候选记录: {source_record.get('UNIT_NAME', 'Unknown')}")
-                return self._format_optimized_no_match_result(source_record)
+                logger.info(f"预过滤未能找到任何候选记录: {safe_source_record.get('UNIT_NAME', 'Unknown')}")
+                return self._format_optimized_no_match_result(safe_source_record)
             
-            logger.info(f"为 {source_record.get('UNIT_NAME', 'Unknown')} 找到 {len(target_candidates)} 个候选。")
+            logger.info(f"为 {safe_source_record.get('UNIT_NAME', 'Unknown')} 找到 {len(target_candidates)} 个候选。")
 
             # 检查是否已存在匹配结果
             existing_result = self._get_existing_match_result(source_id)
@@ -509,19 +530,19 @@ class OptimizedMatchProcessor:
             
             # 精确匹配
             if match_type in ['exact', 'both']:
-                exact_result = self.exact_matcher.match_single_record(source_record, target_candidates)
+                exact_result = self.exact_matcher.match_single_record(safe_source_record, target_candidates)
                 
                 if exact_result.matched:
                     match_result = self._format_optimized_match_result(
-                        exact_result, 'exact', source_record
+                        exact_result, 'exact', safe_source_record
                     )
-                    logger.info(f"信用代码精确匹配成功: {source_record.get('UNIT_NAME', 'Unknown')}")
+                    logger.info(f"信用代码精确匹配成功: {safe_source_record.get('UNIT_NAME', 'Unknown')}")
             
             # 模糊匹配（仅在精确匹配失败或指定模糊匹配时进行）
             if match_type in ['fuzzy', 'both'] and not match_result:
                 # 优先使用增强的模糊匹配器（解决匹配幻觉问题）
                 enhanced_fuzzy_result = self.enhanced_fuzzy_matcher.match_single_record(
-                    source_record, target_candidates
+                    safe_source_record, target_candidates
                 )
                 
                 if enhanced_fuzzy_result.matched:
@@ -530,12 +551,12 @@ class OptimizedMatchProcessor:
                         logger.info(f"触发图匹配二次验证，当前分数: {enhanced_fuzzy_result.similarity_score:.3f}")
                         
                         # 动态将当前比较的记录添加到图中，确保它们存在
-                        self.graph_matcher.add_unit_to_graph(source_record, 'xfaqpc', 'UNIT_NAME', 'UNIT_ADDRESS', 'LEGAL_PEOPLE')
+                        self.graph_matcher.add_unit_to_graph(safe_source_record, 'xfaqpc', 'UNIT_NAME', 'UNIT_ADDRESS', 'LEGAL_PEOPLE')
                         if enhanced_fuzzy_result.target_record:
                             self.graph_matcher.add_unit_to_graph(enhanced_fuzzy_result.target_record, 'xxj', 'dwmc', 'dwdz', 'fddbr')
                         
                         graph_score = self.graph_matcher.calculate_graph_score(
-                            source_record, 
+                            safe_source_record, 
                             enhanced_fuzzy_result.target_record
                         )
                         
@@ -543,22 +564,25 @@ class OptimizedMatchProcessor:
                             original_score = enhanced_fuzzy_result.similarity_score
                             enhanced_fuzzy_result.similarity_score = 0.98  # 提升分数
                             warning_msg = f"图匹配增强: 共享属性发现，分数从 {original_score:.3f} 提升至 0.98"
-                            enhanced_fuzzy_result.match_warnings.append(warning_msg)
-                            logger.info(f"✅ {warning_msg} for {source_record.get('UNIT_NAME')}")
+                            # 修正：将警告信息添加到explanation对象中
+                            if not enhanced_fuzzy_result.explanation:
+                                enhanced_fuzzy_result.explanation = {'positive': [], 'negative': []}
+                            enhanced_fuzzy_result.explanation['positive'].append(warning_msg)
+                            logger.info(f"✅ {warning_msg} for {safe_source_record.get('UNIT_NAME')}")
 
                     match_result = self._format_optimized_match_result(
-                        enhanced_fuzzy_result, 'fuzzy_enhanced', source_record
+                        enhanced_fuzzy_result, 'fuzzy_enhanced', safe_source_record
                     )
-                    logger.info(f"增强模糊匹配成功: {source_record.get('UNIT_NAME', 'Unknown')}, "
+                    logger.info(f"增强模糊匹配成功: {safe_source_record.get('UNIT_NAME', 'Unknown')}, "
                                f"相似度: {enhanced_fuzzy_result.similarity_score:.3f}")
                     
-                    # 记录匹配警告
-                    if enhanced_fuzzy_result.match_warnings:
-                        logger.warning(f"匹配警告: {', '.join(enhanced_fuzzy_result.match_warnings)}")
+                    # 记录匹配警告 (修正：使用explanation对象)
+                    if enhanced_fuzzy_result.explanation and enhanced_fuzzy_result.explanation.get('negative'):
+                        logger.warning(f"匹配警告: {', '.join(enhanced_fuzzy_result.explanation['negative'])}")
                 else:
                     # 如果增强模糊匹配失败，尝试使用优化的模糊匹配器作为备用
                     optimized_fuzzy_result = self.optimized_fuzzy_matcher.match_single_record_optimized(
-                        source_record, target_candidates
+                        safe_source_record, target_candidates
                     )
                     
                     if optimized_fuzzy_result.get('matched', False):
@@ -566,21 +590,21 @@ class OptimizedMatchProcessor:
                         fuzzy_result = FuzzyMatchResult(
                             matched=True,
                             similarity_score=optimized_fuzzy_result.get('similarity_score', 0.0),
-                            source_record=source_record,
+                            source_record=safe_source_record,
                             target_record=optimized_fuzzy_result.get('target_record'),
                             match_details=optimized_fuzzy_result.get('match_details', {})
                         )
                         
                         match_result = self._format_optimized_match_result(
-                            fuzzy_result, 'fuzzy_optimized', source_record
+                            fuzzy_result, 'fuzzy_optimized', safe_source_record
                         )
-                        logger.info(f"优化模糊匹配成功: {source_record.get('UNIT_NAME', 'Unknown')}, "
+                        logger.info(f"优化模糊匹配成功: {safe_source_record.get('UNIT_NAME', 'Unknown')}, "
                                    f"候选数: {optimized_fuzzy_result.get('match_details', {}).get('candidates_count', 0)}")
             
             # 如果没有匹配结果，创建未匹配记录
             if not match_result:
-                match_result = self._format_optimized_no_match_result(source_record)
-                logger.info(f"未找到匹配: {source_record.get('UNIT_NAME', 'Unknown')}")
+                match_result = self._format_optimized_no_match_result(safe_source_record)
+                logger.info(f"未找到匹配: {safe_source_record.get('UNIT_NAME', 'Unknown')}")
             
             # 增量模式逻辑修复：只有在没有找到新匹配且已存在结果时才跳过
             if mode == MatchingMode.INCREMENTAL and existing_result:
@@ -591,7 +615,7 @@ class OptimizedMatchProcessor:
                     
                     # 如果匹配到相同的目标记录，则跳过
                     if existing_matched_id == new_matched_id:
-                        logger.info(f"增量模式跳过: {source_record.get('UNIT_NAME', 'Unknown')} (已存在相同匹配)")
+                        logger.info(f"增量模式跳过: {safe_source_record.get('UNIT_NAME', 'Unknown')} (已存在相同匹配)")
                         return {
                             'operation': 'skipped',
                             'source_id': source_id,
@@ -599,20 +623,20 @@ class OptimizedMatchProcessor:
                         }
                     else:
                         # 找到了不同的匹配目标，更新现有记录
-                        logger.info(f"增量模式更新: {source_record.get('UNIT_NAME', 'Unknown')} (发现更好的匹配)")
+                        logger.info(f"增量模式更新: {safe_source_record.get('UNIT_NAME', 'Unknown')} (发现更好的匹配)")
                         match_result['operation'] = 'updated'
                         match_result['previous_result_id'] = existing_result.get('_id')
                         return match_result
                 else:
                     # 现有记录是未匹配，但现在找到了匹配
                     if match_result and match_result.get('match_status') == 'matched':
-                        logger.info(f"增量模式更新: {source_record.get('UNIT_NAME', 'Unknown')} (从未匹配变为匹配)")
+                        logger.info(f"增量模式更新: {safe_source_record.get('UNIT_NAME', 'Unknown')} (从未匹配变为匹配)")
                         match_result['operation'] = 'updated'
                         match_result['previous_result_id'] = existing_result.get('_id')
                         return match_result
                     else:
                         # 都是未匹配状态，跳过
-                        logger.info(f"增量模式跳过: {source_record.get('UNIT_NAME', 'Unknown')} (未匹配状态未变)")
+                        logger.info(f"增量模式跳过: {safe_source_record.get('UNIT_NAME', 'Unknown')} (未匹配状态未变)")
                         return {
                             'operation': 'skipped',
                             'source_id': source_id,
@@ -640,6 +664,7 @@ class OptimizedMatchProcessor:
         result = {
             'primary_record_id': source_record.get('_id'),
             'primary_system': 'inspection',
+            'primary_credit_code': source_record.get('CREDIT_CODE', ''),
             'unit_name': source_record.get('UNIT_NAME', ''),
             'unit_address': source_record.get('ADDRESS', ''),
             'unit_type': source_record.get('UNIT_TYPE', ''),
@@ -737,15 +762,13 @@ class OptimizedMatchProcessor:
             str(result['matched_record_id'])
         )
         
-        # 添加审核信息 - 设置默认值
-        if match_type == 'exact':
-            # 精确匹配默认无需人工审核
-            result['review_status'] = 'pending'  # 可以设为approved，但为了一致性设为pending
+        # 添加审核信息 - 根据置信度设置默认值
+        if result['match_confidence'] == 'high' or (result.get('similarity_score', 0) > 0.99 and match_type != 'none'):
+             result['review_status'] = 'approved'
+             result['review_notes'] = '系统自动审核通过 (高置信度)'
         else:
-            # 模糊匹配需要人工审核
             result['review_status'] = 'pending'
-        
-        result['review_notes'] = ''
+
         result['reviewer'] = ''
         result['review_time'] = None
         
@@ -874,6 +897,7 @@ class OptimizedMatchProcessor:
             # 主记录信息（安全排查系统）
             'primary_record_id': source_record.get('_id'),
             'primary_system': 'inspection',
+            'primary_credit_code': source_record.get('CREDIT_CODE', ''),
             'unit_name': source_record.get('UNIT_NAME', ''),
             'unit_address': source_record.get('ADDRESS', ''),
             'unit_type': source_record.get('UNIT_TYPE', ''),
@@ -1279,6 +1303,20 @@ class OptimizedMatchProcessor:
             result = collection.find_one({'match_id': match_id})
             
             if result:
+                # 注入人工审核信息到explanation中
+                if result.get('review_status') and result.get('review_status') != 'pending':
+                    if 'explanation' not in result.get('match_details', {}):
+                        result['match_details']['explanation'] = {'positive': [], 'negative': []}
+                    
+                    review_note = f"人工审核: {result['review_status']}"
+                    if result.get('review_notes'):
+                        review_note += f" (理由: {result['review_notes']})"
+                    
+                    if result['review_status'] == 'approved':
+                        result['match_details']['explanation']['positive'].insert(0, review_note)
+                    elif result['review_status'] == 'rejected':
+                        result['match_details']['explanation']['negative'].insert(0, review_note)
+
                 # 转换ObjectId为字符串
                 from src.utils.helpers import convert_objectid_to_str
                 return convert_objectid_to_str(result)

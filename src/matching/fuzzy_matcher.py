@@ -540,84 +540,64 @@ class FuzzyMatcher:
     def _calculate_record_similarity(self, source_record: Dict, target_record: Dict) -> Tuple[float, Dict]:
         """
         计算两条记录的相似度
-        
-        Args:
-            source_record: 源记录
-            target_record: 目标记录
-            
-        Returns:
-            Tuple[float, Dict]: (总相似度分数, 各字段相似度详情)
         """
         field_similarities = {}
         weighted_score = 0.0
         total_weight = 0.0
+        
         # 动态权重分配准备
         base_weights = {
-            'unit_name': 0.4,
-            'address': 0.4,
-            'legal_person': 0.1,
-            'security_person': 0.1
+            'unit_name': 0.4, 'address': 0.4,
+            'legal_person': 0.1, 'security_person': 0.1
         }
-        available_fields = []
+        available_fields = [
+            name for name, cfg in self.fields_config.items()
+            if name == 'unit_name' or (source_record.get(cfg['source_field']) and target_record.get(cfg.get('target_field')))
+        ]
+        
+        total_base_weight = sum(base_weights[k] for k in available_fields)
+        weights = {k: base_weights[k] / total_base_weight for k in available_fields} if total_base_weight > 0 else {}
+        
         for field_name, field_config in self.fields_config.items():
-            source_field = field_config['source_field']
-            target_field = field_config.get('target_field')
-            match_type = field_config['match_type']
-            # 跳过目标字段为空的情况
-            if not target_field:
-                continue
-            source_value = source_record.get(source_field)
-            target_value = target_record.get(target_field)
-            # 判断该字段是否可用
-            if field_name == 'unit_name' or (source_value and target_value):
-                available_fields.append(field_name)
-        # 动态分配权重
-        total_base_weight = sum([base_weights[k] for k in available_fields])
-        weights = {k: base_weights[k] / total_base_weight for k in available_fields}
-        # 计算各字段相似度及加权得分
-        for field_name, field_config in self.fields_config.items():
-            source_field = field_config['source_field']
-            target_field = field_config.get('target_field')
-            match_type = field_config['match_type']
-            # 跳过目标字段为空的情况
-            if not target_field:
-                continue
-            source_value = source_record.get(source_field)
-            target_value = target_record.get(target_field)
-            # 仅对可用字段计算
             if field_name not in available_fields:
                 continue
-            if match_type == 'string':
-                similarity = self.similarity_calculator.calculate_string_similarity(
-                    str(source_value) if source_value else '',
-                    str(target_value) if target_value else ''
-                )
-            elif match_type == 'address':
-                similarity = self.similarity_calculator.calculate_address_similarity(
-                    str(source_value) if source_value else '',
-                    str(target_value) if target_value else ''
-                )
+
+            source_field = field_config['source_field']
+            target_field = field_config['target_field']
+            match_type = field_config['match_type']
+
+            source_value_orig = source_record.get(source_field)
+            target_value_orig = target_record.get(target_field)
+
+            similarity = 0.0
+            if match_type in ['string', 'address', 'phone']:
+                source_str = str(source_value_orig) if source_value_orig is not None else ''
+                target_str = str(target_value_orig) if target_value_orig is not None else ''
+                if match_type == 'string':
+                    similarity = self.similarity_calculator.calculate_string_similarity(source_str, target_str)
+                elif match_type == 'address':
+                    similarity = self.similarity_calculator.calculate_address_similarity(source_str, target_str)
+                elif match_type == 'phone':
+                    similarity = self.similarity_calculator.calculate_phone_similarity(source_str, target_str)
             elif match_type == 'numeric':
-                similarity = self.similarity_calculator.calculate_numeric_similarity(
-                    source_value, target_value, field_config
-                )
-            elif match_type == 'phone':
-                similarity = self.similarity_calculator.calculate_phone_similarity(
-                    str(source_value) if source_value else '',
-                    str(target_value) if target_value else ''
-                )
-            else:
-                similarity = 0.0
+                try:
+                    numeric_source = float(source_value_orig)
+                    numeric_target = float(target_value_orig)
+                    similarity = self.similarity_calculator.calculate_numeric_similarity(numeric_source, numeric_target, field_config)
+                except (ValueError, TypeError, AttributeError):
+                    similarity = 0.0
+            
             field_similarities[field_name] = {
                 'similarity': similarity,
-                'source_value': source_value,
-                'target_value': target_value,
+                'source_value': source_value_orig,
+                'target_value': target_value_orig,
                 'weight': weights.get(field_name, 0.0)
             }
             weighted_score += similarity * weights.get(field_name, 0.0)
             total_weight += weights.get(field_name, 0.0)
-        # 计算加权平均分数
+            
         final_score = weighted_score / total_weight if total_weight > 0 else 0.0
+        
         # 动态阈值
         if len(available_fields) == 1:
             dynamic_threshold = 0.95

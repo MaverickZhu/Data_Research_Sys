@@ -25,5 +25,16 @@
     "cpu_cores": 32,
     "io_threads": 16,
     "gc_optimization": true
+  },
+  "parallel_processing": {
+    "max_workers": 8,
+    "max_db_connections": 4
+  },
+  "batch_processing": {
+    "batch_size": 200
+  },
+  "caching": {
+    "enabled": true,
+    "ttl": 3600
   }
 }

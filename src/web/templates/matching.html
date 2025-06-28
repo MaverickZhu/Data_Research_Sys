@@ -115,9 +115,10 @@
         <div class="tab-pane fade" id="progress-panel" role="tabpanel">
              <div class="card">
                 <div class="card-body">
-                    <h5 class="card-title">实时进度监控</h5>
+                    <h5 class="card-title">任务进度监控</h5>
                     <div id="monitoring-content">
-                        <p class="text-muted">暂无运行中的匹配任务。</p>
+                        <!-- JS will render task progress here -->
+                        <p class="text-muted">暂无正在运行的匹配任务。</p>
                     </div>
                 </div>
             </div>
@@ -177,29 +178,19 @@
 
 {% block scripts %}
 <script>
-    let currentTaskId = null;
+    // 使用 sessionStorage 来持久化任务ID
+    let currentTaskId = sessionStorage.getItem('currentTaskId');
     let progressInterval = null;
+    let monitoringInterval = null;
 
-    // 显示面板
-    function showPanel(panelName) {
-        // 隐藏所有面板
-        document.querySelectorAll('.content-panel').forEach(panel => {
-            panel.classList.remove('active');
-        });
-        
-        // 移除所有标签的active状态
-        document.querySelectorAll('.nav-tab').forEach(tab => {
-            tab.classList.remove('active');
-        });
-        
-        // 显示选中的面板
-        document.getElementById(panelName + '-panel').classList.add('active');
-        
-        // 激活对应的标签
-        event.target.classList.add('active');
-    }
+    document.addEventListener('DOMContentLoaded', function () {
+        // 如果会话中存在任务ID，则立即启动监控
+        if (currentTaskId) {
+            document.getElementById('progress-container').style.display = 'block';
+            startOptimizedProgressMonitoring();
+        }
+    });
 
-    // 启动优化匹配
     async function startOptimizedMatching() {
         const matchType = document.getElementById('match-type').value;
         const batchSize = parseInt(document.getElementById('batch-size').value);
@@ -222,11 +213,9 @@
             
             if (result.success) {
                 currentTaskId = result.task_id;
+                sessionStorage.setItem('currentTaskId', currentTaskId); // 保存到 sessionStorage
                 document.getElementById('progress-container').style.display = 'block';
-                
-                // 开始监控进度
                 startOptimizedProgressMonitoring();
-                
                 showAlert('success', `智能匹配任务启动成功！模式: ${matchMode}, 任务ID: ${result.task_id}`);
             } else {
                 showAlert('error', '启动失败: ' + result.error);
@@ -236,62 +225,19 @@
         }
     }
 
-    // 清空并重新匹配
-    async function clearAndRestart() {
-        if (!confirm('确认要清空所有匹配结果并重新开始匹配吗？此操作不可撤销！')) {
-            return;
-        }
-        
-        try {
-            // 先清空匹配结果
-            const clearResponse = await fetch('/api/clear_match_results', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    confirm: true
-                })
-            });
-            
-            const clearResult = await clearResponse.json();
-            
-            if (clearResult.success) {
-                showAlert('success', `已清空 ${clearResult.deleted_count} 条匹配结果`);
-                
-                // 设置为全量匹配模式
-                document.getElementById('match-mode').value = 'full';
-                
-                // 启动匹配
-                setTimeout(() => {
-                    startOptimizedMatching();
-                }, 1000);
-            } else {
-                showAlert('error', '清空失败: ' + clearResult.error);
-            }
-        } catch (error) {
-            showAlert('error', '请求失败: ' + error.message);
-        }
-    }
-
-    // 启动匹配（保留旧版本兼容性）
-    async function startMatching() {
-        return startOptimizedMatching();
-    }
-
-    // 停止匹配
     async function stopMatching() {
-        if (!currentTaskId) return;
+        const taskIdToStop = sessionStorage.getItem('currentTaskId');
+        if (!taskIdToStop) return;
         
         try {
-            const response = await fetch(`/api/stop_optimized_matching/${currentTaskId}`, {
+            const response = await fetch(`/api/stop_optimized_matching/${taskIdToStop}`, {
                 method: 'POST'
             });
-            
             const result = await response.json();
-            
             if (result.success) {
                 stopProgressMonitoring();
+                sessionStorage.removeItem('currentTaskId'); // 清除已停止的任务
+                currentTaskId = null;
                 showAlert('success', '智能匹配任务已停止');
             } else {
                 showAlert('error', '停止失败: ' + result.message);
@@ -301,23 +247,26 @@
         }
     }
 
-    // 开始优化进度监控
     function startOptimizedProgressMonitoring() {
         if (progressInterval) clearInterval(progressInterval);
         
         progressInterval = setInterval(async () => {
-            if (!currentTaskId) return;
+            const taskId = sessionStorage.getItem('currentTaskId');
+            if (!taskId) {
+                stopProgressMonitoring();
+                return;
+            }
             
             try {
-                const response = await fetch(`/api/optimized_task_progress/${currentTaskId}`);
+                const response = await fetch(`/api/optimized_task_progress/${taskId}`);
                 const progress = await response.json();
                 
                 updateProgressDisplay(progress);
                 
-                // 如果任务完成，停止监控
                 if (progress.status === 'completed' || progress.status === 'error' || progress.status === 'stopped') {
                     stopProgressMonitoring();
-                    
+                    sessionStorage.removeItem('currentTaskId'); // 清除已完成的任务
+                    currentTaskId = null;
                     if (progress.status === 'completed') {
                         showAlert('success', '智能匹配任务完成！');
                     } else if (progress.status === 'stopped') {
@@ -332,12 +281,6 @@
         }, 2000); // 每2秒更新一次
     }
 
-    // 开始进度监控（保留旧版本兼容性）
-    function startProgressMonitoring() {
-        return startOptimizedProgressMonitoring();
-    }
-
-    // 停止进度监控
     function stopProgressMonitoring() {
         if (progressInterval) {
             clearInterval(progressInterval);
@@ -345,7 +288,6 @@
         }
     }
 
-    // 更新进度显示
     function updateProgressDisplay(progress) {
         const percent = progress.progress_percent || 0;
         document.getElementById('progress-fill').style.width = percent + '%';
@@ -365,24 +307,19 @@
         }
     }
 
-    // 显示提示信息
     function showAlert(type, message) {
-        // 移除现有的提示
         const existingAlert = document.querySelector('.alert-dynamic');
         if (existingAlert) {
             existingAlert.remove();
         }
         
-        // 创建新的提示
         const alert = document.createElement('div');
-        alert.className = `alert alert-${type} alert-dynamic`;
+        alert.className = `alert alert-${type} alert-dynamic mt-3`;
         alert.innerHTML = `<strong>${type === 'success' ? '成功' : '错误'}：</strong>${message}`;
         
-        // 插入到表单前面
         const form = document.getElementById('matching-form');
-        form.parentNode.insertBefore(alert, form);
+        form.parentNode.insertBefore(alert, form.nextSibling);
         
-        // 3秒后自动移除
         setTimeout(() => {
             if (alert.parentNode) {
                 alert.remove();
@@ -390,320 +327,78 @@
         }, 5000);
     }
 
-    // 示例：加载并渲染模糊匹配结果
-    async function loadFuzzyReviewResults() {
-        try {
-            // 调用后端API获取待审核的模糊匹配结果
-            const response = await fetch('/api/fuzzy_review_results');
-            const data = await response.json();
-            const tbody = document.getElementById('fuzzy-review-tbody');
-            tbody.innerHTML = '';
-            
-            if (data.results && data.results.length > 0) {
-                document.getElementById('fuzzy-review-container').style.display = 'block';
-                
-                // 存储匹配结果数据，供按钮点击时使用
-                window.fuzzyMatchResults = data.results;
-                
-                data.results.forEach((row, idx) => {
-                    // 字段得分与权重展示
-                    let scoreHtml = '';
-                    let weightHtml = '';
-                    if(row.field_similarities){
-                        for(const k in row.field_similarities){
-                            if(k==='__meta__') continue;
-                            const fs = row.field_similarities[k];
-                            scoreHtml += `<div>${k}: ${(fs.similarity*100).toFixed(1)}%</div>`;
-                            weightHtml += `<div>${k}: ${(fs.weight*100).toFixed(1)}%</div>`;
-                        }
-                    }
-                    
-                    // 动态阈值
-                    let threshold = row.field_similarities && row.field_similarities.__meta__ ? row.field_similarities.__meta__.dynamic_threshold : '-';
-                    
-                    // 操作按钮
-                    let opHtml = `
-                        <button class='btn btn-success btn-sm me-2' onclick='confirmMatch(${idx})' title='确认关联'>
-                            <i class='fas fa-check'></i>
-                        </button> 
-                        <button class='btn btn-danger btn-sm' onclick='rejectMatch(${idx})' title='拒绝关联'>
-                            <i class='fas fa-times'></i>
-                        </button>
-                        <button class='btn btn-info btn-sm' onclick='showDetails("${row.match_id}")' title='查看分析'>
-                            <i class='fas fa-info-circle'></i>
-                        </button>`;
-                    
-                    // 仅名称一致高分提示
-                    if(row.field_similarities && row.field_similarities.__meta__ && row.field_similarities.__meta__.available_fields && row.field_similarities.__meta__.available_fields.length===1 && row.field_similarities.__meta__.available_fields[0]==='unit_name'){
-                        opHtml += `<div style='color:#e67e22;font-weight:bold;margin-top:5px;'>⚠️ 仅名称一致，建议人工核查</div>`;
-                    }
-                    
-                    tbody.innerHTML += `
-                        <tr id='review-row-${idx}'>
-                            <td>${row.primary_unit_name||'-'}</td>
-                            <td>${row.matched_unit_name||'-'}</td>
-                            <td>${scoreHtml}</td>
-                            <td>${weightHtml}</td>
-                            <td>${threshold}</td>
-                            <td><span class='badge bg-primary'>${(row.similarity_score*100).toFixed(1)}%</span></td>
-                            <td>${opHtml}</td>
-                        </tr>`;
-                });
+    document.querySelectorAll('button[data-bs-toggle="tab"]').forEach(tab => {
+        tab.addEventListener('shown.bs.tab', function (event) {
+            const panelId = event.target.getAttribute('data-bs-target');
+            if (panelId === '#progress-panel') {
+                loadAndDisplayTasks();
+                // 仅在进度监控面板激活时启动定时器
+                if (!monitoringInterval) {
+                    monitoringInterval = setInterval(loadAndDisplayTasks, 5000); // 每5秒刷新
+                }
             } else {
-                document.getElementById('fuzzy-review-container').style.display = 'none';
+                // 离开时清除定时器，避免不必要的请求
+                if (monitoringInterval) {
+                    clearInterval(monitoringInterval);
+                    monitoringInterval = null;
+                }
             }
-        } catch (error) {
-            console.error('加载模糊匹配审核结果失败:', error);
-            showAlert('error', '加载审核结果失败: ' + error.message);
-        }
-    }
-
-    // 新增：显示详情模态框
-    async function showDetails(matchId) {
-        const modalElement = document.getElementById('details-modal');
-        const detailsModal = new bootstrap.Modal(modalElement);
-        
-        const unitInfo = document.getElementById('modal-unit-info');
-        const positiveList = document.getElementById('positive-evidence');
-        const negativeList = document.getElementById('negative-evidence');
-
-        // 重置内容
-        unitInfo.innerHTML = '<p class="text-center text-muted">加载中...</p>';
-        positiveList.innerHTML = '';
-        negativeList.innerHTML = '';
-        
-        detailsModal.show();
-
-        try {
-            const response = await fetch(`/api/match_result_details/${matchId}`);
-            const result = await response.json();
-
-            if (result.success) {
-                const details = result.details;
-                unitInfo.innerHTML = `
-                    <p><strong>源单位:</strong> ${details.unit_name}</p>
-                    <p><strong>目标单位:</strong> ${details.matched_unit_name}</p>
-                    <p><strong>最终得分:</strong> <span class="badge bg-primary fs-6">${(details.similarity_score * 100).toFixed(1)}%</span></p>
-                    <hr>`;
-
-                const explanation = details.match_details.explanation || {};
-                const positive = explanation.positive || ['无明确加分项'];
-                const negative = explanation.negative || ['无明确减分项'];
-
-                positive.forEach(item => {
-                    const li = document.createElement('li');
-                    li.className = 'list-group-item';
-                    li.innerHTML = `<i class="fas fa-check-circle text-success me-2"></i>${item}`;
-                    positiveList.appendChild(li);
-                });
-
-                negative.forEach(item => {
-                    const li = document.createElement('li');
-                    li.className = 'list-group-item';
-                    li.innerHTML = `<i class="fas fa-exclamation-triangle text-danger me-2"></i>${item}`;
-                    negativeList.appendChild(li);
-                });
-
-            } else {
-                unitInfo.innerHTML = `<div class="alert alert-danger">加载详情失败: ${result.message}</div>`;
-            }
-        } catch (error) {
-            unitInfo.innerHTML = `<div class="alert alert-danger">请求失败: ${error.message}</div>`;
-        }
-    }
-
-    // 点击模态框外部关闭
-    window.onclick = function(event) {
-        const modal = document.getElementById('details-modal');
-        if (event.target == modal) {
-            closeModal();
-        }
-    }
-
-    // 确认关联
-    async function confirmMatch(idx) {
-        if (!window.fuzzyMatchResults || !window.fuzzyMatchResults[idx]) {
-            showAlert('error', '无效的匹配记录索引');
-            return;
-        }
-        
-        const matchResult = window.fuzzyMatchResults[idx];
-        const matchId = matchResult.match_id;
-        
-        if (!matchId) {
-            showAlert('error', '缺少匹配记录ID');
-            return;
-        }
-        
-        try {
-            // 显示确认对话框
-            const confirmed = confirm(`确定要确认关联以下记录吗？\n\n源单位：${matchResult.primary_unit_name}\n目标单位：${matchResult.matched_unit_name}\n相似度：${(matchResult.similarity_score*100).toFixed(1)}%`);
-            
-            if (!confirmed) {
-                return;
-            }
-            
-            // 禁用按钮，防止重复点击
-            const row = document.getElementById(`review-row-${idx}`);
-            const buttons = row.querySelectorAll('button');
-            buttons.forEach(btn => btn.disabled = true);
-            
-            // 调用后端API确认关联
-            const response = await fetch('/api/confirm_association', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    match_id: matchId
-                })
-            });
-            
-            const result = await response.json();
-            
-            if (result.success) {
-                // 更新行状态
-                row.style.backgroundColor = '#d4edda';
-                row.innerHTML = row.innerHTML.replace(
-                    /<td>.*?<\/td>$/,
-                    '<td><span class="badge bg-success">已确认关联</span></td>'
-                );
-                
-                showAlert('success', '关联确认成功');
-                
-                // 3秒后移除该行
-                setTimeout(() => {
-                    row.style.transition = 'opacity 0.5s';
-                    row.style.opacity = '0';
-                    setTimeout(() => row.remove(), 500);
-                }, 3000);
-                
-            } else {
-                // 重新启用按钮
-                buttons.forEach(btn => btn.disabled = false);
-                showAlert('error', '确认关联失败: ' + (result.error || result.message));
-            }
-            
-        } catch (error) {
-            console.error('确认关联失败:', error);
-            showAlert('error', '确认关联失败: ' + error.message);
-            
-            // 重新启用按钮
-            const row = document.getElementById(`review-row-${idx}`);
-            const buttons = row.querySelectorAll('button');
-            buttons.forEach(btn => btn.disabled = false);
-        }
-    }
-    
-    // 拒绝关联
-    async function rejectMatch(idx) {
-        if (!window.fuzzyMatchResults || !window.fuzzyMatchResults[idx]) {
-            showAlert('error', '无效的匹配记录索引');
-            return;
-        }
-        
-        const matchResult = window.fuzzyMatchResults[idx];
-        const matchId = matchResult.match_id;
-        
-        if (!matchId) {
-            showAlert('error', '缺少匹配记录ID');
-            return;
-        }
-        
-        try {
-            // 显示确认对话框
-            const reason = prompt(`确定要拒绝关联以下记录吗？\n\n源单位：${matchResult.primary_unit_name}\n目标单位：${matchResult.matched_unit_name}\n相似度：${(matchResult.similarity_score*100).toFixed(1)}%\n\n请输入拒绝原因（可选）:`);
-            
-            if (reason === null) {
-                return; // 用户取消
-            }
-            
-            // 禁用按钮，防止重复点击
-            const row = document.getElementById(`review-row-${idx}`);
-            const buttons = row.querySelectorAll('button');
-            buttons.forEach(btn => btn.disabled = true);
-            
-            // 调用后端API拒绝关联
-            const response = await fetch('/api/reject_association', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    match_id: matchId,
-                    reason: reason || '人工审核拒绝关联'
-                })
-            });
-            
-            const result = await response.json();
-            
-            if (result.success) {
-                // 更新行状态
-                row.style.backgroundColor = '#f8d7da';
-                row.innerHTML = row.innerHTML.replace(
-                    /<td>.*?<\/td>$/,
-                    '<td><span class="badge bg-danger">已拒绝关联</span></td>'
-                );
-                
-                showAlert('success', '关联拒绝成功');
-                
-                // 3秒后移除该行
-                setTimeout(() => {
-                    row.style.transition = 'opacity 0.5s';
-                    row.style.opacity = '0';
-                    setTimeout(() => row.remove(), 500);
-                }, 3000);
-                
-            } else {
-                // 重新启用按钮
-                buttons.forEach(btn => btn.disabled = false);
-                showAlert('error', '拒绝关联失败: ' + (result.error || result.message));
-            }
-            
-        } catch (error) {
-            console.error('拒绝关联失败:', error);
-            showAlert('error', '拒绝关联失败: ' + error.message);
-            
-            // 重新启用按钮
-            const row = document.getElementById(`review-row-${idx}`);
-            const buttons = row.querySelectorAll('button');
-            buttons.forEach(btn => btn.disabled = false);
-        }
-    }
-
-    // 页面加载后自动拉取
-    document.addEventListener('DOMContentLoaded', loadFuzzyReviewResults);
-
-    // 页面加载完成后的初始化
-    document.addEventListener('DOMContentLoaded', function() {
-        console.log('匹配管理页面加载完成');
+        });
     });
 
-    // 清除匹配结果
-    async function clearMatchResults() {
-        if (!confirm('确定要清除所有匹配结果吗？此操作不可恢复！')) {
+    async function loadAndDisplayTasks() {
+        const container = document.getElementById('monitoring-content');
+        const taskId = sessionStorage.getItem('currentTaskId'); // 从 sessionStorage 获取
+        if (!taskId) {
+            container.innerHTML = '<p class="text-muted">当前没有正在运行的匹配任务。</p>';
             return;
         }
-        
+
         try {
-            const resp = await fetch('/api/clear_match_results', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
-            const result = await resp.json();
-            
-            if (result.success) {
-                alert(`成功清除 ${result.deleted_count} 条匹配结果记录`);
-                // 刷新统计信息
-                if (typeof loadStatistics === 'function') loadStatistics();
-            } else {
-                alert('清除失败: ' + (result.message || result.error));
+            const response = await fetch(`/api/optimized_task_progress/${taskId}`);
+            if (!response.ok) {
+                throw new Error('获取任务进度失败');
             }
-        } catch (e) {
-            console.error('清除匹配结果失败:', e);
-            alert('清除匹配结果失败: ' + e.message);
+            const progress = await response.json();
+            
+            if(progress.error) {
+                 container.innerHTML = `<div class="alert alert-warning">无法获取任务 ${taskId} 的进度: ${progress.error}</div>`;
+                 return;
+            }
+
+            // 渲染进度卡片
+            container.innerHTML = `
+                <div class="card shadow-sm mb-3">
+                    <div class="card-header d-flex justify-content-between">
+                        <span>任务ID: <code class="small">${progress.task_id}</code></span>
+                        <span class="badge bg-${getStatusColor(progress.status)}">${progress.status}</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="progress" style="height: 25px;">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: ${progress.progress_percent}%" aria-valuenow="${progress.progress_percent}">${progress.progress_percent}%</div>
+                        </div>
+                        <div class="row text-center mt-3">
+                           <div class="col"><strong>${(progress.processed_records || 0).toLocaleString()}</strong> / ${(progress.total_records || 0).toLocaleString()} <small>已处理</small></div>
+                           <div class="col"><strong>${(progress.matched_records || 0).toLocaleString()}</strong> <small>已匹配</small></div>
+                           <div class="col"><strong>${Math.round(progress.elapsed_time || 0)}s</strong> <small>已用时</small></div>
+                           <div class="col"><strong>${Math.round(progress.estimated_remaining_time || 0)}s</strong> <small>预计剩余</small></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+        } catch (error) {
+            container.innerHTML = `<div class="alert alert-danger">加载进度时出错: ${error.message}</div>`;
+        }
+    }
+
+    function getStatusColor(status) {
+        switch(status) {
+            case 'completed': return 'success';
+            case 'running': return 'primary';
+            case 'error': return 'danger';
+            case 'stopped': return 'secondary';
+            default: return 'light';
         }
     }
 </script>

@@ -16,9 +16,10 @@ from src.database.connection import DatabaseManager
 from src.matching.match_processor import MatchProcessor
 from src.matching.multi_match_processor import MultiMatchProcessor
 from src.matching.enhanced_association_processor import EnhancedAssociationProcessor, AssociationStrategy
+from src.matching.optimized_match_processor import OptimizedMatchProcessor
 from src.utils.logger import setup_logger
 from src.utils.config import ConfigManager
-from src.utils.helpers import safe_json_response
+from src.utils.helpers import safe_json_response, generate_match_id
 
 # 设置日志
 logger = setup_logger(__name__)
@@ -32,19 +33,20 @@ db_manager = None
 match_processor = None
 multi_match_processor = None
 enhanced_association_processor = None
+optimized_match_processor = None
 config_manager = None
 
 
 def create_app():
     """创建和配置Flask应用"""
-    global db_manager, match_processor, multi_match_processor, enhanced_association_processor, config_manager
+    global db_manager, match_processor, multi_match_processor, enhanced_association_processor, optimized_match_processor, config_manager
     
     try:
         # 初始化配置管理器
         config_manager = ConfigManager()
         
         # 初始化数据库管理器
-        db_manager = DatabaseManager(config_manager.get_database_config())
+        db_manager = DatabaseManager(config=config_manager.get_database_config())
         
         # 初始化匹配处理器
         match_processor = MatchProcessor(
@@ -62,6 +64,12 @@ def create_app():
         enhanced_association_processor = EnhancedAssociationProcessor(
             db_manager=db_manager,
             config=config_manager.get_matching_config()
+        )
+        
+        # 新增：统一初始化优化的匹配处理器
+        optimized_match_processor = OptimizedMatchProcessor(
+            db_manager=db_manager,
+            config_manager=config_manager
         )
         
         logger.info("Flask应用初始化成功")
@@ -347,13 +355,15 @@ def api_get_match_results():
         # 获取查询参数
         page = int(request.args.get('page', 1))
         per_page = int(request.args.get('per_page', 20))
-        match_type = request.args.get('match_type')  # exact, fuzzy, none
+        match_type = request.args.get('match_type')
+        search_term = request.args.get('search_term') # 获取搜索关键词
         
         # 查询匹配结果
         results_data = db_manager.get_match_results(
             page=page,
             per_page=per_page,
-            match_type=match_type
+            match_type=match_type,
+            search_term=search_term # 传递搜索关键词
         )
         
         # 重新组装前端需要的字段，提供更完整的数据
@@ -364,8 +374,10 @@ def api_get_match_results():
                 value = row.get(key, default)
                 return value if value not in [None, '', '-', 'null'] else default
             
-            # 确保_id字段正确获取
-            record_id = row.get('_id') or row.get('match_id')
+            # 确保使用我们自己生成的、稳定的match_id
+            primary_id = safe_get('primary_record_id')
+            matched_id = safe_get('matched_record_id', 'no_match')
+            match_id = generate_match_id(str(primary_id), str(matched_id))
             
             new_results.append({
                 # 基本信息
@@ -395,9 +407,9 @@ def api_get_match_results():
                 'primary_credit_code': safe_get('primary_credit_code') or safe_get('credit_code'),
                 'matched_credit_code': safe_get('matched_credit_code'),
                 
-                # 系统信息 - 确保_id字段正确设置
-                '_id': record_id,  # 前端需要的ID字段
-                'match_id': record_id,  # 保持向后兼容
+                # 系统信息
+                '_id': str(row.get('_id')),
+                'match_id': match_id, # 确保使用生成的match_id
                 'review_status': safe_get('review_status', 'pending'),
                 'review_notes': safe_get('review_notes', ''),  # 添加审核备注字段
                 'reviewer': safe_get('reviewer', ''),  # 添加审核人字段
@@ -605,13 +617,8 @@ def api_start_optimized_matching():
                 'error': f'无效的匹配模式: {mode}，支持的模式: {valid_modes}'
             }), 400
         
-        # 初始化优化匹配处理器（如果还没有）
-        if not hasattr(app, 'optimized_match_processor'):
-            from src.matching.optimized_match_processor import OptimizedMatchProcessor
-            app.optimized_match_processor = OptimizedMatchProcessor(db_manager, config_manager.get_matching_config())
-        
-        # 启动优化匹配任务
-        task_id = app.optimized_match_processor.start_optimized_matching_task(
+        # 直接使用已初始化的处理器
+        task_id = optimized_match_processor.start_optimized_matching_task(
             match_type=match_type,
             mode=mode,
             batch_size=batch_size,
@@ -639,10 +646,10 @@ def api_start_optimized_matching():
 def api_get_optimized_task_progress(task_id):
     """API: 获取优化任务进度"""
     try:
-        if not hasattr(app, 'optimized_match_processor'):
+        if not optimized_match_processor:
             return jsonify({'error': '优化匹配处理器未初始化'}), 500
         
-        progress = app.optimized_match_processor.get_optimized_task_progress(task_id)
+        progress = optimized_match_processor.get_optimized_task_progress(task_id)
         # 确保数据能正确序列化
         safe_progress = safe_json_response(progress)
         return jsonify(safe_progress)
@@ -655,13 +662,13 @@ def api_get_optimized_task_progress(task_id):
 def api_stop_optimized_matching(task_id):
     """API: 停止优化匹配任务"""
     try:
-        if not hasattr(app, 'optimized_match_processor'):
+        if not optimized_match_processor:
             return jsonify({
                 'success': False,
                 'message': '优化匹配处理器未初始化'
             }), 500
         
-        success = app.optimized_match_processor.stop_optimized_matching_task(task_id)
+        success = optimized_match_processor.stop_optimized_matching_task(task_id)
         
         if success:
             return jsonify({
@@ -686,11 +693,10 @@ def api_stop_optimized_matching(task_id):
 def api_get_optimized_match_statistics():
     """API: 获取优化匹配统计信息"""
     try:
-        if not hasattr(app, 'optimized_match_processor'):
-            from src.matching.optimized_match_processor import OptimizedMatchProcessor
-            app.optimized_match_processor = OptimizedMatchProcessor(db_manager, config_manager.get_matching_config())
+        if not optimized_match_processor:
+            return jsonify({'error': '优化匹配处理器未初始化'}), 500
         
-        statistics = app.optimized_match_processor.get_optimized_matching_statistics()
+        statistics = optimized_match_processor.get_optimized_matching_statistics()
         # 确保数据能正确序列化
         safe_statistics = safe_json_response(statistics)
         return jsonify(safe_statistics)
@@ -703,11 +709,10 @@ def api_get_optimized_match_statistics():
 def api_get_match_result_details(match_id):
     """API: 获取匹配结果详情"""
     try:
-        if not hasattr(app, 'optimized_match_processor'):
-            from src.matching.optimized_match_processor import OptimizedMatchProcessor
-            app.optimized_match_processor = OptimizedMatchProcessor(db_manager, config_manager.get_matching_config())
+        if not optimized_match_processor:
+            return jsonify({'error': '优化匹配处理器未初始化'}), 500
         
-        details = app.optimized_match_processor.get_match_result_details(match_id)
+        details = optimized_match_processor.get_match_result_details(match_id)
         
         if details:
             return jsonify({
@@ -753,11 +758,10 @@ def api_update_review_status():
                 'error': f'无效的审核状态: {review_status}，支持的状态: {valid_statuses}'
             }), 400
         
-        if not hasattr(app, 'optimized_match_processor'):
-            from src.matching.optimized_match_processor import OptimizedMatchProcessor
-            app.optimized_match_processor = OptimizedMatchProcessor(db_manager, config_manager.get_matching_config())
+        if not optimized_match_processor:
+            return jsonify({'error': '优化匹配处理器未初始化'}), 500
         
-        success = app.optimized_match_processor.update_review_status(
+        success = optimized_match_processor.update_review_status(
             match_id=match_id,
             review_status=review_status,
             review_notes=review_notes,

@@ -6,154 +6,73 @@
 import os
 import yaml
 import logging
+import json
 from typing import Dict, Any, Optional
 from pathlib import Path
+from threading import Lock
 
 logger = logging.getLogger(__name__)
 
 
 class ConfigManager:
-    """配置管理器"""
-    
-    def __init__(self, config_dir: Optional[str] = None):
-        """
-        初始化配置管理器
+    _instance = None
+    _lock = Lock()
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __init__(self):
+        if hasattr(self, '_initialized') and self._initialized:
+            return
         
-        Args:
-            config_dir: 配置文件目录路径
-        """
-        if config_dir is None:
-            # 默认使用项目根目录下的config文件夹
-            project_root = Path(__file__).parent.parent.parent
-            self.config_dir = project_root / "config"
-        else:
-            self.config_dir = Path(config_dir)
-            
-        # 验证配置目录存在
-        if not self.config_dir.exists():
-            raise FileNotFoundError(f"配置目录不存在: {self.config_dir}")
-            
-        # 加载配置
-        self._database_config = None
-        self._matching_config = None
-        self._web_config = None
-        
-        self._load_configs()
-        
-    def _load_configs(self):
-        """加载所有配置文件"""
-        try:
-            # 加载数据库配置
-            self._database_config = self._load_yaml_config("database.yaml")
-            logger.info("数据库配置加载成功")
-            
-            # 加载匹配算法配置
-            self._matching_config = self._load_yaml_config("matching.yaml")
-            logger.info("匹配算法配置加载成功")
-            
-            # 尝试加载Web配置（可选）
-            web_config_path = self.config_dir / "web.yaml"
-            if web_config_path.exists():
-                self._web_config = self._load_yaml_config("web.yaml")
-                logger.info("Web配置加载成功")
-            else:
-                # 使用默认Web配置
-                self._web_config = self._get_default_web_config()
-                logger.info("使用默认Web配置")
-                
-        except Exception as e:
-            logger.error(f"配置加载失败: {str(e)}")
-            raise
-            
-    def _load_yaml_config(self, filename: str) -> Dict[str, Any]:
-        """
-        加载YAML配置文件
-        
-        Args:
-            filename: 配置文件名
-            
-        Returns:
-            Dict[str, Any]: 配置内容
-        """
+        self.config_dir = Path(__file__).parent.parent.parent / "config"
+        self._db_config = self._load_config('database.yaml')
+        self._matching_config = self._load_config('matching.yaml')
+        self._web_config = self._load_config('web.yaml')
+        self._performance_config = self._load_config('high_performance.json', is_json=True, default={
+            "parallel_processing": {
+                "max_workers": 8,
+                "max_db_connections": 4
+            }
+        })
+        self._initialized = True
+
+    def _load_config(self, filename: str, is_json: bool = False, default: Dict = None) -> Dict:
         config_path = self.config_dir / filename
-        
         if not config_path.exists():
-            raise FileNotFoundError(f"配置文件不存在: {config_path}")
-            
+            logger.warning(f"配置文件 '{filename}' 未找到。")
+            if default is not None:
+                logger.info(f"使用默认配置 for '{filename}'.")
+                return default
+            return {}
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
-                config = yaml.safe_load(f)
-                
-            if config is None:
-                raise ValueError(f"配置文件为空: {config_path}")
-                
-            return config
-            
-        except yaml.YAMLError as e:
-            logger.error(f"YAML解析错误 {config_path}: {str(e)}")
-            raise
+                if is_json:
+                    return json.load(f)
+                else:
+                    return yaml.safe_load(f)
         except Exception as e:
             logger.error(f"读取配置文件失败 {config_path}: {str(e)}")
-            raise
-            
-    def _get_default_web_config(self) -> Dict[str, Any]:
-        """
-        获取默认Web配置
-        
-        Returns:
-            Dict[str, Any]: 默认Web配置
-        """
-        return {
-            'flask': {
-                'host': '0.0.0.0',
-                'port': 5000,
-                'debug': False,
-                'secret_key': 'your-secret-key-here'
-            },
-            'cors': {
-                'origins': ['*'],
-                'methods': ['GET', 'POST', 'PUT', 'DELETE'],
-                'allow_headers': ['Content-Type', 'Authorization']
-            },
-            'pagination': {
-                'default_per_page': 20,
-                'max_per_page': 100
-            }
-        }
-        
-    def get_database_config(self) -> Dict[str, Any]:
-        """
-        获取数据库配置
-        
-        Returns:
-            Dict[str, Any]: 数据库配置
-        """
-        if self._database_config is None:
-            raise RuntimeError("数据库配置未加载")
-        return self._database_config.copy()
-        
-    def get_matching_config(self) -> Dict[str, Any]:
-        """
-        获取匹配算法配置
-        
-        Returns:
-            Dict[str, Any]: 匹配算法配置
-        """
-        if self._matching_config is None:
-            raise RuntimeError("匹配算法配置未加载")
-        return self._matching_config.copy()
-        
-    def get_web_config(self) -> Dict[str, Any]:
-        """
-        获取Web配置
-        
-        Returns:
-            Dict[str, Any]: Web配置
-        """
-        if self._web_config is None:
-            raise RuntimeError("Web配置未加载")
-        return self._web_config.copy()
-        
+            if default is not None:
+                return default
+            return {}
+
+    def get_database_config(self) -> Dict:
+        return self._db_config
+
+    def get_matching_config(self) -> Dict:
+        return self._matching_config
+
+    def get_web_config(self) -> Dict:
+        return self._web_config
+
+    def get_performance_config(self) -> Dict:
+        return self._performance_config
+
     def update_matching_config(self, new_config: Dict[str, Any]) -> bool:
         """
         更新匹配算法配置
@@ -195,7 +114,7 @@ class ConfigManager:
         try:
             # 获取配置字典
             if config_type == 'database':
-                config = self._database_config
+                config = self._db_config
             elif config_type == 'matching':
                 config = self._matching_config
             elif config_type == 'web':
@@ -218,15 +137,6 @@ class ConfigManager:
         except Exception as e:
             logger.error(f"获取配置值失败 {config_type}.{key_path}: {str(e)}")
             return default
-            
-    def reload_configs(self):
-        """重新加载所有配置"""
-        try:
-            self._load_configs()
-            logger.info("配置重新加载成功")
-        except Exception as e:
-            logger.error(f"重新加载配置失败: {str(e)}")
-            raise
             
     def validate_configs(self) -> Dict[str, bool]:
         """

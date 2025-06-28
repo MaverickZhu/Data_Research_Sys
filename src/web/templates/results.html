@@ -36,7 +36,7 @@
                     <input type="text" id="search-term" class="form-control" placeholder="输入关键词...">
                 </div>
                 <div class="col-md-3 d-flex align-items-end">
-                    <button class="btn btn-primary w-100" onclick="loadResults(1)"><i class="fas fa-search"></i> 查询</button>
+                    <button class="btn btn-primary w-100" onclick="loadResults(1)"><i class="fas fa-search"></i>  查询</button>
                     <button class="btn btn-secondary ms-2" onclick="exportResults()"><i class="fas fa-download"></i></button>
                 </div>
             </div>
@@ -209,23 +209,57 @@
                 tbody.appendChild(row);
             });
         }
-        updatePagination(data.pagination);
-        document.getElementById('results-summary').textContent = `共 ${data.pagination.total_count} 条记录`;
+        updatePagination(data);
+        document.getElementById('results-summary').textContent = `共 ${data.total || 0} 条记录`;
     }
 
     function getMatchTypeBadge(type) {
+        let typeKey = 'none';
+        let typeTextDisplay = '未知';
+
+        if (type && type.startsWith('exact')) {
+            typeKey = 'exact';
+            typeTextDisplay = '精确';
+        } else if (type && type.startsWith('fuzzy')) {
+            typeKey = 'fuzzy';
+            typeTextDisplay = '模糊';
+        } else if (type === 'none') {
+            typeKey = 'none';
+            typeTextDisplay = '未匹配';
+        }
+        
         const typeMap = { 'exact': 'success', 'fuzzy': 'primary', 'none': 'secondary' };
-        const typeText = { 'exact': '精确', 'fuzzy': '模糊', 'none': '未匹配' };
-        const badgeClass = typeMap[type] || 'light';
-        return `<span class="badge bg-${badgeClass}">${typeText[type] || '未知'}</span>`;
+        const badgeClass = typeMap[typeKey] || 'light';
+        return `<span class="badge bg-${badgeClass}">${typeTextDisplay}</span>`;
     }
 
     function getMatchStatusBadge(result) {
-        const statusMap = { 'approved': 'success', 'rejected': 'danger', 'pending': 'warning' };
-        if (statusMap[result.review_status]) {
-            return `<span class="badge bg-${statusMap[result.review_status]}">${result.review_status}</span>`;
+        const score = result.similarity_score || 0;
+        const reviewStatus = result.review_status;
+
+        if (reviewStatus === 'approved') {
+            return `<span class="badge bg-success">审核通过</span>`;
         }
-        return `<span class="badge rounded-pill bg-primary">${(result.similarity_score * 100).toFixed(1)}%</span>`;
+        if (reviewStatus === 'rejected') {
+            return `<span class="badge bg-danger">审核未通过</span>`;
+        }
+        
+        // 对于 'pending' 或其他状态, 显示分数
+        let scoreText = (score * 100).toFixed(1) + '%';
+        if (result.match_type && result.match_type.startsWith('exact')) {
+            scoreText = '精确匹配';
+        }
+        
+        let badgeClass = 'primary';
+        if (score >= 0.95) badgeClass = 'success';
+        else if (score >= 0.8) badgeClass = 'info';
+        else if (score < 0.7) badgeClass = 'warning';
+
+        let html = `<span class="badge rounded-pill bg-${badgeClass}">${scoreText}</span>`;
+        if (reviewStatus === 'pending' && result.match_type && result.match_type.startsWith('fuzzy')) {
+            html += ` <span class="badge bg-light text-dark">待审核</span>`;
+        }
+        return html;
     }
 
     function formatDualContent(val1, val2, label1, label2) {
@@ -238,24 +272,61 @@
         return (text || '').replace(/`/g, "\\`");
     }
 
-    function updatePagination(pagination) {
+    function updatePagination(paginationData) {
         const nav = document.getElementById('pagination-nav');
         nav.innerHTML = '';
-        if (pagination.total_pages <= 1) return;
-        
+        const page = paginationData.page || 1;
+        const totalPages = paginationData.pages || 1;
+
+        if (totalPages <= 1) return;
+
         let html = '<ul class="pagination">';
-        // Previous
-        html += `<li class="page-item ${pagination.page === 1 ? 'disabled' : ''}"><a class="page-link" href="#" onclick="loadResults(${pagination.page - 1})">上一页</a></li>`;
-        // Pages
-        for(let i=1; i<=pagination.total_pages; i++){
-             if(i === pagination.page) {
-                html += `<li class="page-item active"><span class="page-link">${i}</span></li>`;
-             } else {
-                html += `<li class="page-item"><a class="page-link" href="#" onclick="loadResults(${i})">${i}</a></li>`;
-             }
+
+        // Previous Button
+        html += `<li class="page-item ${page === 1 ? 'disabled' : ''}"><a class="page-link" href="#" onclick="event.preventDefault(); loadResults(${page - 1})">上一页</a></li>`;
+
+        // Page Number Logic
+        const maxPagesToShow = 5;
+        let startPage, endPage;
+
+        if (totalPages <= maxPagesToShow) {
+            startPage = 1;
+            endPage = totalPages;
+        } else {
+            const maxPagesBeforeCurrent = Math.floor(maxPagesToShow / 2);
+            const maxPagesAfterCurrent = Math.ceil(maxPagesToShow / 2) - 1;
+            if (page <= maxPagesBeforeCurrent) {
+                startPage = 1;
+                endPage = maxPagesToShow;
+            } else if (page + maxPagesAfterCurrent >= totalPages) {
+                startPage = totalPages - maxPagesToShow + 1;
+                endPage = totalPages;
+            } else {
+                startPage = page - maxPagesBeforeCurrent;
+                endPage = page + maxPagesAfterCurrent;
+            }
         }
-        // Next
-        html += `<li class="page-item ${pagination.page === pagination.total_pages ? 'disabled' : ''}"><a class="page-link" href="#" onclick="loadResults(${pagination.page + 1})">下一页</a></li>`;
+        
+        if (startPage > 1) {
+            html += `<li class="page-item"><a class="page-link" href="#" onclick="event.preventDefault(); loadResults(1)">1</a></li>`;
+            if (startPage > 2) {
+                html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+            }
+        }
+
+        for (let i = startPage; i <= endPage; i++) {
+            html += `<li class="page-item ${i === page ? 'active' : ''}"><a class="page-link" href="#" onclick="event.preventDefault(); loadResults(${i})">${i}</a></li>`;
+        }
+
+        if (endPage < totalPages) {
+            if (endPage < totalPages - 1) {
+                html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+            }
+            html += `<li class="page-item"><a class="page-link" href="#" onclick="event.preventDefault(); loadResults(${totalPages})">${totalPages}</a></li>`;
+        }
+
+        // Next Button
+        html += `<li class="page-item ${page === totalPages ? 'disabled' : ''}"><a class="page-link" href="#" onclick="event.preventDefault(); loadResults(${page + 1})">下一页</a></li>`;
         html += '</ul>';
         nav.innerHTML = html;
     }
@@ -289,35 +360,72 @@
     }
     
     async function showDetailsModal(matchId) {
+        const modalElement = document.getElementById('analysisModal');
+        const analysisModal = new bootstrap.Modal(modalElement);
         const unitInfo = document.getElementById('analysisUnitInfo');
         const positiveList = document.getElementById('positive-evidence');
         const negativeList = document.getElementById('negative-evidence');
 
-        unitInfo.innerHTML = '<p class="text-center text-muted">加载中...</p>';
+        unitInfo.innerHTML = '<div class="text-center"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div>';
         positiveList.innerHTML = '';
         negativeList.innerHTML = '';
-        analysisModalInstance.show();
+        analysisModal.show();
 
         try {
             const response = await fetch(`/api/match_result_details/${matchId}`);
             const result = await response.json();
 
             if (result.success) {
-                const details = result.details;
-                unitInfo.innerHTML = `<p><strong>源:</strong> ${details.unit_name}</p><p><strong>目标:</strong> ${details.matched_unit_name}</p><p><strong>得分:</strong> <span class="badge bg-primary fs-6">${(details.similarity_score * 100).toFixed(1)}%</span></p><hr>`;
-                
-                const explanation = details.match_details.explanation || {};
+                const d = result.details;
+                unitInfo.innerHTML = `
+                    <table class="table table-sm table-bordered">
+                        <thead>
+                            <tr>
+                                <th scope="col">属性</th>
+                                <th scope="col">源单位 (安全排查系统)</th>
+                                <th scope="col">目标单位 (监督管理系统)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <th scope="row">单位名称</th>
+                                <td>${d.unit_name || '-'}</td>
+                                <td>${d.matched_unit_name || '-'}</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">信用代码</th>
+                                <td>${d.primary_credit_code || '-'}</td>
+                                <td>${d.matched_credit_code || '-'}</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">法人代表</th>
+                                <td>${d.contact_person || '-'}</td>
+                                <td>${d.matched_legal_person || '-'}</td>
+                            </tr>
+                             <tr>
+                                <th scope="row">安全管理人</th>
+                                <td>${d.security_manager || '-'}</td>
+                                <td>${d.matched_security_manager || '-'}</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">最终得分</th>
+                                <td colspan="2" class="text-center"><span class="badge bg-primary fs-6">${(d.similarity_score * 100).toFixed(1)}%</span></td>
+                            </tr>
+                        </tbody>
+                    </table>`;
+
+                const explanation = d.match_details.explanation || {};
                 const positive = explanation.positive || ['无'];
                 const negative = explanation.negative || ['无'];
 
                 positive.forEach(item => {
-                    positiveList.innerHTML += `<li class="list-group-item"><i class="fas fa-check-circle text-success me-2"></i>${item}</li>`;
+                    positiveList.innerHTML += `<li class="list-group-item list-group-item-success"><i class="fas fa-check-circle me-2"></i>${item}</li>`;
                 });
                 negative.forEach(item => {
-                    negativeList.innerHTML += `<li class="list-group-item"><i class="fas fa-exclamation-triangle text-danger me-2"></i>${item}</li>`;
+                    negativeList.innerHTML += `<li class="list-group-item list-group-item-danger"><i class="fas fa-exclamation-triangle me-2"></i>${item}</li>`;
                 });
             } else {
-                 unitInfo.innerHTML = `<div class="alert alert-danger">加载失败: ${result.message}</div>`;
+                 unitInfo.innerHTML = `<div class="alert alert-danger">${result.message}</div>`;
             }
         } catch (error) {
             unitInfo.innerHTML = `<div class="alert alert-danger">请求失败: ${error.message}</div>`;

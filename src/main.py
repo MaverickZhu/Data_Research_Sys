@@ -38,8 +38,8 @@ def main():
         
         # 测试数据库连接
         logger.info("测试数据库连接...")
-        # 确保db_manager是全局的，或通过create_app传递
-        db_manager = DatabaseManager(config_manager.get_database_config())
+        # 数据库连接器现在内部处理高精度解码
+        db_manager = DatabaseManager(config=config_manager.get_database_config())
         
         # 获取数据统计
         supervision_count = db_manager.get_collection_count('xxj_shdwjbxx')

@@ -4,7 +4,7 @@
 """
 
 import logging
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Any
 from pymongo import MongoClient
 from pymongo.collection import Collection
 from pymongo.database import Database
@@ -12,24 +12,40 @@ import redis
 from datetime import datetime
 from threading import Lock
 from src.utils.helpers import convert_objectid_to_str
+from pymongo.errors import ConnectionFailure
+from redis import Redis
+from redis.exceptions import ConnectionError as RedisConnectionError
+from bson.codec_options import CodecOptions, TypeRegistry, TypeDecoder
+from bson.decimal128 import Decimal128
+from decimal import Decimal, ROUND_HALF_UP
 
 logger = logging.getLogger(__name__)
 
+class FloatAsDecimalDecoder(TypeDecoder):
+    """
+    A TypeDecoder to automatically decode BSON doubles (read as floats)
+    into Python Decimals to preserve precision.
+    """
+    bson_type = float
+
+    def transform_bson(self, value: float) -> Decimal:
+        """Transforms a BSON float to a Python Decimal."""
+        return Decimal(str(value))
 
 class DatabaseManager:
     """数据库管理器（单例模式）"""
     _instance = None
     _lock = Lock()
+    _db_client = None
+    _redis_client = None
+    _db = None
 
     def __new__(cls, *args, **kwargs):
-        if cls._instance is None:
-            with cls._lock:
-                # Double-check locking
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
+        if not cls._instance:
+            cls._instance = super(DatabaseManager, cls).__new__(cls)
         return cls._instance
     
-    def __init__(self, config: Dict = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
         """
         初始化数据库管理器
         
@@ -64,62 +80,34 @@ class DatabaseManager:
     def _connect_mongodb(self):
         """连接MongoDB"""
         try:
-            # 连接池配置
-            pool_config = self.mongodb_config.get('connection_pool', {})
+            # Correctly configure the type registry for high-precision decoding.
+            type_registry = TypeRegistry([FloatAsDecimalDecoder()])
             
-            # 检查是否使用URI格式连接
-            mongo_uri = self.mongodb_config.get('uri')
+            # Per documentation, type_registry is a direct keyword argument to MongoClient.
+            self._mongo_client = MongoClient(
+                self.mongodb_config.get('uri', 'mongodb://localhost:27017/'),
+                maxPoolSize=self.mongodb_config.get('connection_pool', {}).get('max_pool_size', 100),
+                minPoolSize=self.mongodb_config.get('connection_pool', {}).get('min_pool_size', 10),
+                maxIdleTimeMS=self.mongodb_config.get('connection_pool', {}).get('max_idle_time_ms', 30000),
+                connectTimeoutMS=self.mongodb_config.get('connection_pool', {}).get('connect_timeout_ms', 20000),
+                serverSelectionTimeoutMS=self.mongodb_config.get('connection_pool', {}).get('server_selection_timeout_ms', 30000),
+                type_registry=type_registry
+            )
             
-            if mongo_uri:
-                # 使用URI格式连接
-                self._mongo_client = MongoClient(
-                    mongo_uri,
-                    maxPoolSize=pool_config.get('max_pool_size', 100),
-                    minPoolSize=pool_config.get('min_pool_size', 10),
-                    maxIdleTimeMS=pool_config.get('max_idle_time_ms', 30000),
-                    connectTimeoutMS=pool_config.get('connect_timeout_ms', 20000),
-                    serverSelectionTimeoutMS=pool_config.get('server_selection_timeout_ms', 30000)
-                )
-                
-                # 从客户端获取数据库，更稳健
-                self._mongo_db = self._mongo_client.get_database()
-                db_name = self._mongo_db.name
-                
-                connection_info = f"URI: {mongo_uri} (DB: {db_name})"
-                
-            else:
-                # 使用传统的host/port方式连接
-                mongo_host = self.mongodb_config.get('host', 'localhost')
-                mongo_port = self.mongodb_config.get('port', 27017)
-                db_name = self.mongodb_config.get('database', 'Unit_Info')
-                
-                # 认证配置
-                username = self.mongodb_config.get('username')
-                password = self.mongodb_config.get('password')
-                auth_source = self.mongodb_config.get('auth_source')
-                
-                self._mongo_client = MongoClient(
-                    host=mongo_host,
-                    port=mongo_port,
-                    username=username,
-                    password=password,
-                    authSource=auth_source,
-                    maxPoolSize=pool_config.get('max_pool_size', 100),
-                    minPoolSize=pool_config.get('min_pool_size', 10),
-                    maxIdleTimeMS=pool_config.get('max_idle_time_ms', 30000),
-                    connectTimeoutMS=pool_config.get('connect_timeout_ms', 20000),
-                    serverSelectionTimeoutMS=pool_config.get('server_selection_timeout_ms', 30000)
-                )
-                
-                self._mongo_db = self._mongo_client[db_name]
-                connection_info = f"{mongo_host}:{mongo_port}/{db_name}"
+            # 从客户端获取数据库，更稳健
+            self._mongo_db = self._mongo_client.get_database()
+            db_name = self._mongo_db.name
+            
+            connection_info = f"URI: {self.mongodb_config.get('uri', 'mongodb://localhost:27017/')} (DB: {db_name})"
             
             # 测试连接
             self._mongo_client.admin.command('ping')
             logger.info(f"MongoDB连接成功: {connection_info}")
             
-        except Exception as e:
-            logger.error(f"MongoDB连接失败: {str(e)}")
+        except ConnectionFailure as e:
+            logger.error(f"MongoDB连接失败: {e}")
+            self._mongo_client = None
+            self._mongo_db = None
             raise
             
     def _connect_redis(self):
@@ -145,14 +133,15 @@ class DatabaseManager:
             if redis_username:
                 redis_params['username'] = redis_username
             
-            self._redis_client = redis.Redis(**redis_params)
+            self._redis_client = Redis(**redis_params)
             
             # 测试连接
             self._redis_client.ping()
             logger.info(f"Redis连接成功: {redis_host}:{redis_port}/{redis_db}")
             
-        except Exception as e:
-            logger.error(f"Redis连接失败: {str(e)}")
+        except RedisConnectionError as e:
+            logger.error(f"Redis连接失败: {e}")
+            self._redis_client = None
             raise
             
     def get_collection(self, collection_name: str) -> Collection:
@@ -169,7 +158,7 @@ class DatabaseManager:
             raise Exception("MongoDB未连接")
         return self._mongo_db[collection_name]
         
-    def get_redis_client(self) -> redis.Redis:
+    def get_redis_client(self) -> Redis:
         """
         获取Redis客户端
         
@@ -515,4 +504,52 @@ class DatabaseManager:
                 logger.info("Redis连接已关闭")
                 
         except Exception as e:
-            logger.error(f"关闭数据库连接失败: {str(e)}") 
+            logger.error(f"关闭数据库连接失败: {str(e)}")
+
+    def connect_mongo(self, mongo_config: Dict[str, Any]):
+        uri = mongo_config.get('uri', 'mongodb://localhost:27017/')
+        db_name = mongo_config.get('database', 'Unit_Info')
+        
+        try:
+            # Correctly configure the type registry for high-precision decoding.
+            type_registry = TypeRegistry([FloatAsDecimalDecoder()])
+            
+            # Per documentation, type_registry is a direct keyword argument to MongoClient.
+            self._db_client = MongoClient(uri, serverSelectionTimeoutMS=5000, type_registry=type_registry)
+            self._db_client.server_info()
+            self._db = self._db_client[db_name]
+            logger.info(f"MongoDB连接成功 (高精度模式): URI: {uri} (DB: {db_name})")
+        except ConnectionFailure as e:
+            logger.error(f"MongoDB连接失败: {e}")
+            self._db_client = None
+            self._db = None
+            raise
+
+    def connect_redis(self, redis_config: Dict[str, Any]):
+        host = redis_config.get('host', 'localhost')
+        port = redis_config.get('port', 6379)
+        db = redis_config.get('db', 0)
+        password = redis_config.get('password')
+        username = redis_config.get('username')
+        
+        # 构建Redis连接参数
+        redis_params = {
+            'host': host,
+            'port': port,
+            'db': db,
+            'decode_responses': redis_config.get('decode_responses', True)
+        }
+        
+        # 添加认证参数（如果提供）
+        if password:
+            redis_params['password'] = password
+        if username:
+            redis_params['username'] = username
+        
+        self._redis_client = Redis(**redis_params)
+        
+        # 测试连接
+        self._redis_client.ping()
+        logger.info(f"Redis连接成功: {host}:{port}/{db}")
+        
+        return self._redis_client 

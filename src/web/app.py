@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Dict, List
 import pandas as pd
 import io
+from decimal import Decimal, InvalidOperation
 
 # 导入自定义模块
 from src.database.connection import DatabaseManager
@@ -364,7 +365,14 @@ def _format_match_results(raw_results: List[Dict]) -> List[Dict]:
         primary_id = safe_get('primary_record_id') or safe_get('_id')
         matched_id = safe_get('matched_record_id', 'no_match')
         match_id = generate_match_id(str(primary_id), str(matched_id))
-        
+
+        # 辅助函数：安全地将ID转换为字符串
+        def to_str(val):
+            # The value might now be a Decimal object, handle it gracefully.
+            if isinstance(val, Decimal):
+                return format(val, 'f') # Convert Decimal to a plain string without scientific notation.
+            return str(val) if val is not None else None
+
         new_results.append({
             # 基本信息
             'primary_unit_name': safe_get('primary_unit_name') or safe_get('unit_name'),
@@ -389,13 +397,15 @@ def _format_match_results(raw_results: List[Dict]) -> List[Dict]:
             'primary_phone': safe_get('primary_phone') or safe_get('contact_phone') or safe_get('phone'),
             'matched_phone': safe_get('matched_phone') or safe_get('matched_contact_phone'),
             
-            # 其他信息
-            'primary_credit_code': safe_get('primary_credit_code') or safe_get('credit_code'),
-            'matched_credit_code': safe_get('matched_credit_code'),
+            # 其他信息 (确保ID为字符串)
+            'primary_credit_code': to_str(safe_get('primary_credit_code') or safe_get('credit_code')),
+            'matched_credit_code': to_str(safe_get('matched_credit_code')),
             
             # 系统信息
             '_id': str(row.get('_id')),
             'match_id': match_id, # 确保使用生成的match_id
+            'xfaqpc_jzdwxx_id': to_str(safe_get('xfaqpc_jzdwxx_id')),
+            'xxj_shdwjbxx_id': to_str(safe_get('xxj_shdwjbxx_id')),
             'review_status': safe_get('review_status', 'pending'),
             'review_notes': safe_get('review_notes', ''),
             'reviewer': safe_get('reviewer', ''),
@@ -574,7 +584,8 @@ def api_export_results():
         export_df = df[[
             'primary_unit_name', 'matched_unit_name', 'match_type', 'similarity_score',
             'review_status', 'primary_unit_address', 'matched_unit_address',
-            'primary_legal_person', 'matched_legal_person', 'primary_credit_code', 'matched_credit_code'
+            'primary_legal_person', 'matched_legal_person', 'primary_credit_code', 'matched_credit_code',
+            'xfaqpc_jzdwxx_id', 'xxj_shdwjbxx_id'
         ]].rename(columns={
             'primary_unit_name': '源单位名称',
             'matched_unit_name': '匹配单位名称',
@@ -586,15 +597,25 @@ def api_export_results():
             'primary_legal_person': '源单位法人',
             'matched_legal_person': '匹配单位法人',
             'primary_credit_code': '源单位信用代码',
-            'matched_credit_code': '匹配单位信用代码'
+            'matched_credit_code': '匹配单位信用代码',
+            'xfaqpc_jzdwxx_id': '源系统原始ID',
+            'xxj_shdwjbxx_id': '目标系统原始ID'
         })
         
         # 将相似度转换为百分比
         export_df['相似度'] = export_df['相似度'].apply(lambda x: f"{x*100:.1f}%" if isinstance(x, float) else x)
 
-        # 为信用代码添加特殊格式，防止Excel等软件自动转换为科学计数法
-        for col in ['源单位信用代码', '匹配单位信用代码']:
-            export_df[col] = export_df[col].apply(lambda x: f'="{x}"' if pd.notna(x) and x else '')
+        # 为信用代码和原始ID添加特殊格式，防止Excel等软件自动转换为科学计数法
+        def format_id_for_excel(value):
+            """Safely formats a value that might be an ID to prevent Excel's conversion."""
+            if value is None or not pd.notna(value) or str(value).strip() == '':
+                return ''
+            
+            # Since data is now pre-formatted as string, we just need to wrap it.
+            return f'="{str(value).strip()}"'
+
+        for col in ['源单位信用代码', '匹配单位信用代码', '源系统原始ID', '目标系统原始ID']:
+            export_df[col] = export_df[col].apply(format_id_for_excel)
 
         # 创建一个内存中的CSV文件
         output = io.BytesIO()

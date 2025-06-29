@@ -663,6 +663,7 @@ class OptimizedMatchProcessor:
         # 基础信息 - 以安全排查系统（source）为主记录
         result = {
             'primary_record_id': source_record.get('_id'),
+            'xfaqpc_jzdwxx_id': source_record.get('ID'), # 新增：源系统原始ID
             'primary_system': 'inspection',
             'primary_credit_code': source_record.get('CREDIT_CODE', ''),
             'unit_name': source_record.get('UNIT_NAME', ''),
@@ -674,6 +675,7 @@ class OptimizedMatchProcessor:
             'primary_security_manager': source_record.get('SECURITY_PEOPLE', ''),
             'legal_tel': source_record.get('SECURITY_TEL', ''),
             'matched_record_id': target_record.get('_id') if target_record else None,
+            'xxj_shdwjbxx_id': target_record.get('ID') if target_record else None, # 新增：目标系统原始ID
             'matched_system': 'supervision',
             'matched_unit_name': target_record.get('dwmc', '') if target_record else '',
             'matched_unit_address': target_record.get('dwdz', '') if target_record else '',
@@ -896,6 +898,7 @@ class OptimizedMatchProcessor:
         return {
             # 主记录信息（安全排查系统）
             'primary_record_id': source_record.get('_id'),
+            'xfaqpc_jzdwxx_id': source_record.get('ID'), # 新增：源系统原始ID
             'primary_system': 'inspection',
             'primary_credit_code': source_record.get('CREDIT_CODE', ''),
             'unit_name': source_record.get('UNIT_NAME', ''),
@@ -906,6 +909,7 @@ class OptimizedMatchProcessor:
             
             # 匹配记录信息（空，因为没有匹配）
             'matched_record_id': None,
+            'xxj_shdwjbxx_id': None, # 新增：目标系统原始ID
             'matched_system': None,
             'matched_unit_name': '',
             'matched_unit_address': '',

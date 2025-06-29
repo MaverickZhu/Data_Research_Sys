@@ -3,13 +3,15 @@ Flask Web应用主程序
 提供数据匹配进度管理的Web界面
 """
 
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, send_file
 from flask_cors import CORS
 import logging
 import yaml
 import os
 from datetime import datetime
 from typing import Dict, List
+import pandas as pd
+import io
 
 # 导入自定义模块
 from src.database.connection import DatabaseManager
@@ -348,6 +350,67 @@ def api_stop_matching(task_id):
         }), 500
 
 
+def _format_match_results(raw_results: List[Dict]) -> List[Dict]:
+    """将从数据库获取的原始匹配结果格式化为统一的结构"""
+    new_results = []
+    for row in raw_results:
+        # 安全获取字段值的辅助函数
+        def safe_get(key, default=None):
+            value = row.get(key, default)
+            # 统一处理各种形式的空值
+            return value if value not in [None, '', '-', 'null'] else default
+        
+        # 确保使用我们自己生成的、稳定的match_id
+        primary_id = safe_get('primary_record_id') or safe_get('_id')
+        matched_id = safe_get('matched_record_id', 'no_match')
+        match_id = generate_match_id(str(primary_id), str(matched_id))
+        
+        new_results.append({
+            # 基本信息
+            'primary_unit_name': safe_get('primary_unit_name') or safe_get('unit_name'),
+            'matched_unit_name': safe_get('matched_unit_name'),
+            'match_type': safe_get('match_type', 'none'),
+            'similarity_score': safe_get('similarity_score', 0),
+            'match_time': safe_get('match_time') or safe_get('matching_time') or safe_get('process_time'),
+            
+            # 地址信息
+            'primary_unit_address': safe_get('primary_unit_address') or safe_get('unit_address') or safe_get('address'),
+            'matched_unit_address': safe_get('matched_unit_address'),
+            
+            # 法定代表人信息
+            'primary_legal_person': safe_get('primary_legal_person') or safe_get('legal_person') or safe_get('contact_person'),
+            'matched_legal_person': safe_get('matched_legal_person'),
+            
+            # 消防安全管理人信息
+            'primary_security_manager': safe_get('primary_security_manager') or safe_get('SECURITY_PEOPLE') or safe_get('security_manager') or safe_get('fire_safety_manager'),
+            'matched_security_manager': safe_get('matched_security_manager') or safe_get('xfaqglr'),
+            
+            # 联系电话
+            'primary_phone': safe_get('primary_phone') or safe_get('contact_phone') or safe_get('phone'),
+            'matched_phone': safe_get('matched_phone') or safe_get('matched_contact_phone'),
+            
+            # 其他信息
+            'primary_credit_code': safe_get('primary_credit_code') or safe_get('credit_code'),
+            'matched_credit_code': safe_get('matched_credit_code'),
+            
+            # 系统信息
+            '_id': str(row.get('_id')),
+            'match_id': match_id, # 确保使用生成的match_id
+            'review_status': safe_get('review_status', 'pending'),
+            'review_notes': safe_get('review_notes', ''),
+            'reviewer': safe_get('reviewer', ''),
+            'review_time': safe_get('review_time'),
+            'created_time': safe_get('created_time'),
+            'updated_time': safe_get('updated_time'),
+            
+            # 匹配详情
+            'match_details': safe_get('match_details', {}),
+            'match_confidence': safe_get('match_confidence'),
+            'match_reason': safe_get('match_reason')
+        })
+    return new_results
+
+
 @app.route('/api/match_results')
 def api_get_match_results():
     """API: 获取匹配结果"""
@@ -366,62 +429,8 @@ def api_get_match_results():
             search_term=search_term # 传递搜索关键词
         )
         
-        # 重新组装前端需要的字段，提供更完整的数据
-        new_results = []
-        for row in results_data['results']:
-            # 安全获取字段值的辅助函数
-            def safe_get(key, default=None):
-                value = row.get(key, default)
-                return value if value not in [None, '', '-', 'null'] else default
-            
-            # 确保使用我们自己生成的、稳定的match_id
-            primary_id = safe_get('primary_record_id')
-            matched_id = safe_get('matched_record_id', 'no_match')
-            match_id = generate_match_id(str(primary_id), str(matched_id))
-            
-            new_results.append({
-                # 基本信息
-                'primary_unit_name': safe_get('primary_unit_name') or safe_get('unit_name'),
-                'matched_unit_name': safe_get('matched_unit_name'),
-                'match_type': safe_get('match_type', 'none'),
-                'similarity_score': safe_get('similarity_score', 0),
-                'match_time': safe_get('match_time') or safe_get('matching_time') or safe_get('process_time'),
-                
-                # 地址信息
-                'primary_unit_address': safe_get('primary_unit_address') or safe_get('unit_address') or safe_get('address'),
-                'matched_unit_address': safe_get('matched_unit_address'),
-                
-                # 法定代表人信息
-                'primary_legal_person': safe_get('primary_legal_person') or safe_get('legal_person') or safe_get('contact_person'),
-                'matched_legal_person': safe_get('matched_legal_person'),
-                
-                # 消防安全管理人信息
-                'primary_security_manager': safe_get('primary_security_manager') or safe_get('SECURITY_PEOPLE') or safe_get('security_manager') or safe_get('fire_safety_manager'),
-                'matched_security_manager': safe_get('matched_security_manager') or safe_get('xfaqglr'),
-                
-                # 联系电话
-                'primary_phone': safe_get('primary_phone') or safe_get('contact_phone') or safe_get('phone'),
-                'matched_phone': safe_get('matched_phone') or safe_get('matched_contact_phone'),
-                
-                # 其他信息
-                'primary_credit_code': safe_get('primary_credit_code') or safe_get('credit_code'),
-                'matched_credit_code': safe_get('matched_credit_code'),
-                
-                # 系统信息
-                '_id': str(row.get('_id')),
-                'match_id': match_id, # 确保使用生成的match_id
-                'review_status': safe_get('review_status', 'pending'),
-                'review_notes': safe_get('review_notes', ''),  # 添加审核备注字段
-                'reviewer': safe_get('reviewer', ''),  # 添加审核人字段
-                'review_time': safe_get('review_time'),  # 添加审核时间字段
-                'created_time': safe_get('created_time'),
-                'updated_time': safe_get('updated_time'),
-                
-                # 匹配详情
-                'match_details': safe_get('match_details', {}),
-                'match_confidence': safe_get('match_confidence'),
-                'match_reason': safe_get('match_reason')
-            })
+        # 使用新的辅助函数格式化结果
+        new_results = _format_match_results(results_data.get('results', []))
         
         results_data['results'] = new_results
         return jsonify(results_data)
@@ -536,23 +545,73 @@ def api_get_task_history():
 
 @app.route('/api/export_results')
 def api_export_results():
-    """API: 导出匹配结果"""
+    """API: 导出匹配结果为CSV文件"""
     try:
-        export_format = request.args.get('format', 'csv')  # csv, excel
+        # 获取查询参数
         match_type = request.args.get('match_type')
-        
-        # 导出结果
-        file_path = match_processor.export_results(
-            format=export_format,
-            match_type=match_type
+        search_term = request.args.get('search_term')
+
+        # 获取所有匹配结果（不分页）
+        # 我们通过设置一个极大的per_page值来获取所有数据
+        # 更好的方法是修改get_match_results以支持导出模式
+        results_data = db_manager.get_match_results(
+            page=1,
+            per_page=1000000, # 获取所有数据
+            match_type=match_type,
+            search_term=search_term
         )
-        
-        return jsonify({
-            'success': True,
-            'file_path': file_path,
-            'download_url': f'/download/{os.path.basename(file_path)}'
+
+        # 使用辅助函数格式化结果
+        formatted_results = _format_match_results(results_data.get('results', []))
+
+        if not formatted_results:
+            return jsonify({'success': False, 'message': '没有可导出的数据'}), 404
+
+        # 使用pandas创建DataFrame
+        df = pd.DataFrame(formatted_results)
+
+        # 选择并重命名字段
+        export_df = df[[
+            'primary_unit_name', 'matched_unit_name', 'match_type', 'similarity_score',
+            'review_status', 'primary_unit_address', 'matched_unit_address',
+            'primary_legal_person', 'matched_legal_person', 'primary_credit_code', 'matched_credit_code'
+        ]].rename(columns={
+            'primary_unit_name': '源单位名称',
+            'matched_unit_name': '匹配单位名称',
+            'match_type': '匹配类型',
+            'similarity_score': '相似度',
+            'review_status': '审核状态',
+            'primary_unit_address': '源单位地址',
+            'matched_unit_address': '匹配单位地址',
+            'primary_legal_person': '源单位法人',
+            'matched_legal_person': '匹配单位法人',
+            'primary_credit_code': '源单位信用代码',
+            'matched_credit_code': '匹配单位信用代码'
         })
         
+        # 将相似度转换为百分比
+        export_df['相似度'] = export_df['相似度'].apply(lambda x: f"{x*100:.1f}%" if isinstance(x, float) else x)
+
+        # 为信用代码添加特殊格式，防止Excel等软件自动转换为科学计数法
+        for col in ['源单位信用代码', '匹配单位信用代码']:
+            export_df[col] = export_df[col].apply(lambda x: f'="{x}"' if pd.notna(x) and x else '')
+
+        # 创建一个内存中的CSV文件
+        output = io.BytesIO()
+        export_df.to_csv(output, index=False, encoding='utf-8-sig')
+        output.seek(0)
+
+        # 生成文件名
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"match_results_{timestamp}.csv"
+
+        return send_file(
+            output,
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name=filename
+        )
+
     except Exception as e:
         logger.error(f"导出结果失败: {str(e)}")
         return jsonify({

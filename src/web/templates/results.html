@@ -431,5 +431,19 @@
             unitInfo.innerHTML = `<div class="alert alert-danger">请求失败: ${error.message}</div>`;
         }
     }
+
+    function exportResults() {
+        const matchType = document.getElementById('match-type-filter').value;
+        const searchTerm = document.getElementById('search-term').value;
+
+        const params = new URLSearchParams();
+        if (matchType) params.append('match_type', matchType);
+        if (searchTerm) params.append('search_term', searchTerm);
+        
+        const exportUrl = `/api/export_results?${params.toString()}`;
+        
+        // 通过设置 window.location.href 触发文件下载
+        window.location.href = exportUrl;
+    }
 </script>
 {% endblock %} 

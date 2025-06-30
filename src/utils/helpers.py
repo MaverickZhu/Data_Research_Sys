@@ -293,19 +293,36 @@ def generate_match_id(source_id: str, target_id: str) -> str:
     return hash_obj.hexdigest()[:16]  # 取前16位
 
 
-def batch_iterator(items: list, batch_size: int = 100):
+def batch_iterator(items: Union[list, 'pymongo.collection.Collection'], batch_size: int = 100):
     """
-    批量迭代器
+    通用批量迭代器，支持列表和PyMongo集合。
     
     Args:
-        items: 数据列表
+        items: 数据列表或PyMongo集合对象
         batch_size: 批次大小
         
     Yields:
         list: 批次数据
     """
-    for i in range(0, len(items), batch_size):
-        yield items[i:i + batch_size]
+    try:
+        from pymongo.collection import Collection
+        is_collection = isinstance(items, Collection)
+    except ImportError:
+        is_collection = False
+
+    if is_collection:
+        # 处理PyMongo集合
+        skip = 0
+        while True:
+            batch = list(items.find({}).skip(skip).limit(batch_size))
+            if not batch:
+                break
+            yield batch
+            skip += batch_size
+    else:
+        # 处理列表
+        for i in range(0, len(items), batch_size):
+            yield items[i:i + batch_size]
 
 
 def memory_usage() -> dict:

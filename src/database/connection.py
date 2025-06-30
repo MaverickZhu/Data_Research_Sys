@@ -15,34 +15,19 @@ from src.utils.helpers import convert_objectid_to_str
 from pymongo.errors import ConnectionFailure
 from redis import Redis
 from redis.exceptions import ConnectionError as RedisConnectionError
-from bson.codec_options import CodecOptions, TypeRegistry, TypeDecoder
-from bson.decimal128 import Decimal128
 from decimal import Decimal, ROUND_HALF_UP
 
 logger = logging.getLogger(__name__)
-
-class FloatAsDecimalDecoder(TypeDecoder):
-    """
-    A TypeDecoder to automatically decode BSON doubles (read as floats)
-    into Python Decimals to preserve precision.
-    """
-    bson_type = float
-
-    def transform_bson(self, value: float) -> Decimal:
-        """Transforms a BSON float to a Python Decimal."""
-        return Decimal(str(value))
 
 class DatabaseManager:
     """数据库管理器（单例模式）"""
     _instance = None
     _lock = Lock()
-    _db_client = None
-    _redis_client = None
-    _db = None
 
     def __new__(cls, *args, **kwargs):
-        if not cls._instance:
-            cls._instance = super(DatabaseManager, cls).__new__(cls)
+        with cls._lock:
+            if not cls._instance:
+                cls._instance = super(DatabaseManager, cls).__new__(cls)
         return cls._instance
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
@@ -80,18 +65,13 @@ class DatabaseManager:
     def _connect_mongodb(self):
         """连接MongoDB"""
         try:
-            # Correctly configure the type registry for high-precision decoding.
-            type_registry = TypeRegistry([FloatAsDecimalDecoder()])
-            
-            # Per documentation, type_registry is a direct keyword argument to MongoClient.
             self._mongo_client = MongoClient(
                 self.mongodb_config.get('uri', 'mongodb://localhost:27017/'),
                 maxPoolSize=self.mongodb_config.get('connection_pool', {}).get('max_pool_size', 100),
                 minPoolSize=self.mongodb_config.get('connection_pool', {}).get('min_pool_size', 10),
                 maxIdleTimeMS=self.mongodb_config.get('connection_pool', {}).get('max_idle_time_ms', 30000),
                 connectTimeoutMS=self.mongodb_config.get('connection_pool', {}).get('connect_timeout_ms', 20000),
-                serverSelectionTimeoutMS=self.mongodb_config.get('connection_pool', {}).get('server_selection_timeout_ms', 30000),
-                type_registry=type_registry
+                serverSelectionTimeoutMS=self.mongodb_config.get('connection_pool', {}).get('server_selection_timeout_ms', 30000)
             )
             
             # 从客户端获取数据库，更稳健
@@ -511,14 +491,10 @@ class DatabaseManager:
         db_name = mongo_config.get('database', 'Unit_Info')
         
         try:
-            # Correctly configure the type registry for high-precision decoding.
-            type_registry = TypeRegistry([FloatAsDecimalDecoder()])
-            
-            # Per documentation, type_registry is a direct keyword argument to MongoClient.
-            self._db_client = MongoClient(uri, serverSelectionTimeoutMS=5000, type_registry=type_registry)
+            self._db_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
             self._db_client.server_info()
             self._db = self._db_client[db_name]
-            logger.info(f"MongoDB连接成功 (高精度模式): URI: {uri} (DB: {db_name})")
+            logger.info(f"MongoDB连接成功: URI: {uri} (DB: {db_name})")
         except ConnectionFailure as e:
             logger.error(f"MongoDB连接失败: {e}")
             self._db_client = None
@@ -552,4 +528,4 @@ class DatabaseManager:
         self._redis_client.ping()
         logger.info(f"Redis连接成功: {host}:{port}/{db}")
         
-        return self._redis_client 
+        return self._redis_client

@@ -6,10 +6,9 @@
 import pymongo
 from typing import Dict, List
 import logging
-from rapidfuzz import process, fuzz
 import jieba
 import json
-import re  # 导入re模块
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +57,8 @@ class PrefilterSystem:
         
         # 转换回完整记录
         if candidates:
+            # 增加查询候选项数量的日志
+            logger.info(f"为 {source_record.get('UNIT_NAME', 'Unknown')} 找到 {len(candidates)} 个候选。")
             return list(self.db['xxj_shdwjbxx'].find({'_id': {'$in': list(candidates)}}))
         else:
             return []
@@ -98,27 +99,25 @@ class PrefilterSystem:
             
             candidates = list(self.db['xxj_shdwjbxx'].find(query).limit(self.config['max_candidates_per_method']))
             return candidates
-    
+
     def _filter_by_address(self, source_record: Dict) -> List[Dict]:
-        """基于地址筛选"""
+        """基于地址筛选，现在使用文本索引"""
         source_address = source_record.get('ADDRESS', '')
-        if not source_address:
+        if not isinstance(source_address, str) or not source_address.strip():
             return []
         
-        # 提取地址关键词
-        keywords = self._extract_address_keywords(source_address)
-        if not keywords:
+        # 使用与名称筛选相同的文本搜索逻辑
+        try:
+            query = {'$text': {'$search': source_address}}
+            candidates = list(self.db['xxj_shdwjbxx'].find(
+                query, 
+                {'score': {'$meta': 'textScore'}}
+            ).sort([('score', {'$meta': 'textScore'})]).limit(self.config['max_candidates_per_method']))
+            return candidates
+        except Exception as e:
+            logger.debug(f"地址文本搜索失败: {e}")
+            # 作为备用，可以返回空列表或执行更简单的查询
             return []
-        
-        # 使用$or操作符为每个关键词构建查询，并对特殊字符进行转义
-        regex_queries = [{'dwdz': {'$regex': re.escape(keyword), '$options': 'i'}} for keyword in keywords]
-        query = {'$or': regex_queries}
-        
-        # 在执行前记录查询
-        logger.info(f"正在执行地址预过滤查询: {json.dumps(query, ensure_ascii=False)}")
-        
-        candidates = list(self.db['xxj_shdwjbxx'].find(query).limit(self.config['max_candidates_per_method']))
-        return candidates
     
     def _filter_by_legal_person(self, source_record: Dict) -> List[Dict]:
         """基于法定代表人筛选"""

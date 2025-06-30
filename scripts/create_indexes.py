@@ -16,46 +16,71 @@ def create_indexes():
     """为关键集合创建索引以优化查询性能。"""
     try:
         logger.info("正在初始化数据库管理器以创建索引...")
-        # 初始化配置以获取数据库连接信息
         config_manager = ConfigManager()
         db_manager = DatabaseManager(config=config_manager.get_database_config())
         db = db_manager.get_db()
 
+        # 1. 为源数据集合 (xxj_shdwjbxx) 创建索引
+        logger.info("--- 正在处理源数据集合 (xxj_shdwjbxx) ---")
         target_collection_name = 'xxj_shdwjbxx'
         target_collection = db[target_collection_name]
-        logger.info(f"目标集合: {target_collection.name}")
-
-        # 定义需要创建的索引
-        indexes_to_create = {
-            "dwmc_text": ([("dwmc", TEXT)], {"default_language": "none"}),
-            "dwdz_asc": ([("dwdz", ASCENDING)], {}),
-            "fddbr_asc": ([("fddbr", ASCENDING)], {})
+        
+        # 定义索引
+        source_indexes = {
+            "compound_text_index": ([("dwmc", TEXT), ("dwdz", TEXT)], {"default_language": "none", "name": "compound_text_index"}),
+            "fddbr_asc": ([("fddbr", ASCENDING)], {"name": "fddbr_asc"})
         }
 
-        # 获取已存在的索引信息，并提取出被索引的字段
-        existing_indexes_info = target_collection.index_information()
-        indexed_fields = set()
-        for index in existing_indexes_info.values():
-            if 'key' in index:
-                indexed_fields.update(field[0] for field in index['key'])
-        
-        logger.info(f"已存在的索引: {list(existing_indexes_info.keys())}")
-        logger.info(f"已被索引的字段: {indexed_fields}")
+        existing_source_indexes = target_collection.index_information()
+        logger.info(f"'{target_collection_name}' 上已存在的索引: {list(existing_source_indexes.keys())}")
 
-        for index_name, (keys, options) in indexes_to_create.items():
-            # 检查该索引的第一个字段是否已经被索引
-            field_to_check = keys[0][0]
-            if field_to_check in indexed_fields:
-                logger.info(f"ℹ️ 字段 '{field_to_check}' 已被其他索引覆盖，跳过创建 {index_name}。")
-                continue
+        for index_name, (keys, options) in source_indexes.items():
+            if options["name"] in existing_source_indexes:
+                logger.info(f"ℹ️ 源集合索引 '{options['name']}' 已存在，跳过。")
+            else:
+                logger.info(f"正在创建源集合索引: {options['name']}...")
+                target_collection.create_index(keys, **options)
+                logger.info(f"✅ 源集合索引 {options['name']} 创建成功。")
 
-            logger.info(f"正在创建索引: {index_name} ... (这可能需要一些时间)")
-            target_collection.create_index(keys, name=index_name, **options)
-            logger.info(f"✅ 索引 {index_name} 创建成功。")
-            # 更新已索引字段集合
-            indexed_fields.add(field_to_check)
+        # 2. 为基础匹配结果集合 (unit_match_results) 创建索引
+        logger.info("\n--- 正在处理基础匹配结果集合 (unit_match_results) ---")
+        results_collection_name = 'unit_match_results'
+        results_collection = db[results_collection_name]
         
-        logger.info("🎉 索引创建流程完成。")
+        result_indexes = {
+            "res_unit_name": ([("unit_name", ASCENDING)], {"name": "res_unit_name"}),
+            "res_credit_code": ([("primary_credit_code", ASCENDING)], {"name": "res_credit_code"}),
+            "res_building_id": ([("building_id", ASCENDING)], {"name": "res_building_id"})
+        }
+
+        existing_result_indexes = results_collection.index_information()
+        logger.info(f"'{results_collection_name}' 上已存在的索引: {list(existing_result_indexes.keys())}")
+        
+        for index_name, (keys, options) in result_indexes.items():
+            if options["name"] in existing_result_indexes:
+                logger.info(f"ℹ️ 基础匹配结果索引 '{options['name']}' 已存在，跳过。")
+            else:
+                logger.info(f"正在创建基础匹配结果索引: {options['name']}...")
+                results_collection.create_index(keys, **options)
+                logger.info(f"✅ 基础匹配结果索引 {options['name']} 创建成功。")
+        
+        # 3. 为增强关联结果集合 (enhanced_association_results) 创建唯一索引
+        logger.info("\n--- 正在处理增强关联结果集合 (enhanced_association_results) ---")
+        final_collection_name = 'enhanced_association_results'
+        final_collection = db[final_collection_name]
+
+        final_index_name = "association_id_unique"
+        existing_final_indexes = final_collection.index_information()
+        logger.info(f"'{final_collection_name}' 上已存在的索引: {list(existing_final_indexes.keys())}")
+
+        if final_index_name not in existing_final_indexes:
+            logger.info(f"正在创建唯一索引: '{final_index_name}'...")
+            final_collection.create_index([("association_id", ASCENDING)], name=final_index_name, unique=True)
+            logger.info(f"✅ 唯一索引 '{final_index_name}' 创建成功。")
+        else:
+            logger.info(f"ℹ️ 唯一索引 '{final_index_name}' 已存在。")
+
+        logger.info("\n🎉 所有索引创建流程完成。")
 
     except Exception as e:
         logger.error(f"创建索引失败: {e}", exc_info=True)

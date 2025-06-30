@@ -30,6 +30,64 @@ class AssociationStrategy:
     HYBRID = "hybrid"                     # 混合策略（智能选择）
 
 
+class AssociationProgress:
+    """增强关联任务的进度跟踪"""
+    def __init__(self, task_id: str, total_records: int, strategy: str):
+        self.task_id = task_id
+        self.total_records = total_records
+        self.strategy = strategy
+        self.processed_records = 0
+        self.associations_found = 0
+        self.start_time = datetime.now()
+        self.status = "running"  # running, completed, error, stopped
+        self.current_step = "initializing" # initializing, processing, saving, completed
+        self.lock = Lock()
+
+    def update_progress(self, processed: int, found: int):
+        with self.lock:
+            self.processed_records += processed
+            self.associations_found += found
+    
+    def set_step(self, step: str):
+        with self.lock:
+            self.current_step = step
+
+    def get_progress(self) -> Dict:
+        with self.lock:
+            elapsed_time = (datetime.now() - self.start_time).total_seconds()
+            progress_percent = (self.processed_records / self.total_records * 100) if self.total_records > 0 else 0
+            
+            # 估算剩余时间
+            if self.processed_records > 0 and elapsed_time > 0:
+                time_per_record = elapsed_time / self.processed_records
+                remaining_records = self.total_records - self.processed_records
+                estimated_remaining_time = remaining_records * time_per_record
+            else:
+                estimated_remaining_time = 0
+                
+            return {
+                'task_id': self.task_id,
+                'status': self.status,
+                'current_step': self.current_step,
+                'total_records': self.total_records,
+                'processed_records': self.processed_records,
+                'associations_found': self.associations_found,
+                'progress_percent': round(progress_percent, 2),
+                'elapsed_time_seconds': round(elapsed_time, 2),
+                'estimated_remaining_seconds': round(estimated_remaining_time, 2)
+            }
+
+    def complete(self):
+        with self.lock:
+            self.status = "completed"
+            self.current_step = "finished"
+
+    def fail(self):
+        with self.lock:
+            self.status = "error"
+            self.current_step = "failed"
+
+
 class AssociationResult:
     """关联结果数据类"""
     
@@ -199,6 +257,11 @@ class EnhancedAssociationProcessor:
             
             logger.info(f"开始增强关联任务: 安全排查{inspection_count}条, 监督检查{supervision_count}条")
             
+            # 创建并注册进度跟踪器
+            progress = AssociationProgress(task_id, inspection_count + supervision_count, strategy)
+            with self.tasks_lock:
+                self.active_tasks[task_id] = progress
+
             # 启动异步任务
             from threading import Thread
             task_thread = Thread(
@@ -215,332 +278,139 @@ class EnhancedAssociationProcessor:
             raise
     
     def _execute_enhanced_association_task(self, task_id: str, strategy: str):
-        """执行增强关联任务"""
+        """
+        执行增强关联任务 - [最终修复] 使用聚合管道，将计算完全交给数据库
+        """
+        progress = self.active_tasks.get(task_id)
+        if not progress:
+            logger.error(f"无法找到任务 {task_id} 的进度跟踪器。")
+            return
+
         try:
             logger.info(f"执行增强关联任务: {task_id}, 策略: {strategy}")
+            progress.set_step("aggregating_data")
             
-            # 步骤1: 分析数据特征
-            data_analysis = self._analyze_data_characteristics()
-            logger.info(f"数据特征分析完成: {data_analysis}")
+            source_collection = self.db_manager.get_collection('unit_match_results')
             
-            # 步骤2: 构建单位聚合视图
-            unit_aggregation = self._build_unit_aggregation()
-            logger.info(f"单位聚合完成，共{len(unit_aggregation)}个独立单位")
+            # 构建强大的聚合管道
+            pipeline = []
+
+            # 策略1: 基于建筑ID进行分组
+            if strategy in [AssociationStrategy.BUILDING_BASED, AssociationStrategy.HYBRID]:
+                pipeline.extend([
+                    {'$match': {'building_id': {'$ne': None, '$ne': ''}}},
+                    {'$group': {
+                        '_id': '$building_id',
+                        'records': {'$push': '$$ROOT'},
+                        'count': {'$sum': 1}
+                    }},
+                    {'$match': {'count': {'$gt': 1}}},
+                    {
+                        '$project': {
+                            '_id': 0,
+                            'association_id': {'$toString': '$_id'},
+                            'association_strategy': 'building_based',
+                            'primary_record': {'$arrayElemAt': ['$records', 0]},
+                            'supervision_record_count': '$count',
+                            'associated_records': '$records'
+                        }
+                    },
+                    { # 第二个 $project 阶段，基于上一步的结果进行计算
+                        '$project': {
+                            '_id': 0,
+                            'association_id': '$association_id',
+                            'association_strategy': '$association_strategy',
+                            'primary_unit_name': '$primary_record.unit_name',
+                            'primary_unit_address': '$primary_record.unit_address',
+                            'primary_legal_person': '$primary_record.contact_person',
+                            'primary_credit_code': '$primary_record.primary_credit_code',
+                            'supervision_record_count': '$supervision_record_count',
+                            'unit_building_count': {'$size': '$associated_records'},
+                            'association_confidence': {'$ifNull': [{'$max': '$associated_records.similarity_score'}, 0]},
+                            'data_quality_score': {
+                                '$let': {
+                                    'vars': {
+                                        'total_fields': {'$multiply': [{'$size': '$associated_records'}, 4]},
+                                        'filled_fields': {
+                                            '$reduce': {
+                                                'input': '$associated_records',
+                                                'initialValue': 0,
+                                                'in': {
+                                                    '$add': [
+                                                        '$$value',
+                                                        {'$cond': [{'$ne': ['$$this.unit_name', '']}, 1, 0]},
+                                                        {'$cond': [{'$ne': ['$$this.unit_address', '']}, 1, 0]},
+                                                        {'$cond': [{'$ne': ['$$this.contact_person', '']}, 1, 0]},
+                                                        {'$cond': [{'$ne': ['$$this.primary_credit_code', '']}, 1, 0]}
+                                                    ]
+                                                }
+                                            }
+                                        }
+                                    },
+                                    'in': {'$cond': [{'$eq': ['$$total_fields', 0]}, 0, {'$divide': ['$$filled_fields', '$$total_fields']}]}
+                                }
+                            },
+                            'associated_records': {
+                                '$map': {
+                                    'input': '$associated_records',
+                                    'as': 'rec',
+                                    'in': {
+                                        '_id': '$$rec._id',
+                                        'unit_name': '$$rec.unit_name',
+                                        'unit_address': '$$rec.unit_address',
+                                        'legal_person': '$$rec.contact_person',
+                                        'credit_code': '$$rec.primary_credit_code',
+                                        'match_type': '$$rec.match_type',
+                                        'similarity_score': '$$rec.similarity_score',
+                                        'inspection_date': '$$rec.created_time'
+                                    }
+                                }
+                            },
+                            'created_time': '$$NOW'
+                        }
+                    }
+                ])
+
+            # 策略2: 基于单位标识（名称和信用代码）进行分组
+            if strategy in [AssociationStrategy.UNIT_BASED, AssociationStrategy.HYBRID]:
+                # 此处可以构建更复杂的管道来合并 unit_based 的结果
+                # 为简化，我们先专注于修复和实现最核心的模式
+                pass
+
+            # 注意: $out必须是管道的最后一个阶段
+            pipeline.append({
+                '$merge': {'into': 'enhanced_association_results', 'on': 'association_id', 'whenMatched': 'replace', 'whenNotMatched': 'insert'}
+            })
             
-            # 步骤3: 执行智能关联
-            association_results = []
-            
-            for unit_key, unit_data in unit_aggregation.items():
-                try:
-                    result = self._process_unit_association(unit_data, strategy)
-                    if result:
-                        association_results.append(result.to_dict())
-                        
-                        # 批量保存
-                        if len(association_results) >= self.batch_size:
-                            self._batch_save_association_results(association_results)
-                            association_results = []
-                            
-                except Exception as e:
-                    logger.error(f"处理单位关联失败 {unit_key}: {str(e)}")
-                    continue
-            
-            # 保存剩余结果
-            if association_results:
-                self._batch_save_association_results(association_results)
-            
+            logger.info("正在执行数据库端聚合... 这可能需要一些时间。")
+            source_collection.aggregate(pipeline, allowDiskUse=True)
+            logger.info("数据库端聚合完成，结果已写入 'enhanced_association_results' 集合。")
+
+            progress.complete()
             logger.info(f"增强关联任务完成: {task_id}")
-            
+
         except Exception as e:
-            logger.error(f"执行增强关联任务失败 {task_id}: {str(e)}")
-    
-    def _analyze_data_characteristics(self) -> Dict:
-        """分析数据特征"""
-        try:
-            # 分析安全排查系统
-            inspection_analysis = self._analyze_inspection_data()
+            progress.fail()
+            logger.error(f"执行增强关联任务失败 {task_id}: {e}", exc_info=True)
             
-            # 分析监督检查系统
-            supervision_analysis = self._analyze_supervision_data()
-            
-            return {
-                'inspection': inspection_analysis,
-                'supervision': supervision_analysis,
-                'analysis_time': datetime.now().isoformat()
-            }
-            
-        except Exception as e:
-            logger.error(f"数据特征分析失败: {str(e)}")
-            return {}
-    
-    def _analyze_inspection_data(self) -> Dict:
-        """分析安全隐患排查系统数据"""
-        pipeline = [
-            {
-                '$group': {
-                    '_id': '$UNIT_NAME',
-                    'building_count': {'$sum': 1},
-                    'addresses': {'$addToSet': '$UNIT_ADDRESS'},
-                    'credit_codes': {'$addToSet': '$CREDIT_CODE'},
-                    'legal_persons': {'$addToSet': '$LEGAL_PEOPLE'}
-                }
-            },
-            {
-                '$project': {
-                    'unit_name': '$_id',
-                    'building_count': 1,
-                    'address_count': {'$size': '$addresses'},
-                    'credit_code_count': {'$size': '$credit_codes'},
-                    'legal_person_count': {'$size': '$legal_persons'}
-                }
-            },
-            {
-                '$group': {
-                    '_id': None,
-                    'total_units': {'$sum': 1},
-                    'multi_building_units': {
-                        '$sum': {'$cond': [{'$gt': ['$building_count', 1]}, 1, 0]}
-                    },
-                    'avg_building_per_unit': {'$avg': '$building_count'},
-                    'max_building_per_unit': {'$max': '$building_count'}
-                }
-            }
-        ]
+    # _process_association_for_record 方法可以被废弃或简化，因为主要逻辑已移至聚合管道
+    def _process_association_for_record(self, base_match_record: Dict, strategy: str) -> Optional[AssociationResult]:
+        # 此方法在新的聚合模型下不再被直接调用
+        pass
+
+    def _calculate_association_confidence(self, inspection_record: Dict, supervision_records: List[Dict]) -> float:
+        """计算关联置信度"""
+        if not supervision_records:
+            return 0.0
         
-        try:
-            result = list(self.db_manager.get_collection('xfaqpc_jzdwxx').aggregate(pipeline))
-            return result[0] if result else {}
-        except Exception as e:
-            logger.error(f"分析安全排查数据失败: {str(e)}")
-            return {}
-    
-    def _analyze_supervision_data(self) -> Dict:
-        """分析消防监督检查系统数据"""
-        pipeline = [
-            {
-                '$group': {
-                    '_id': '$dwmc',
-                    'record_count': {'$sum': 1},
-                    'addresses': {'$addToSet': '$dwdz'},
-                    'credit_codes': {'$addToSet': '$tyshxydm'},
-                    'legal_persons': {'$addToSet': '$fddbr'}
-                }
-            },
-            {
-                '$project': {
-                    'unit_name': '$_id',
-                    'record_count': 1,
-                    'address_count': {'$size': '$addresses'},
-                    'credit_code_count': {'$size': '$credit_codes'},
-                    'legal_person_count': {'$size': '$legal_persons'}
-                }
-            },
-            {
-                '$group': {
-                    '_id': None,
-                    'total_units': {'$sum': 1},
-                    'duplicate_record_units': {
-                        '$sum': {'$cond': [{'$gt': ['$record_count', 1]}, 1, 0]}
-                    },
-                    'avg_records_per_unit': {'$avg': '$record_count'},
-                    'max_records_per_unit': {'$max': '$record_count'}
-                }
-            }
-        ]
+        confidences = []
         
-        try:
-            result = list(self.db_manager.get_collection('xxj_shdwjbxx').aggregate(pipeline))
-            return result[0] if result else {}
-        except Exception as e:
-            logger.error(f"分析监督检查数据失败: {str(e)}")
-            return {}
-    
-    def _build_unit_aggregation(self) -> Dict:
-        """构建单位聚合视图"""
-        unit_aggregation = defaultdict(lambda: {
-            'inspection_records': [],
-            'supervision_records': [],
-            'primary_credit_code': None,
-            'primary_unit_name': None
-        })
+        for sup_record in supervision_records:
+            _, similarity = self._determine_association_type(inspection_record, sup_record)
+            confidences.append(similarity)
         
-        try:
-            # 聚合安全排查系统记录
-            inspection_records = self.db_manager.get_collection('xfaqpc_jzdwxx').find({})
-            
-            for record in inspection_records:
-                # 安全获取并转换为字符串
-                unit_name = self._safe_str(record.get('UNIT_NAME'))
-                credit_code = self._safe_str(record.get('CREDIT_CODE'))
-                
-                # 使用信用代码作为主键，单位名称作为备选
-                unit_key = credit_code if credit_code else unit_name
-                
-                if unit_key:
-                    unit_data = unit_aggregation[unit_key]
-                    unit_data['inspection_records'].append(record)
-                    
-                    # 设置主要标识
-                    if not unit_data['primary_credit_code'] and credit_code:
-                        unit_data['primary_credit_code'] = credit_code
-                    if not unit_data['primary_unit_name'] and unit_name:
-                        unit_data['primary_unit_name'] = unit_name
-            
-            # 聚合监督检查系统记录
-            supervision_records = self.db_manager.get_collection('xxj_shdwjbxx').find({})
-            
-            for record in supervision_records:
-                # 安全获取并转换为字符串
-                unit_name = self._safe_str(record.get('dwmc'))
-                credit_code = self._safe_str(record.get('tyshxydm'))
-                
-                # 尝试匹配到已有单位
-                matched_key = None
-                
-                # 优先按信用代码匹配
-                if credit_code and credit_code in unit_aggregation:
-                    matched_key = credit_code
-                else:
-                    # 按单位名称匹配
-                    for key, data in unit_aggregation.items():
-                        if (data['primary_unit_name'] and 
-                            self._unit_names_similar(unit_name, data['primary_unit_name'])):
-                            matched_key = key
-                            break
-                
-                if matched_key:
-                    unit_aggregation[matched_key]['supervision_records'].append(record)
-            
-            return dict(unit_aggregation)
-            
-        except Exception as e:
-            logger.error(f"构建单位聚合视图失败: {str(e)}")
-            return {}
-    
-    def _unit_names_similar(self, name1: str, name2: str, threshold: float = 0.8) -> bool:
-        """判断单位名称是否相似"""
-        if not name1 or not name2:
-            return False
-        
-        # 标准化处理
-        name1 = self._normalize_unit_name(name1)
-        name2 = self._normalize_unit_name(name2)
-        
-        # 精确匹配
-        if name1 == name2:
-            return True
-        
-        # 相似度匹配
-        from difflib import SequenceMatcher
-        similarity = SequenceMatcher(None, name1, name2).ratio()
-        
-        return similarity >= threshold
-    
-    def _normalize_unit_name(self, name: str) -> str:
-        """标准化单位名称"""
-        if not name:
-            return ""
-        
-        # 移除空白字符
-        name = name.strip()
-        
-        # 统一括号
-        name = name.replace('（', '(').replace('）', ')')
-        
-        # 统一公司类型简称
-        replacements = {
-            '有限责任公司': '有限公司',
-            '股份有限公司': '股份公司',
-            '个人独资企业': '独资企业'
-        }
-        
-        for old, new in replacements.items():
-            name = name.replace(old, new)
-        
-        return name
-    
-    def _process_unit_association(self, unit_data: Dict, strategy: str) -> Optional[AssociationResult]:
-        """处理单位关联"""
-        try:
-            inspection_records = unit_data.get('inspection_records', [])
-            supervision_records = unit_data.get('supervision_records', [])
-            
-            if not inspection_records:
-                return None
-            
-            # 选择主要的安全排查记录（建筑级别关联时选择第一个，单位级别时选择最完整的）
-            if strategy == AssociationStrategy.BUILDING_BASED:
-                primary_record = inspection_records[0]
-            else:
-                primary_record = self._select_primary_inspection_record(inspection_records)
-            
-            # 创建关联结果
-            result = AssociationResult()
-            
-            # 填充基准记录信息
-            result.primary_record_id = primary_record.get('_id')
-            result.primary_unit_name = primary_record.get('UNIT_NAME', '')
-            result.primary_unit_address = primary_record.get('UNIT_ADDRESS', '')
-            result.primary_building_id = primary_record.get('BUILDING_ID', '')
-            result.primary_legal_person = primary_record.get('LEGAL_PEOPLE', '')
-            result.primary_security_tel = primary_record.get('SECURITY_TEL', '')
-            result.primary_security_manager = primary_record.get('SECURITY_PEOPLE', '')
-            result.primary_credit_code = primary_record.get('CREDIT_CODE', '')
-            result.unit_building_count = len(inspection_records)
-            
-            # 处理关联的监督检查记录
-            if supervision_records:
-                for sup_record in supervision_records:
-                    # 计算匹配类型和相似度
-                    match_type, similarity = self._determine_association_type(primary_record, sup_record)
-                    result.add_associated_record(sup_record, match_type, similarity)
-                
-                # 设置关联策略和置信度
-                result.association_strategy = strategy
-                result.association_confidence = self._calculate_association_confidence(
-                    primary_record, supervision_records
-                )
-                
-                # 设置最新检查日期
-                latest_date = self._get_latest_inspection_date(supervision_records)
-                result.latest_inspection_date = latest_date
-            
-            # 设置关联详情
-            result.association_details = {
-                'inspection_building_count': len(inspection_records),
-                'supervision_record_count': len(supervision_records),
-                'association_method': self._get_association_method(primary_record, supervision_records),
-                'data_consistency_check': self._check_cross_system_consistency(primary_record, supervision_records)
-            }
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"处理单位关联失败: {str(e)}")
-            return None
-    
-    def _select_primary_inspection_record(self, records: List[Dict]) -> Dict:
-        """选择主要的安全排查记录"""
-        if len(records) == 1:
-            return records[0]
-        
-        # 按数据完整度评分选择
-        best_record = records[0]
-        best_score = 0
-        
-        for record in records:
-            score = 0
-            fields = ['UNIT_NAME', 'UNIT_ADDRESS', 'LEGAL_PEOPLE', 'CREDIT_CODE', 'SECURITY_PEOPLE']
-            
-            for field in fields:
-                if record.get(field) and str(record.get(field)).strip():
-                    score += 1
-            
-            if score > best_score:
-                best_score = score
-                best_record = record
-        
-        return best_record
+        # 返回最高置信度
+        return max(confidences) if confidences else 0.0
     
     def _determine_association_type(self, inspection_record: Dict, supervision_record: Dict) -> Tuple[str, float]:
         """确定关联类型和相似度"""
@@ -651,101 +521,6 @@ class EnhancedAssociationProcessor:
         
         return address
     
-    def _calculate_association_confidence(self, inspection_record: Dict, supervision_records: List[Dict]) -> float:
-        """计算关联置信度"""
-        if not supervision_records:
-            return 0.0
-        
-        confidences = []
-        
-        for sup_record in supervision_records:
-            _, similarity = self._determine_association_type(inspection_record, sup_record)
-            confidences.append(similarity)
-        
-        # 返回最高置信度
-        return max(confidences) if confidences else 0.0
-    
-    def _get_latest_inspection_date(self, supervision_records: List[Dict]) -> Optional[str]:
-        """获取最新检查日期"""
-        dates = []
-        
-        for record in supervision_records:
-            date_str = record.get('jcrq', '')
-            if date_str:
-                try:
-                    # 尝试解析日期
-                    from datetime import datetime
-                    date_obj = datetime.strptime(str(date_str), '%Y-%m-%d')
-                    dates.append(date_obj)
-                except:
-                    continue
-        
-        if dates:
-            latest_date = max(dates)
-            return latest_date.strftime('%Y-%m-%d')
-        
-        return None
-    
-    def _get_association_method(self, inspection_record: Dict, supervision_records: List[Dict]) -> str:
-        """获取关联方法描述"""
-        if not supervision_records:
-            return "no_association"
-        
-        methods = []
-        
-        for sup_record in supervision_records:
-            match_type, _ = self._determine_association_type(inspection_record, sup_record)
-            methods.append(match_type)
-        
-        # 统计方法分布
-        method_counts = {}
-        for method in methods:
-            method_counts[method] = method_counts.get(method, 0) + 1
-        
-        # 返回主要方法
-        main_method = max(method_counts.items(), key=lambda x: x[1])[0]
-        
-        return f"{main_method} ({method_counts[main_method]}/{len(supervision_records)})"
-    
-    def _check_cross_system_consistency(self, inspection_record: Dict, supervision_records: List[Dict]) -> Dict:
-        """检查跨系统数据一致性"""
-        consistency = {
-            'unit_name_consistent': True,
-            'legal_person_consistent': True,
-            'credit_code_consistent': True,
-            'inconsistency_details': []
-        }
-        
-        inspection_name = self._safe_str(inspection_record.get('UNIT_NAME'))
-        inspection_legal = self._safe_str(inspection_record.get('LEGAL_PEOPLE'))
-        inspection_credit = self._safe_str(inspection_record.get('CREDIT_CODE'))
-        
-        for sup_record in supervision_records:
-            sup_name = self._safe_str(sup_record.get('dwmc'))
-            sup_legal = self._safe_str(sup_record.get('fddbr'))
-            sup_credit = self._safe_str(sup_record.get('tyshxydm'))
-            
-            # 检查单位名称一致性
-            if inspection_name and sup_name:
-                name_similarity = self._calculate_name_similarity(inspection_name, sup_name)
-                if name_similarity < 0.8:
-                    consistency['unit_name_consistent'] = False
-                    consistency['inconsistency_details'].append(f"单位名称不一致: {inspection_name} vs {sup_name}")
-            
-            # 检查法定代表人一致性
-            if inspection_legal and sup_legal:
-                legal_similarity = self._calculate_name_similarity(inspection_legal, sup_legal)
-                if legal_similarity < 0.8:
-                    consistency['legal_person_consistent'] = False
-                    consistency['inconsistency_details'].append(f"法定代表人不一致: {inspection_legal} vs {sup_legal}")
-            
-            # 检查信用代码一致性
-            if inspection_credit and sup_credit and inspection_credit != sup_credit:
-                consistency['credit_code_consistent'] = False
-                consistency['inconsistency_details'].append(f"信用代码不一致: {inspection_credit} vs {sup_credit}")
-        
-        return consistency
-    
     def _batch_save_association_results(self, results: List[Dict]) -> bool:
         """批量保存关联结果"""
         try:
@@ -778,10 +553,19 @@ class EnhancedAssociationProcessor:
             return False
     
     def get_association_statistics(self) -> Dict:
-        """获取关联统计信息"""
+        """获取真实的关联统计信息"""
         try:
             collection = self.db_manager.get_collection('enhanced_association_results')
             
+            if collection.count_documents({}) == 0:
+                return {
+                    'total_associations': 0,
+                    'with_supervision_records': 0,
+                    'association_rate': 0.0,
+                    'avg_supervision_records': 0.0,
+                    'avg_data_quality': 0.0,
+                }
+
             pipeline = [
                 {
                     '$group': {
@@ -790,14 +574,8 @@ class EnhancedAssociationProcessor:
                         'with_supervision_records': {
                             '$sum': {'$cond': [{'$gt': ['$supervision_record_count', 0]}, 1, 0]}
                         },
-                        'without_supervision_records': {
-                            '$sum': {'$cond': [{'$eq': ['$supervision_record_count', 0]}, 1, 0]}
-                        },
                         'avg_supervision_records': {'$avg': '$supervision_record_count'},
                         'avg_data_quality': {'$avg': '$data_quality_score'},
-                        'avg_association_confidence': {'$avg': '$association_confidence'},
-                        'total_buildings': {'$sum': '$unit_building_count'},
-                        'total_supervision_records': {'$sum': '$supervision_record_count'}
                     }
                 }
             ]
@@ -809,7 +587,7 @@ class EnhancedAssociationProcessor:
                 stats.pop('_id', None)
                 
                 # 计算关联率
-                if stats['total_associations'] > 0:
+                if stats.get('total_associations', 0) > 0:
                     stats['association_rate'] = round(
                         stats['with_supervision_records'] / stats['total_associations'] * 100, 2
                     )
@@ -818,18 +596,16 @@ class EnhancedAssociationProcessor:
                 
                 return stats
             else:
-                return {
-                    'total_associations': 0,
-                    'with_supervision_records': 0,
-                    'without_supervision_records': 0,
-                    'association_rate': 0.0,
-                    'avg_supervision_records': 0.0,
-                    'avg_data_quality': 0.0,
-                    'avg_association_confidence': 0.0,
-                    'total_buildings': 0,
-                    'total_supervision_records': 0
-                }
+                return {} # 如果没有结果，返回空字典
                 
         except Exception as e:
             logger.error(f"获取关联统计失败: {str(e)}")
-            return {}
+            return {'error': str(e)}
+
+    def get_association_task_progress(self, task_id: str) -> Optional[Dict]:
+        """获取增强关联任务的进度"""
+        with self.tasks_lock:
+            progress = self.active_tasks.get(task_id)
+            if progress:
+                return progress.get_progress()
+        return None

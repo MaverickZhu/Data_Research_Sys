@@ -12,7 +12,6 @@ from datetime import datetime
 from typing import Dict, List
 import pandas as pd
 import io
-from decimal import Decimal, InvalidOperation
 
 # 导入自定义模块
 from src.database.connection import DatabaseManager
@@ -330,6 +329,9 @@ def api_get_task_progress(task_id):
 def api_stop_matching(task_id):
     """API: 停止匹配任务"""
     try:
+        # 增强诊断：记录API请求来源
+        logger.info(f"收到来自IP '{request.remote_addr}' 的API请求，要求停止任务 '{task_id}'")
+
         success = match_processor.stop_matching_task(task_id)
         
         if success:
@@ -368,9 +370,6 @@ def _format_match_results(raw_results: List[Dict]) -> List[Dict]:
 
         # 辅助函数：安全地将ID转换为字符串
         def to_str(val):
-            # The value might now be a Decimal object, handle it gracefully.
-            if isinstance(val, Decimal):
-                return format(val, 'f') # Convert Decimal to a plain string without scientific notation.
             return str(val) if val is not None else None
 
         new_results.append({
@@ -611,7 +610,7 @@ def api_export_results():
             if value is None or not pd.notna(value) or str(value).strip() == '':
                 return ''
             
-            # Since data is now pre-formatted as string, we just need to wrap it.
+            # The value is now guaranteed to be a string from the source.
             return f'="{str(value).strip()}"'
 
         for col in ['源单位信用代码', '匹配单位信用代码', '源系统原始ID', '目标系统原始ID']:
@@ -742,6 +741,9 @@ def api_get_optimized_task_progress(task_id):
 def api_stop_optimized_matching(task_id):
     """API: 停止优化匹配任务"""
     try:
+        # 增强诊断：记录API请求来源
+        logger.info(f"收到来自IP '{request.remote_addr}' 的API请求，要求停止任务 '{task_id}'")
+
         if not optimized_match_processor:
             return jsonify({
                 'success': False,
@@ -1367,15 +1369,33 @@ def api_start_enhanced_association():
         }), 500
 
 
+@app.route('/api/enhanced_association_progress/<task_id>')
+def api_get_enhanced_association_progress(task_id):
+    """API: 获取增强关联任务进度"""
+    try:
+        progress = enhanced_association_processor.get_association_task_progress(task_id)
+        if progress:
+            return jsonify({'success': True, 'progress': progress})
+        else:
+            return jsonify({'success': False, 'error': '未找到任务'}), 404
+    except Exception as e:
+        logger.error(f"获取增强关联任务进度失败: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/enhanced_association_statistics')
 def api_get_enhanced_association_statistics():
-    """获取增强关联统计信息"""
+    """获取增强关联统计信息 - [修复] 直接从结果表聚合"""
     try:
-        stats = enhanced_association_processor.get_association_statistics()
+        if not enhanced_association_processor:
+            return jsonify({'error': '增强关联处理器未初始化'}), 500
+        
+        # 直接调用重构后的统计方法
+        statistics = enhanced_association_processor.get_association_statistics()
         
         return jsonify({
             'success': True,
-            'statistics': stats,
+            'statistics': statistics,
             'timestamp': datetime.now().isoformat()
         })
         
@@ -1389,54 +1409,23 @@ def api_get_enhanced_association_statistics():
 
 @app.route('/api/enhanced_association_results')
 def api_get_enhanced_association_results():
-    """获取增强关联结果"""
+    """获取增强关联结果 - [修复] 直接从结果表查询"""
     try:
-        # 获取查询参数
         page = int(request.args.get('page', 1))
         page_size = int(request.args.get('page_size', 20))
         
-        # 筛选条件
-        has_associations = request.args.get('has_associations')  # 'true', 'false', 或 None
-        min_confidence = request.args.get('min_confidence', type=float)
-        strategy = request.args.get('strategy')
-        
-        # 构建查询条件
+        # 构建查询（这里可以保持不变，因为我们是直接查询最终结果）
         query = {}
-        
-        if has_associations == 'true':
-            query['supervision_record_count'] = {'$gt': 0}
-        elif has_associations == 'false':
-            query['supervision_record_count'] = 0
-        
-        if min_confidence is not None:
-            query['association_confidence'] = {'$gte': min_confidence}
-        
+        strategy = request.args.get('strategy')
         if strategy:
-            query['association_strategy'] = strategy
-        
-        # 查询数据
+            query['association_type'] = strategy # 注意字段名可能已在聚合中更改
+
         collection = db_manager.get_collection('enhanced_association_results')
         
-        # 计算总数
         total_count = collection.count_documents(query)
+        cursor = collection.find(query).skip((page - 1) * page_size).limit(page_size)
         
-        # 分页查询
-        skip = (page - 1) * page_size
-        cursor = collection.find(query).skip(skip).limit(page_size).sort('created_time', -1)
-        
-        results = []
-        for doc in cursor:
-            # 转换ObjectId为字符串
-            doc['_id'] = str(doc['_id'])
-            if doc.get('primary_record_id'):
-                doc['primary_record_id'] = str(doc['primary_record_id'])
-            
-            # 处理关联记录中的ObjectId
-            for record in doc.get('associated_records', []):
-                if record.get('record_id'):
-                    record['record_id'] = str(record['record_id'])
-            
-            results.append(doc)
+        results = safe_json_response(list(cursor))
         
         return jsonify({
             'success': True,
@@ -1445,11 +1434,7 @@ def api_get_enhanced_association_results():
                 'page': page,
                 'page_size': page_size,
                 'total_count': total_count,
-                'total_pages': (total_count + page_size - 1) // page_size
-            },
-            'query_info': {
-                'filters_applied': query,
-                'result_count': len(results)
+                'total_pages': (total_count + page_size - 1) // page_size if page_size > 0 else 0
             }
         })
         
@@ -1478,18 +1463,10 @@ def api_get_association_result_detail(association_id):
                 'error': '未找到指定的关联结果'
             }), 404
         
-        # 转换ObjectId
-        result['_id'] = str(result['_id'])
-        if result.get('primary_record_id'):
-            result['primary_record_id'] = str(result['primary_record_id'])
-        
-        for record in result.get('associated_records', []):
-            if record.get('record_id'):
-                record['record_id'] = str(record['record_id'])
-        
+        # 使用 safe_json_response 确保所有字段都能被正确序列化
         return jsonify({
             'success': True,
-            'result': result
+            'result': safe_json_response(result)
         })
         
     except Exception as e:
@@ -1502,27 +1479,21 @@ def api_get_association_result_detail(association_id):
 
 @app.route('/api/clear_enhanced_association_results', methods=['POST'])
 def api_clear_enhanced_association_results():
-    """清空增强关联结果"""
+    """API: 清空增强关联结果"""
     try:
+        if not enhanced_association_processor:
+             return jsonify({'success': False, 'error': '处理器未初始化'}), 500
+
         success = enhanced_association_processor._clear_association_results()
         
         if success:
-            return jsonify({
-                'success': True,
-                'message': '增强关联结果已清空'
-            })
+            return jsonify({'success': True, 'message': '增强关联结果已成功清除'})
         else:
-            return jsonify({
-                'success': False,
-                'error': '清空增强关联结果失败'
-            }), 500
+            return jsonify({'success': False, 'error': '清除增强关联结果失败'})
             
     except Exception as e:
-        logger.error(f"清空增强关联结果失败: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        logger.error(f"清除增强关联结果失败: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 if __name__ == '__main__':

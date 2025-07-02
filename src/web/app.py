@@ -363,10 +363,20 @@ def _format_match_results(raw_results: List[Dict]) -> List[Dict]:
             # 统一处理各种形式的空值
             return value if value not in [None, '', '-', 'null'] else default
         
-        # 确保使用我们自己生成的、稳定的match_id
-        primary_id = safe_get('primary_record_id') or safe_get('_id')
-        matched_id = safe_get('matched_record_id', 'no_match')
-        match_id = generate_match_id(str(primary_id), str(matched_id))
+        # 优先使用数据库中已存在的、稳定的match_id
+        # 这是修复决策分析功能404问题的关键
+        match_id = safe_get('match_id')
+        if not match_id:
+            # 仅在match_id不存在时才生成，作为后备方案
+            # (需要确保helper函数可用)
+            try:
+                from src.utils.helpers import generate_match_id
+                primary_id = safe_get('primary_record_id') or safe_get('_id')
+                matched_id = safe_get('matched_record_id', 'no_match')
+                match_id = generate_match_id(str(primary_id), str(matched_id))
+            except ImportError:
+                # 如果帮助函数不可用，则使用_id作为备用
+                match_id = str(safe_get('_id'))
 
         # 辅助函数：安全地将ID转换为字符串
         def to_str(val):

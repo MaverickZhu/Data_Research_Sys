@@ -1309,12 +1309,94 @@ class OptimizedMatchProcessor:
             logger.error(f"清理优化任务失败: {str(e)}")
     
     def get_match_result_details(self, match_id: str) -> Optional[Dict]:
-        """获取匹配结果详情"""
+        """
+        获取匹配结果详情 - 最终修复版
+        - 修正了xxj_shdwjbxx集合的关联键 (使用xxj_shdwjbxx_id关联ID字段)
+        - 确保从$lookup的结果中提取最新、最准确的数据
+        """
         try:
-            collection = self.db_manager.get_collection('unit_match_results')
+            from bson import ObjectId
             
-            result = collection.find_one({'match_id': match_id})
+            results_collection = self.db_manager.get_collection('unit_match_results')
             
+            pipeline = [
+                {
+                    '$match': {'match_id': match_id}
+                },
+                # Step 1: 转换第一个表的关联ID为ObjectId
+                {
+                    '$addFields': {
+                        'primary_record_id_obj': {
+                           '$cond': {
+                                'if': {'$eq': [{'$type': '$primary_record_id'}, 'string']},
+                                'then': {'$toObjectId': '$primary_record_id'},
+                                'else': '$primary_record_id'
+                            }
+                        }
+                    }
+                },
+                # Step 2: 关联源系统 (xfaqpc_jzdwxx)
+                {
+                    '$lookup': {
+                        'from': 'xfaqpc_jzdwxx',
+                        'localField': 'primary_record_id_obj',
+                        'foreignField': '_id',
+                        'as': 'source_details'
+                    }
+                },
+                # Step 3: 关联目标系统 (xxj_shdwjbxx)，使用正确的字符串ID进行关联
+                {
+                    '$lookup': {
+                        'from': 'xxj_shdwjbxx',
+                        'localField': 'xxj_shdwjbxx_id', # 使用正确的关联字段
+                        'foreignField': 'ID',            # 对应目标表的'ID'字段
+                        'as': 'target_details'
+                    }
+                },
+                # Step 4: 解包，即使没有找到也保留记录
+                {
+                    '$unwind': { 'path': '$source_details', 'preserveNullAndEmptyArrays': True }
+                },
+                {
+                    '$unwind': { 'path': '$target_details', 'preserveNullAndEmptyArrays': True }
+                },
+                # Step 5: 构建最终输出，从关联结果中提取最准确的数据
+                {
+                    '$project': {
+                        '_id': 0,
+                        # --- 基础匹配信息 (来自原始匹配结果) ---
+                        'match_id': '$match_id',
+                        'match_type': '$match_type',
+                        'similarity_score': '$similarity_score',
+                        'match_status': '$match_status',
+                        'review_status': '$review_status',
+                        'review_notes': '$review_notes',
+                        'match_details': '$match_details',
+
+                        # --- 安全排查系统 (源) ---
+                        'unit_name': '$source_details.UNIT_NAME',
+                        'primary_credit_code': '$source_details.TYSHXYDM',
+                        'contact_person': '$source_details.FRDB',
+                        'security_manager': '$source_details.XFAQGLR',
+                        'primary_unit_address': '$source_details.ADDRESS',
+
+                        # --- 消防监督系统 (目标) ---
+                        'matched_unit_name': '$target_details.dwmc',
+                        'matched_credit_code': '$target_details.tyshxydm',
+                        'matched_legal_person': '$target_details.fddbr',
+                        'matched_security_manager': '$target_details.xfaqzrxm',
+                        'matched_unit_address': '$target_details.dwdz',
+                        
+                        # --- 完整记录供调试 ---
+                        'source_full_record': '$source_details',
+                        'target_full_record': '$target_details'
+                    }
+                }
+            ]
+
+            result_cursor = results_collection.aggregate(pipeline)
+            result = next(result_cursor, None)
+
             if result:
                 # 注入人工审核信息到explanation中
                 if result.get('review_status') and result.get('review_status') != 'pending':
@@ -1326,20 +1408,28 @@ class OptimizedMatchProcessor:
                         review_note += f" (理由: {result['review_notes']})"
                     
                     if result['review_status'] == 'approved':
+                        if 'positive' not in result['match_details']['explanation']:
+                             result['match_details']['explanation']['positive'] = []
                         result['match_details']['explanation']['positive'].insert(0, review_note)
                     elif result['review_status'] == 'rejected':
+                        if 'negative' not in result['match_details']['explanation']:
+                             result['match_details']['explanation']['negative'] = []
                         result['match_details']['explanation']['negative'].insert(0, review_note)
 
-                # 转换ObjectId为字符串
+                # 转换所有可能的ObjectId为字符串，确保JSON序列化安全
                 from src.utils.helpers import convert_objectid_to_str
                 return convert_objectid_to_str(result)
             
+            # 如果聚合没有返回任何结果，记录警告
+            logger.warning(f"聚合查询未找到任何匹配 '{match_id}' 的结果。")
             return None
             
         except Exception as e:
-            logger.error(f"获取匹配结果详情失败: {str(e)}")
+            logger.error(f"获取匹配结果详情失败 (match_id: {match_id}): {str(e)}")
+            import traceback
+            logger.error(f"详细错误堆栈: {traceback.format_exc()}")
             return None
-    
+
     def update_review_status(self, match_id: str, review_status: str, 
                            review_notes: str = '', reviewer: str = '') -> bool:
         """更新审核状态 - 支持通过_id或match_id查询"""

@@ -311,6 +311,7 @@ class SimilarityCalculator:
         Returns:
             Tuple[float, Dict]: (综合相似度, 字段相似度详情)
         """
+        
         field_similarities = {}
         weighted_score = 0.0
         total_weight = 0.0

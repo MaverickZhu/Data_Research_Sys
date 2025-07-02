@@ -360,8 +360,6 @@
     }
     
     async function showDetailsModal(matchId) {
-        const modalElement = document.getElementById('analysisModal');
-        const analysisModal = new bootstrap.Modal(modalElement);
         const unitInfo = document.getElementById('analysisUnitInfo');
         const positiveList = document.getElementById('positive-evidence');
         const negativeList = document.getElementById('negative-evidence');
@@ -369,14 +367,18 @@
         unitInfo.innerHTML = '<div class="text-center"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div>';
         positiveList.innerHTML = '';
         negativeList.innerHTML = '';
-        analysisModal.show();
+        analysisModalInstance.show();
 
         try {
             const response = await fetch(`/api/match_result_details/${matchId}`);
             const result = await response.json();
 
+            console.log('API Response:', result); // 调试日志
+
             if (result.success) {
                 const d = result.details;
+                console.log('Details object:', d); // 调试日志
+                
                 unitInfo.innerHTML = `
                     <table class="table table-sm table-bordered">
                         <thead>
@@ -414,20 +416,50 @@
                         </tbody>
                     </table>`;
 
-                const explanation = d.match_details.explanation || {};
-                const positive = explanation.positive || ['无'];
-                const negative = explanation.negative || ['无'];
+                // 安全地访问 match_details.explanation
+                let explanation = {};
+                if (d.match_details && d.match_details.explanation) {
+                    explanation = d.match_details.explanation;
+                }
+                console.log('Explanation object:', explanation); // 调试日志
+                
+                const positive = explanation.positive || [];
+                const negative = explanation.negative || [];
+
+                // 如果没有理由，添加默认信息
+                if (positive.length === 0 && negative.length === 0) {
+                    // 根据匹配类型生成默认理由
+                    if (d.match_type && d.match_type.includes('exact')) {
+                        positive.push('信用代码完全匹配');
+                    } else if (d.similarity_score >= 0.8) {
+                        positive.push(`相似度较高 (${(d.similarity_score * 100).toFixed(1)}%)`);
+                    }
+                    
+                    if (!d.matched_unit_name) {
+                        negative.push('未找到匹配的单位');
+                    }
+                }
 
                 positive.forEach(item => {
                     positiveList.innerHTML += `<li class="list-group-item list-group-item-success"><i class="fas fa-check-circle me-2"></i>${item}</li>`;
                 });
+                
                 negative.forEach(item => {
                     negativeList.innerHTML += `<li class="list-group-item list-group-item-danger"><i class="fas fa-exclamation-triangle me-2"></i>${item}</li>`;
                 });
+                
+                // 如果还是没有内容，显示默认消息
+                if (positiveList.innerHTML === '') {
+                    positiveList.innerHTML = '<li class="list-group-item">暂无支持理由</li>';
+                }
+                if (negativeList.innerHTML === '') {
+                    negativeList.innerHTML = '<li class="list-group-item">暂无反对理由</li>';
+                }
             } else {
-                 unitInfo.innerHTML = `<div class="alert alert-danger">${result.message}</div>`;
+                 unitInfo.innerHTML = `<div class="alert alert-danger">${result.message || '未找到匹配结果'}</div>`;
             }
         } catch (error) {
+            console.error('Error in showDetailsModal:', error); // 错误日志
             unitInfo.innerHTML = `<div class="alert alert-danger">请求失败: ${error.message}</div>`;
         }
     }

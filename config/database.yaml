@@ -27,5 +27,5 @@ redis:
   decode_responses: true
   host: localhost
   password: difyai123456
-  port: 6379
+  port: 26379
   username: null

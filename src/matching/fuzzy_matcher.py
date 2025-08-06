@@ -570,15 +570,18 @@ class FuzzyMatcher:
             target_value_orig = target_record.get(target_field)
 
             similarity = 0.0
-            if match_type in ['string', 'address', 'phone']:
+            if match_type == 'string':
                 source_str = str(source_value_orig) if source_value_orig is not None else ''
                 target_str = str(target_value_orig) if target_value_orig is not None else ''
-                if match_type == 'string':
-                    similarity = self.similarity_calculator.calculate_string_similarity(source_str, target_str)
-                elif match_type == 'address':
-                    similarity = self.similarity_calculator.calculate_address_similarity(source_str, target_str)
-                elif match_type == 'phone':
-                    similarity = self.similarity_calculator.calculate_phone_similarity(source_str, target_str)
+                similarity = self.similarity_calculator.calculate_string_similarity(source_str, target_str)
+            elif match_type == 'address':
+                source_str = str(source_value_orig) if source_value_orig is not None else ''
+                target_str = str(target_value_orig) if target_value_orig is not None else ''
+                similarity = self.similarity_calculator.calculate_address_similarity(source_str, target_str)
+            elif match_type == 'phone':
+                source_str = str(source_value_orig) if source_value_orig is not None else ''
+                target_str = str(target_value_orig) if target_value_orig is not None else ''
+                similarity = self.similarity_calculator.calculate_phone_similarity(source_str, target_str)
             elif match_type == 'numeric':
                 try:
                     numeric_source = float(source_value_orig)

@@ -381,7 +381,7 @@ def _format_match_results(raw_results: List[Dict]) -> List[Dict]:
         # 辅助函数：安全地将ID转换为字符串
         def to_str(val):
             return str(val) if val is not None else None
-
+            
         new_results.append({
             # 基本信息
             'primary_unit_name': safe_get('primary_unit_name') or safe_get('unit_name'),
@@ -409,7 +409,7 @@ def _format_match_results(raw_results: List[Dict]) -> List[Dict]:
             # 其他信息 (确保ID为字符串)
             'primary_credit_code': to_str(safe_get('primary_credit_code') or safe_get('credit_code')),
             'matched_credit_code': to_str(safe_get('matched_credit_code')),
-            
+                
             # 系统信息
             '_id': str(row.get('_id')),
             'match_id': match_id, # 确保使用生成的match_id
@@ -641,7 +641,7 @@ def api_export_results():
             as_attachment=True,
             download_name=filename
         )
-
+        
     except Exception as e:
         logger.error(f"导出结果失败: {str(e)}")
         return jsonify({
@@ -1429,7 +1429,7 @@ def api_get_enhanced_association_results():
         strategy = request.args.get('strategy')
         if strategy:
             query['association_type'] = strategy # 注意字段名可能已在聚合中更改
-
+        
         collection = db_manager.get_collection('enhanced_association_results')
         
         total_count = collection.count_documents(query)

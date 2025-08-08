@@ -82,7 +82,8 @@ class CSVProcessor:
         try:
             # 检查文件扩展名
             file_ext = Path(file_path).suffix.lower()
-            if file_ext not in ['.csv', '.txt']:
+            allowed_extensions = ['.csv', '.txt', '.xlsx', '.xls']  # 默认支持的扩展名
+            if file_ext not in allowed_extensions:
                 validation_result['errors'].append(f"不支持的文件格式: {file_ext}")
                 validation_result['valid'] = False
                 
@@ -127,35 +128,71 @@ class CSVProcessor:
         }
         
         try:
+            logger.info(f"开始解析文件: {file_name}")
             # 1. 验证文件
             validation = self.validate_file(file_name, file_content)
+            logger.info(f"文件验证结果: {validation}")
             if not validation['valid']:
                 result['errors'].extend(validation['errors'])
                 return result
                 
             # 2. 检测编码
             encoding = self.detect_encoding(file_content)
+            logger.info(f"检测到编码: {encoding}")
             result['metadata']['encoding'] = encoding
             
-            # 3. 解码文件内容
-            try:
-                text_content = file_content.decode(encoding)
-            except UnicodeDecodeError as e:
-                result['errors'].append(f"文件解码失败: {str(e)}")
+            # 3. 解码文件内容（增强编码容错）
+            text_content = None
+            encoding_attempts = [encoding]
+            
+            # 如果检测到GB2312，尝试GBK作为备选
+            if encoding.lower() == 'gb2312':
+                encoding_attempts.append('gbk')
+            
+            # 添加常用编码作为备选
+            for fallback in ['utf-8', 'gbk', 'gb2312', 'utf-8-sig']:
+                if fallback not in encoding_attempts:
+                    encoding_attempts.append(fallback)
+            
+            decode_error = None
+            for attempt_encoding in encoding_attempts:
+                try:
+                    text_content = file_content.decode(attempt_encoding)
+                    logger.info(f"文件解码成功，使用编码: {attempt_encoding}，内容长度: {len(text_content)}")
+                    result['metadata']['encoding'] = attempt_encoding
+                    break
+                except UnicodeDecodeError as e:
+                    decode_error = e
+                    logger.warning(f"编码 {attempt_encoding} 解码失败: {str(e)}")
+                    continue
+            
+            if text_content is None:
+                result['errors'].append(f"文件解码失败，尝试了所有编码: {str(decode_error)}")
+                logger.error(f"文件解码失败，尝试了编码: {encoding_attempts}")
                 return result
                 
-            # 4. 检测分隔符
-            delimiter = self._detect_delimiter(text_content[:5000])
-            result['metadata']['delimiter'] = delimiter
+            # 4. 检测文件类型并解析
+            file_ext = Path(file_name).suffix.lower()
+            logger.info(f"文件扩展名: {file_ext}")
             
-            # 5. 解析CSV
-            csv_data = pd.read_csv(
-                io.StringIO(text_content),
-                delimiter=delimiter,
-                encoding=encoding,
-                low_memory=False,
-                na_values=['', 'NULL', 'null', 'None', 'N/A', 'NA']
-            )
+            if file_ext in ['.xlsx', '.xls']:
+                # Excel文件处理
+                csv_data = pd.read_excel(
+                    io.BytesIO(file_content),
+                    na_values=['', 'NULL', 'null', 'None', 'N/A', 'NA']
+                )
+                result['metadata']['delimiter'] = 'N/A (Excel)'
+            else:
+                # CSV/TXT文件处理
+                delimiter = self._detect_delimiter(text_content[:5000])
+                result['metadata']['delimiter'] = delimiter
+                
+                csv_data = pd.read_csv(
+                    io.StringIO(text_content),
+                    delimiter=delimiter,
+                    low_memory=False,
+                    na_values=['', 'NULL', 'null', 'None', 'N/A', 'NA']
+                )
             
             # 6. 基础数据清洗
             csv_data = self._basic_cleaning(csv_data)
@@ -310,3 +347,91 @@ class CSVProcessor:
         except Exception as e:
             logger.error(f"获取样本数据失败: {str(e)}")
             return {}
+    
+    def process_file(self, file_path: str) -> Dict[str, Any]:
+        """
+        处理CSV文件 - 完整的文件处理流程
+        
+        Args:
+            file_path: 文件路径
+            
+        Returns:
+            Dict: 处理结果，包含dataframe和其他元数据
+        """
+        try:
+            file_ext = Path(file_path).suffix.lower()
+
+            # Excel文件处理
+            if file_ext in ['.xlsx', '.xls']:
+                # 直接使用pandas读取Excel
+                df = pd.read_excel(file_path)
+                df = self._basic_cleaning(df)
+
+                metadata = {
+                    'file_name': Path(file_path).name,
+                    'total_rows': len(df),
+                    'total_columns': len(df.columns),
+                    'columns': df.columns.tolist(),
+                    'dtypes': df.dtypes.to_dict(),
+                    'encoding': 'binary',
+                    'delimiter': ','
+                }
+
+                return {
+                    'success': True,
+                    'dataframe': df,
+                    'metadata': metadata,
+                    'encoding': metadata.get('encoding', 'binary'),
+                    'delimiter': metadata.get('delimiter', ','),
+                    'row_count': len(df),
+                    'column_count': len(df.columns),
+                    'sample_data': self.get_sample_data(df),
+                    'warnings': []
+                }
+
+            # 文本类CSV/TXT处理
+            # 读取文件内容
+            with open(file_path, 'rb') as f:
+                file_content = f.read()
+
+            # 验证文件
+            validation_result = self.validate_file(file_path, file_content)
+            if not validation_result['valid']:
+                return {
+                    'success': False,
+                    'error': f"文件验证失败: {', '.join(validation_result['errors'])}",
+                    'dataframe': None
+                }
+
+            # 解析CSV文件
+            file_name = Path(file_path).name
+            parse_result = self.parse_csv(file_content, file_name)
+
+            if not parse_result['success']:
+                return {
+                    'success': False,
+                    'error': f"CSV解析失败: {', '.join(parse_result['errors'])}",
+                    'dataframe': None
+                }
+
+            # 返回成功结果
+            metadata = parse_result['metadata']
+            return {
+                'success': True,
+                'dataframe': parse_result['data'],
+                'metadata': metadata,
+                'encoding': metadata.get('encoding', 'utf-8'),
+                'delimiter': metadata.get('delimiter', ','),
+                'row_count': len(parse_result['data']) if parse_result['data'] is not None else 0,
+                'column_count': len(parse_result['data'].columns) if parse_result['data'] is not None else 0,
+                'sample_data': self.get_sample_data(parse_result['data']),
+                'warnings': parse_result['warnings']
+            }
+
+        except Exception as e:
+            logger.error(f"处理文件失败: {str(e)}")
+            return {
+                'success': False,
+                'error': f"处理文件时发生错误: {str(e)}",
+                'dataframe': None
+            }

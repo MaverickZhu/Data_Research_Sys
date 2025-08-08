@@ -1,0 +1,554 @@
+{% extends "base.html" %}
+
+{% block title %}CSV数据上传 - 智能关联匹配系统V2.0{% endblock %}
+
+{% block extra_css %}
+<!-- 强制禁用缓存 -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<style>
+    .upload-container {
+        max-width: 800px;
+        margin: 30px auto;
+        padding: 20px;
+    }
+    
+    .upload-zone {
+        border: 3px dashed #007bff;
+        border-radius: 10px;
+        padding: 60px 20px;
+        text-align: center;
+        background: #f8f9fa;
+        transition: all 0.3s ease;
+        cursor: pointer;
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .upload-zone:hover {
+        border-color: #0056b3;
+        background: #e7f3ff;
+    }
+    
+    .upload-zone.dragover {
+        border-color: #28a745;
+        background: #d4edda;
+    }
+    
+    .upload-icon {
+        font-size: 48px;
+        color: #007bff;
+        margin-bottom: 20px;
+    }
+    
+    .upload-text {
+        font-size: 18px;
+        font-weight: 600;
+        color: #333;
+        margin-bottom: 10px;
+    }
+    
+    .upload-hint {
+        font-size: 14px;
+        color: #666;
+        margin-bottom: 20px;
+    }
+    
+    .file-info {
+        background: #fff;
+        border-radius: 8px;
+        padding: 20px;
+        margin: 20px 0;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        display: none;
+    }
+    
+    .progress-container {
+        margin: 20px 0;
+        display: none;
+    }
+    
+    .file-details {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 15px;
+        margin: 15px 0;
+    }
+    
+    .detail-item {
+        background: #f8f9fa;
+        padding: 12px;
+        border-radius: 6px;
+        border-left: 4px solid #007bff;
+    }
+    
+    .detail-label {
+        font-weight: 600;
+        color: #333;
+        font-size: 12px;
+        text-transform: uppercase;
+    }
+    
+    .detail-value {
+        font-size: 16px;
+        color: #666;
+        margin-top: 4px;
+    }
+    
+    .supported-formats {
+        background: #e7f3ff;
+        border: 1px solid #b3d9ff;
+        border-radius: 6px;
+        padding: 15px;
+        margin: 20px 0;
+    }
+    
+    .format-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 10px;
+    }
+    
+    .format-tag {
+        background: #007bff;
+        color: white;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 600;
+    }
+    
+    .error-message {
+        background: #f8d7da;
+        border: 1px solid #f5c6cb;
+        color: #721c24;
+        padding: 15px;
+        border-radius: 6px;
+        margin: 15px 0;
+        display: none;
+    }
+    
+    .success-message {
+        background: #d4edda;
+        border: 1px solid #c3e6cb;
+        color: #155724;
+        padding: 15px;
+        border-radius: 6px;
+        margin: 15px 0;
+        display: none;
+    }
+    
+    .btn-analyze {
+        background: linear-gradient(45deg, #007bff, #0056b3);
+        border: none;
+        color: white;
+        padding: 12px 30px;
+        border-radius: 6px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+    
+    .btn-analyze:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(0,123,255,0.3);
+    }
+    
+    .btn-analyze:disabled {
+        background: #6c757d;
+        cursor: not-allowed;
+        transform: none;
+    }
+    
+    .upload-stats {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 15px;
+        margin: 20px 0;
+    }
+    
+    .stat-card {
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        text-align: center;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    .stat-number {
+        font-size: 24px;
+        font-weight: 700;
+        color: #007bff;
+    }
+    
+    .stat-label {
+        font-size: 12px;
+        color: #666;
+        text-transform: uppercase;
+        margin-top: 5px;
+    }
+    
+    .loading-spinner {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        border: 3px solid #f3f3f3;
+        border-top: 3px solid #007bff;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-right: 10px;
+    }
+    
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+    
+    .step-indicator {
+        display: flex;
+        justify-content: center;
+        margin: 30px 0;
+    }
+    
+    .step {
+        padding: 10px 20px;
+        background: #e9ecef;
+        color: #6c757d;
+        border-radius: 20px;
+        margin: 0 5px;
+        font-size: 14px;
+        font-weight: 600;
+    }
+    
+    .step.active {
+        background: #007bff;
+        color: white;
+    }
+    
+    .step.completed {
+        background: #28a745;
+        color: white;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- 步骤指示器 -->
+    <div class="step-indicator">
+        <div class="step active">1. 数据上传</div>
+        <div class="step">2. 数据分析</div>
+        <div class="step">3. 字段映射</div>
+        <div class="step">4. 知识图谱构建</div>
+    </div>
+    
+    <div class="upload-container">
+        <div class="row">
+            <div class="col-12">
+                <h2 class="text-center mb-4">
+                    <i class="fas fa-upload"></i> CSV数据文件上传
+                </h2>
+                
+                <!-- 支持格式说明 -->
+                <div class="supported-formats">
+                    <h6><i class="fas fa-file-alt"></i> 支持的文件格式</h6>
+                    <div class="format-list">
+                        <span class="format-tag">.CSV</span>
+                        <span class="format-tag">.TXT</span>
+                        <span class="format-tag">.XLSX</span>
+                        <span class="format-tag">.XLS</span>
+                        <span class="format-tag">UTF-8</span>
+                        <span class="format-tag">GBK</span>
+                        <span class="format-tag">大小受配置限制</span>
+                    </div>
+                </div>
+                
+                <!-- 文件上传区域 -->
+                <div class="upload-zone" id="uploadZone">
+                    <div class="upload-icon">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                    </div>
+                    <div class="upload-text">拖拽文件到此处或点击选择文件</div>
+                    <div class="upload-hint">支持CSV、TXT、Excel格式（大小受配置限制）</div>
+                    <input type="file" id="fileInput" accept=".csv,.txt,.xlsx,.xls" style="display: none;">
+                </div>
+                
+                <!-- 进度条 -->
+                <div class="progress-container" id="progressContainer">
+                    <div class="progress mb-3">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                             id="uploadProgress" role="progressbar" style="width: 0%">
+                            <span id="progressText">0%</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 错误消息 -->
+                <div class="error-message" id="errorMessage"></div>
+                
+                <!-- 成功消息 -->
+                <div class="success-message" id="successMessage"></div>
+                
+                <!-- 文件信息 -->
+                <div class="file-info" id="fileInfo">
+                    <h5><i class="fas fa-file-csv"></i> 文件信息</h5>
+                    <div class="file-details" id="fileDetails">
+                        <!-- 文件详情将通过JavaScript动态填充 -->
+                    </div>
+                    
+                    <!-- 数据统计 -->
+                    <div class="upload-stats" id="uploadStats">
+                        <div class="stat-card">
+                            <div class="stat-number" id="rowCount">-</div>
+                            <div class="stat-label">数据行数</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-number" id="columnCount">-</div>
+                            <div class="stat-label">字段数量</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-number" id="qualityScore">-</div>
+                            <div class="stat-label">数据质量</div>
+                        </div>
+                    </div>
+                    
+                    <!-- 操作按钮 -->
+                    <div class="text-center mt-4">
+                        <button class="btn-analyze" id="analyzeBtn" disabled>
+                            <i class="fas fa-analytics"></i> 开始数据分析
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const uploadZone = document.getElementById('uploadZone');
+    const fileInput = document.getElementById('fileInput');
+    const progressContainer = document.getElementById('progressContainer');
+    const uploadProgress = document.getElementById('uploadProgress');
+    const progressText = document.getElementById('progressText');
+    const errorMessage = document.getElementById('errorMessage');
+    const successMessage = document.getElementById('successMessage');
+    const fileInfo = document.getElementById('fileInfo');
+    const fileDetails = document.getElementById('fileDetails');
+    const analyzeBtn = document.getElementById('analyzeBtn');
+    
+    let currentFile = null;
+    let uploadedData = null;
+    
+    // 文件上传区域点击事件
+    uploadZone.addEventListener('click', () => {
+        fileInput.click();
+    });
+    
+    // 文件拖拽事件
+    uploadZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadZone.classList.add('dragover');
+    });
+    
+    uploadZone.addEventListener('dragleave', () => {
+        uploadZone.classList.remove('dragover');
+    });
+    
+    uploadZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadZone.classList.remove('dragover');
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            handleFile(files[0]);
+        }
+    });
+    
+    // 文件选择事件
+    fileInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+            handleFile(e.target.files[0]);
+        }
+    });
+    
+    // 分析按钮事件
+    analyzeBtn.addEventListener('click', () => {
+        if (uploadedData) {
+            // 跳转到数据分析页面
+            window.location.href = `/data_analysis?file_id=${uploadedData.file_id}`;
+        }
+    });
+    
+    // 处理文件上传
+    function handleFile(file) {
+        // 验证文件扩展名（更可靠）
+        const fileName = file.name.toLowerCase();
+        const validExtensions = ['.csv', '.txt', '.xlsx', '.xls'];
+        
+        if (!validExtensions.some(ext => fileName.endsWith(ext))) {
+            showError('请选择CSV/TXT/Excel格式的文件');
+            return;
+        }
+        
+        // 验证文件大小 (100MB)
+        if (file.size > 100 * 1024 * 1024) {
+            showError('文件大小不能超过100MB');
+            return;
+        }
+        
+        currentFile = file;
+        uploadFile(file);
+    }
+    
+    // 上传文件
+    function uploadFile(file) {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        // 显示进度条
+        progressContainer.style.display = 'block';
+        fileInfo.style.display = 'none';
+        hideMessages();
+        
+        // 创建XMLHttpRequest以支持进度监控
+        const xhr = new XMLHttpRequest();
+        
+        // 进度事件
+        xhr.upload.addEventListener('progress', (e) => {
+            if (e.lengthComputable) {
+                const percentComplete = (e.loaded / e.total) * 100;
+                updateProgress(percentComplete);
+            }
+        });
+        
+        // 完成事件
+        xhr.onload = function() {
+            if (xhr.status === 200) {
+                try {
+                    const response = JSON.parse(xhr.responseText);
+                    
+                    if (response.success) {
+                        uploadedData = response.data;
+                        showFileInfo(response.data);
+                        const notice = response.data.alias_notice ? ('\n' + response.data.alias_notice) : '';
+                        showSuccess('文件上传成功！已创建集合：' + (response.data.collection_name || '') + notice);
+                        updateStep(1, 'completed');
+                        updateStep(2, 'active');
+                        
+                        // 保存文件ID与集合名到localStorage，供其他页面使用
+                        localStorage.setItem('v2_last_file_id', response.data.file_id);
+                        if (response.data.collection_name) {
+                            localStorage.setItem('v2_last_collection', response.data.collection_name);
+                        }
+                    } else {
+                        showError(response.message || response.error || '文件上传失败');
+                    }
+                } catch (e) {
+                    console.error('JSON解析错误:', e);
+                    console.log('原始响应:', xhr.responseText);
+                    showError('服务器响应解析错误：' + e.message + '。这可能是由于数据量过大导致的，但数据可能已成功上传到数据库。');
+                }
+            } else {
+                showError('网络错误，请重试 (HTTP ' + xhr.status + ')');
+            }
+            progressContainer.style.display = 'none';
+        };
+        
+        // 错误事件
+        xhr.onerror = function() {
+            showError('网络连接错误');
+            progressContainer.style.display = 'none';
+        };
+        
+        // 设置超时时间（大文件需要更长时间）
+        xhr.timeout = 300000; // 5分钟超时
+        
+        // 超时事件
+        xhr.ontimeout = function() {
+            showError('上传超时，请检查文件大小或网络连接。大文件可能需要更长时间处理。');
+            progressContainer.style.display = 'none';
+        };
+        
+        // 发送请求
+        xhr.open('POST', '/api/upload_csv');
+        // 不要手动设置Content-Type，让浏览器自动设置multipart/form-data
+        xhr.send(formData);
+    }
+    
+    // 更新进度条
+    function updateProgress(percent) {
+        const roundedPercent = Math.round(percent);
+        uploadProgress.style.width = roundedPercent + '%';
+        progressText.textContent = roundedPercent + '%';
+    }
+    
+    // 显示文件信息
+    function showFileInfo(data) {
+        const details = [
+            { label: '文件名', value: data.filename },
+            { label: '文件大小', value: formatFileSize(data.file_size) },
+            { label: '编码格式', value: data.encoding },
+            { label: '分隔符', value: data.delimiter },
+            { label: '上传时间', value: new Date(data.upload_time).toLocaleString() }
+        ];
+        
+        fileDetails.innerHTML = details.map(item => `
+            <div class="detail-item">
+                <div class="detail-label">${item.label}</div>
+                <div class="detail-value">${item.value}</div>
+            </div>
+        `).join('');
+        
+        // 更新统计信息
+        document.getElementById('rowCount').textContent = data.row_count.toLocaleString();
+        document.getElementById('columnCount').textContent = data.column_count;
+        document.getElementById('qualityScore').textContent = data.quality_score + '%';
+        
+        // 显示文件信息区域
+        fileInfo.style.display = 'block';
+        analyzeBtn.disabled = false;
+    }
+    
+    // 格式化文件大小
+    function formatFileSize(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+    
+    // 显示错误消息
+    function showError(message) {
+        errorMessage.textContent = message;
+        errorMessage.style.display = 'block';
+        successMessage.style.display = 'none';
+    }
+    
+    // 显示成功消息
+    function showSuccess(message) {
+        successMessage.textContent = message;
+        successMessage.style.display = 'block';
+        errorMessage.style.display = 'none';
+    }
+    
+    // 隐藏消息
+    function hideMessages() {
+        errorMessage.style.display = 'none';
+        successMessage.style.display = 'none';
+    }
+    
+    // 更新步骤状态
+    function updateStep(stepNumber, status) {
+        const steps = document.querySelectorAll('.step');
+        if (steps[stepNumber - 1]) {
+            steps[stepNumber - 1].className = `step ${status}`;
+        }
+    }
+});
+</script>
+{% endblock %}

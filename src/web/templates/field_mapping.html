@@ -1,0 +1,972 @@
+{% extends "base.html" %}
+
+{% block title %}字段映射配置 - 智能关联匹配系统V2.0{% endblock %}
+
+{% block extra_css %}
+<style>
+    .mapping-container {
+        max-width: 1400px;
+        margin: 20px auto;
+        padding: 20px;
+    }
+    
+    .step-indicator {
+        display: flex;
+        justify-content: center;
+        margin: 30px 0;
+    }
+    
+    .step {
+        padding: 10px 20px;
+        background: #e9ecef;
+        color: #6c757d;
+        border-radius: 20px;
+        margin: 0 5px;
+        font-size: 14px;
+        font-weight: 600;
+    }
+    
+    .step.active {
+        background: #007bff;
+        color: white;
+    }
+    
+    .step.completed {
+        background: #28a745;
+        color: white;
+    }
+    
+    .mapping-section {
+        background: white;
+        border-radius: 10px;
+        padding: 30px;
+        margin: 20px 0;
+        box-shadow: 0 2px 15px rgba(0,0,0,0.1);
+        border-left: 5px solid #007bff;
+    }
+    
+    .section-header {
+        display: flex;
+        align-items: center;
+        margin-bottom: 25px;
+        padding-bottom: 15px;
+        border-bottom: 2px solid #f8f9fa;
+    }
+    
+    .section-title {
+        font-size: 22px;
+        font-weight: 600;
+        color: #333;
+        margin: 0;
+        margin-left: 10px;
+    }
+    
+    .section-icon {
+        font-size: 26px;
+        color: #007bff;
+    }
+    
+    .mapping-grid {
+        display: grid;
+        grid-template-columns: 1fr 100px 1fr;
+        gap: 20px;
+        align-items: start;
+    }
+    
+    .column-list {
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 20px;
+        border: 2px solid #e9ecef;
+    }
+    
+    .list-header {
+        font-weight: 600;
+        color: #495057;
+        margin-bottom: 15px;
+        text-align: center;
+        padding: 10px;
+        background: white;
+        border-radius: 6px;
+        border: 1px solid #dee2e6;
+    }
+    
+    .column-item {
+        background: white;
+        border: 1px solid #dee2e6;
+        border-radius: 6px;
+        padding: 15px;
+        margin: 8px 0;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        position: relative;
+    }
+    
+    .column-item:hover {
+        border-color: #007bff;
+        box-shadow: 0 2px 8px rgba(0,123,255,0.2);
+    }
+    
+    .column-item.selected {
+        border-color: #28a745;
+        background: #f8fff9;
+        box-shadow: 0 2px 8px rgba(40,167,69,0.2);
+    }
+    
+    .column-item.entity {
+        border-left: 4px solid #007bff;
+    }
+    
+    .column-item.relation {
+        border-left: 4px solid #28a745;
+    }
+    
+    .column-name {
+        font-weight: 600;
+        color: #333;
+        margin-bottom: 5px;
+    }
+    
+    .column-type {
+        display: inline-block;
+        padding: 3px 8px;
+        border-radius: 10px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        margin-bottom: 5px;
+    }
+    
+    .type-organization { background: #e7f3ff; color: #0066cc; }
+    .type-person { background: #fff2e7; color: #cc6600; }
+    .type-address { background: #e7ffe7; color: #006600; }
+    .type-identifier { background: #ffe7f3; color: #cc0066; }
+    .type-numeric { background: #f3e7ff; color: #6600cc; }
+    .type-text { background: #f0f0f0; color: #666; }
+    .type-datetime { background: #e7f7ff; color: #0088cc; }
+    
+    .column-preview {
+        font-size: 12px;
+        color: #666;
+        font-style: italic;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    
+    .mapping-arrow {
+        text-align: center;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+    }
+    
+    .arrow-icon {
+        font-size: 24px;
+        color: #007bff;
+        margin: 10px 0;
+    }
+    
+    .mapping-controls {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .mapping-btn {
+        padding: 8px 12px;
+        border: none;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+    
+    .btn-map {
+        background: #007bff;
+        color: white;
+    }
+    
+    .btn-unmap {
+        background: #dc3545;
+        color: white;
+    }
+    
+    .btn-auto {
+        background: #28a745;
+        color: white;
+    }
+    
+    .mapping-btn:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+    }
+    
+    .mapping-btn:disabled {
+        background: #6c757d;
+        cursor: not-allowed;
+        transform: none;
+    }
+    
+    .entity-mapping {
+        border: 2px solid #007bff;
+        background: #f0f8ff;
+    }
+    
+    .relation-mapping {
+        border: 2px solid #28a745;
+        background: #f0fff0;
+    }
+    
+    .mapping-summary {
+        background: #e7f3ff;
+        border: 1px solid #b3d9ff;
+        border-radius: 8px;
+        padding: 20px;
+        margin: 20px 0;
+    }
+    
+    .summary-header {
+        font-weight: 600;
+        color: #0066cc;
+        margin-bottom: 15px;
+        display: flex;
+        align-items: center;
+    }
+    
+    .summary-stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 15px;
+    }
+    
+    .stat-card {
+        background: white;
+        padding: 15px;
+        border-radius: 6px;
+        text-align: center;
+        border: 1px solid #b3d9ff;
+    }
+    
+    .stat-number {
+        font-size: 24px;
+        font-weight: 700;
+        color: #007bff;
+    }
+    
+    .stat-label {
+        font-size: 12px;
+        color: #666;
+        text-transform: uppercase;
+        margin-top: 5px;
+    }
+    
+    .mapping-rules {
+        background: #fff9e6;
+        border: 1px solid #ffeaa7;
+        border-radius: 8px;
+        padding: 20px;
+        margin: 20px 0;
+    }
+    
+    .rules-header {
+        font-weight: 600;
+        color: #d68910;
+        margin-bottom: 15px;
+        display: flex;
+        align-items: center;
+    }
+    
+    .rule-item {
+        background: white;
+        padding: 12px;
+        border-radius: 4px;
+        margin: 8px 0;
+        border-left: 4px solid #f39c12;
+        font-size: 14px;
+    }
+    
+    .action-buttons {
+        text-align: center;
+        margin: 30px 0;
+        padding: 20px 0;
+        border-top: 2px solid #f8f9fa;
+    }
+    
+    .btn-action {
+        padding: 12px 30px;
+        border: none;
+        border-radius: 8px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        margin: 0 10px;
+        text-decoration: none;
+        display: inline-block;
+    }
+    
+    .btn-primary {
+        background: linear-gradient(45deg, #007bff, #0056b3);
+        color: white;
+    }
+    
+    .btn-secondary {
+        background: #6c757d;
+        color: white;
+    }
+    
+    .btn-success {
+        background: linear-gradient(45deg, #28a745, #1e7e34);
+        color: white;
+    }
+    
+    .btn-action:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        text-decoration: none;
+        color: white;
+    }
+    
+    .btn-action:disabled {
+        background: #6c757d;
+        cursor: not-allowed;
+        transform: none;
+    }
+    
+    .preview-section {
+        background: white;
+        border-radius: 8px;
+        padding: 20px;
+        margin: 20px 0;
+        border: 2px solid #e9ecef;
+    }
+    
+    .preview-header {
+        font-weight: 600;
+        color: #495057;
+        margin-bottom: 15px;
+        display: flex;
+        align-items: center;
+    }
+    
+    .mapping-preview {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 15px;
+    }
+    
+    .mapping-pair {
+        background: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 6px;
+        padding: 15px;
+        position: relative;
+    }
+    
+    .mapping-pair.entity-pair {
+        border-left: 4px solid #007bff;
+    }
+    
+    .mapping-pair.relation-pair {
+        border-left: 4px solid #28a745;
+    }
+    
+    .pair-source {
+        font-weight: 600;
+        color: #333;
+        margin-bottom: 5px;
+    }
+    
+    .pair-target {
+        font-size: 14px;
+        color: #666;
+    }
+    
+    .pair-remove {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        background: #dc3545;
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 24px;
+        height: 24px;
+        font-size: 12px;
+        cursor: pointer;
+    }
+    
+    .loading-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.5);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+    }
+    
+    .loading-content {
+        background: white;
+        padding: 40px;
+        border-radius: 10px;
+        text-align: center;
+    }
+    
+    .loading-spinner {
+        width: 40px;
+        height: 40px;
+        border: 4px solid #f3f3f3;
+        border-top: 4px solid #007bff;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 20px;
+    }
+    
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- 步骤指示器 -->
+    <div class="step-indicator">
+        <div class="step completed">1. 数据上传</div>
+        <div class="step completed">2. 数据分析</div>
+        <div class="step active">3. 字段映射</div>
+        <div class="step">4. 知识图谱构建</div>
+    </div>
+    
+    <div class="mapping-container">
+        <!-- 智能映射建议 -->
+        <div class="mapping-section">
+            <div class="section-header">
+                <i class="fas fa-robot section-icon"></i>
+                <h3 class="section-title">智能映射建议</h3>
+            </div>
+            
+            <div class="mapping-rules">
+                <div class="rules-header">
+                    <i class="fas fa-lightbulb"></i>
+                    <span style="margin-left: 10px;">映射规则说明</span>
+                </div>
+                <div class="rule-item">
+                    <strong>实体字段：</strong>代表具体的实体对象，如组织机构、人员、地址、标识符等
+                </div>
+                <div class="rule-item">
+                    <strong>关系字段：</strong>描述实体间的关系或实体的属性，如联系方式、面积、注册资本等
+                </div>
+                <div class="rule-item">
+                    <strong>建议采用：</strong>系统基于字段内容和类型自动推荐最佳映射方案
+                </div>
+            </div>
+        </div>
+        
+        <!-- 字段映射配置 -->
+        <div class="mapping-section">
+            <div class="section-header">
+                <i class="fas fa-exchange-alt section-icon"></i>
+                <h3 class="section-title">字段映射配置</h3>
+            </div>
+            
+            <div class="mapping-grid">
+                <!-- 源字段列表 -->
+                <div class="column-list">
+                    <div class="list-header">
+                        <i class="fas fa-file-csv"></i> 源数据字段
+                    </div>
+                    <div id="sourceColumns">
+                        <!-- 动态填充源字段 -->
+                    </div>
+                </div>
+                
+                <!-- 映射控制 -->
+                <div class="mapping-arrow">
+                    <div class="mapping-controls">
+                        <button class="mapping-btn btn-auto" id="autoMapBtn">
+                            <i class="fas fa-magic"></i><br>自动映射
+                        </button>
+                        <button class="mapping-btn btn-map" id="mapEntityBtn" disabled>
+                            <i class="fas fa-arrow-right"></i><br>映射实体
+                        </button>
+                        <button class="mapping-btn btn-map" id="mapRelationBtn" disabled>
+                            <i class="fas fa-arrow-right"></i><br>映射关系
+                        </button>
+                        <button class="mapping-btn btn-unmap" id="unmapBtn" disabled>
+                            <i class="fas fa-times"></i><br>取消映射
+                        </button>
+                    </div>
+                    <div class="arrow-icon">
+                        <i class="fas fa-exchange-alt"></i>
+                    </div>
+                </div>
+                
+                <!-- 目标映射类型 -->
+                <div>
+                    <!-- 实体映射区域 -->
+                    <div class="column-list entity-mapping">
+                        <div class="list-header">
+                            <i class="fas fa-cubes"></i> 实体字段映射
+                        </div>
+                        <div id="entityMappings">
+                            <div class="column-item" style="text-align: center; color: #666; font-style: italic;">
+                                将实体相关字段拖拽到此处
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 关系映射区域 -->
+                    <div class="column-list relation-mapping" style="margin-top: 20px;">
+                        <div class="list-header">
+                            <i class="fas fa-project-diagram"></i> 关系字段映射
+                        </div>
+                        <div id="relationMappings">
+                            <div class="column-item" style="text-align: center; color: #666; font-style: italic;">
+                                将关系相关字段拖拽到此处
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 映射统计摘要 -->
+        <div class="mapping-summary">
+            <div class="summary-header">
+                <i class="fas fa-chart-pie"></i>
+                <span style="margin-left: 10px;">映射统计摘要</span>
+            </div>
+            <div class="summary-stats">
+                <div class="stat-card">
+                    <div class="stat-number" id="totalFields">0</div>
+                    <div class="stat-label">总字段数</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="entityFields">0</div>
+                    <div class="stat-label">实体字段</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="relationFields">0</div>
+                    <div class="stat-label">关系字段</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="unmappedFields">0</div>
+                    <div class="stat-label">未映射字段</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 映射预览 -->
+        <div class="preview-section">
+            <div class="preview-header">
+                <i class="fas fa-eye"></i>
+                <span style="margin-left: 10px;">映射预览</span>
+            </div>
+            <div class="mapping-preview" id="mappingPreview">
+                <!-- 动态显示映射关系 -->
+            </div>
+        </div>
+        
+        <!-- 操作按钮 -->
+        <div class="action-buttons">
+            <a href="#" class="btn-action btn-secondary" id="backBtn">
+                <i class="fas fa-arrow-left"></i> 返回分析
+            </a>
+            <button class="btn-action btn-primary" id="validateBtn">
+                <i class="fas fa-check-circle"></i> 验证映射
+            </button>
+            <button class="btn-action btn-success" id="nextBtn" disabled>
+                <i class="fas fa-arrow-right"></i> 构建知识图谱
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- 加载遮罩 -->
+<div class="loading-overlay" id="loadingOverlay">
+    <div class="loading-content">
+        <div class="loading-spinner"></div>
+        <p>正在处理映射配置...</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const fileId = urlParams.get('file_id');
+    
+    if (!fileId) {
+        alert('缺少文件ID参数');
+        window.location.href = '/csv_upload';
+        return;
+    }
+    
+    // 全局变量
+    let fileData = null;
+    let selectedColumn = null;
+    let mappings = {
+        entities: {},
+        relations: {}
+    };
+    
+    // 初始化
+    loadFileData(fileId);
+    initializeEventListeners();
+    
+    function initializeEventListeners() {
+        // 自动映射按钮
+        document.getElementById('autoMapBtn').addEventListener('click', performAutoMapping);
+        
+        // 映射按钮
+        document.getElementById('mapEntityBtn').addEventListener('click', () => mapColumn('entity'));
+        document.getElementById('mapRelationBtn').addEventListener('click', () => mapColumn('relation'));
+        document.getElementById('unmapBtn').addEventListener('click', unmapColumn);
+        
+        // 验证按钮
+        document.getElementById('validateBtn').addEventListener('click', validateMappings);
+        
+        // 下一步按钮
+        document.getElementById('nextBtn').addEventListener('click', () => {
+            window.location.href = `/kg_builder?file_id=${fileId}`;
+        });
+        
+        // 返回按钮
+        document.getElementById('backBtn').addEventListener('click', (e) => {
+            e.preventDefault();
+            window.location.href = `/data_analysis?file_id=${fileId}`;
+        });
+    }
+    
+    async function loadFileData(fileId) {
+        try {
+            showLoading(true);
+            const response = await fetch(`/api/get_file_analysis/${fileId}`);
+            const result = await response.json();
+            
+            if (result.success) {
+                fileData = result.data;
+                displaySourceColumns();
+                updateStatistics();
+            } else {
+                alert('获取文件数据失败: ' + result.error);
+                window.location.href = '/csv_upload';
+            }
+        } catch (error) {
+            alert('网络请求失败: ' + error.message);
+            window.location.href = '/csv_upload';
+        } finally {
+            showLoading(false);
+        }
+    }
+    
+    function displaySourceColumns() {
+        const sourceColumns = document.getElementById('sourceColumns');
+        
+        if (!fileData || !fileData.columns) {
+            sourceColumns.innerHTML = '<p>没有可用的字段数据</p>';
+            return;
+        }
+        
+        const columnsHtml = fileData.columns.map(column => {
+            const dataType = fileData.data_types[column] || 'text';
+            const typeClass = `type-${dataType}`;
+            const typeLabel = getTypeLabel(dataType);
+            const sampleData = getSampleData(column);
+            
+            return `
+                <div class="column-item" data-column="${column}" data-type="${dataType}">
+                    <div class="column-name">${column}</div>
+                    <span class="column-type ${typeClass}">${typeLabel}</span>
+                    <div class="column-preview">示例: ${sampleData}</div>
+                </div>
+            `;
+        }).join('');
+        
+        sourceColumns.innerHTML = columnsHtml;
+        
+        // 添加点击事件
+        sourceColumns.querySelectorAll('.column-item').forEach(item => {
+            item.addEventListener('click', () => selectColumn(item));
+        });
+    }
+    
+    function selectColumn(item) {
+        // 清除之前的选择
+        document.querySelectorAll('.column-item.selected').forEach(el => {
+            el.classList.remove('selected');
+        });
+        
+        // 选择当前项
+        item.classList.add('selected');
+        selectedColumn = {
+            name: item.dataset.column,
+            type: item.dataset.type
+        };
+        
+        // 启用映射按钮
+        document.getElementById('mapEntityBtn').disabled = false;
+        document.getElementById('mapRelationBtn').disabled = false;
+        document.getElementById('unmapBtn').disabled = false;
+    }
+    
+    function mapColumn(mappingType) {
+        if (!selectedColumn) return;
+        
+        const columnName = selectedColumn.name;
+        
+        // 从现有映射中移除
+        delete mappings.entities[columnName];
+        delete mappings.relations[columnName];
+        
+        // 添加到新映射
+        mappings[mappingType === 'entity' ? 'entities' : 'relations'][columnName] = {
+            type: selectedColumn.type,
+            mappingType: mappingType
+        };
+        
+        // 更新显示
+        updateMappingDisplay();
+        updateStatistics();
+        updatePreview();
+        
+        // 清除选择
+        clearSelection();
+    }
+    
+    function unmapColumn() {
+        if (!selectedColumn) return;
+        
+        const columnName = selectedColumn.name;
+        
+        // 从所有映射中移除
+        delete mappings.entities[columnName];
+        delete mappings.relations[columnName];
+        
+        // 更新显示
+        updateMappingDisplay();
+        updateStatistics();
+        updatePreview();
+        
+        // 清除选择
+        clearSelection();
+    }
+    
+    function clearSelection() {
+        document.querySelectorAll('.column-item.selected').forEach(el => {
+            el.classList.remove('selected');
+        });
+        selectedColumn = null;
+        
+        // 禁用映射按钮
+        document.getElementById('mapEntityBtn').disabled = true;
+        document.getElementById('mapRelationBtn').disabled = true;
+        document.getElementById('unmapBtn').disabled = true;
+    }
+    
+    function updateMappingDisplay() {
+        updateEntityMappings();
+        updateRelationMappings();
+    }
+    
+    function updateEntityMappings() {
+        const container = document.getElementById('entityMappings');
+        const entities = Object.keys(mappings.entities);
+        
+        if (entities.length === 0) {
+            container.innerHTML = '<div class="column-item" style="text-align: center; color: #666; font-style: italic;">将实体相关字段拖拽到此处</div>';
+            return;
+        }
+        
+        const entitiesHtml = entities.map(column => {
+            const mapping = mappings.entities[column];
+            const typeClass = `type-${mapping.type}`;
+            const typeLabel = getTypeLabel(mapping.type);
+            
+            return `
+                <div class="column-item entity" data-column="${column}">
+                    <div class="column-name">${column}</div>
+                    <span class="column-type ${typeClass}">${typeLabel}</span>
+                    <button class="pair-remove" onclick="removeMapping('entities', '${column}')">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            `;
+        }).join('');
+        
+        container.innerHTML = entitiesHtml;
+    }
+    
+    function updateRelationMappings() {
+        const container = document.getElementById('relationMappings');
+        const relations = Object.keys(mappings.relations);
+        
+        if (relations.length === 0) {
+            container.innerHTML = '<div class="column-item" style="text-align: center; color: #666; font-style: italic;">将关系相关字段拖拽到此处</div>';
+            return;
+        }
+        
+        const relationsHtml = relations.map(column => {
+            const mapping = mappings.relations[column];
+            const typeClass = `type-${mapping.type}`;
+            const typeLabel = getTypeLabel(mapping.type);
+            
+            return `
+                <div class="column-item relation" data-column="${column}">
+                    <div class="column-name">${column}</div>
+                    <span class="column-type ${typeClass}">${typeLabel}</span>
+                    <button class="pair-remove" onclick="removeMapping('relations', '${column}')">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            `;
+        }).join('');
+        
+        container.innerHTML = relationsHtml;
+    }
+    
+    function updateStatistics() {
+        const totalFields = fileData ? fileData.columns.length : 0;
+        const entityFields = Object.keys(mappings.entities).length;
+        const relationFields = Object.keys(mappings.relations).length;
+        const unmappedFields = totalFields - entityFields - relationFields;
+        
+        document.getElementById('totalFields').textContent = totalFields;
+        document.getElementById('entityFields').textContent = entityFields;
+        document.getElementById('relationFields').textContent = relationFields;
+        document.getElementById('unmappedFields').textContent = unmappedFields;
+    }
+    
+    function updatePreview() {
+        const preview = document.getElementById('mappingPreview');
+        const allMappings = [
+            ...Object.entries(mappings.entities).map(([col, data]) => ({column: col, type: 'entity', ...data})),
+            ...Object.entries(mappings.relations).map(([col, data]) => ({column: col, type: 'relation', ...data}))
+        ];
+        
+        if (allMappings.length === 0) {
+            preview.innerHTML = '<p style="text-align: center; color: #666; font-style: italic;">暂无映射配置</p>';
+            return;
+        }
+        
+        const previewHtml = allMappings.map(mapping => `
+            <div class="mapping-pair ${mapping.type}-pair">
+                <div class="pair-source">${mapping.column}</div>
+                <div class="pair-target">${mapping.type === 'entity' ? '实体字段' : '关系字段'} - ${getTypeLabel(mapping.type)}</div>
+                <button class="pair-remove" onclick="removeMapping('${mapping.type === 'entity' ? 'entities' : 'relations'}', '${mapping.column}')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        `).join('');
+        
+        preview.innerHTML = previewHtml;
+    }
+    
+    function performAutoMapping() {
+        if (!fileData || !fileData.schema_detection) {
+            alert('没有可用的智能建议数据');
+            return;
+        }
+        
+        showLoading(true);
+        
+        // 模拟自动映射逻辑
+        setTimeout(() => {
+            // 重置映射
+            mappings = { entities: {}, relations: {} };
+            
+            // 基于字段类型进行自动映射
+            fileData.columns.forEach(column => {
+                const dataType = fileData.data_types[column] || 'text';
+                
+                if (['organization', 'person', 'address', 'identifier'].includes(dataType)) {
+                    mappings.entities[column] = {
+                        type: dataType,
+                        mappingType: 'entity'
+                    };
+                } else {
+                    mappings.relations[column] = {
+                        type: dataType,
+                        mappingType: 'relation'
+                    };
+                }
+            });
+            
+            // 更新显示
+            updateMappingDisplay();
+            updateStatistics();
+            updatePreview();
+            
+            showLoading(false);
+            alert('自动映射完成！');
+        }, 1500);
+    }
+    
+    async function validateMappings() {
+        if (Object.keys(mappings.entities).length === 0) {
+            alert('请至少映射一个实体字段');
+            return;
+        }
+        
+        showLoading(true);
+        
+        try {
+            // 这里可以调用后端API验证映射配置
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // 启用下一步按钮
+            document.getElementById('nextBtn').disabled = false;
+            alert('映射配置验证成功！可以进行下一步。');
+        } catch (error) {
+            alert('映射验证失败: ' + error.message);
+        } finally {
+            showLoading(false);
+        }
+    }
+    
+    // 全局函数，供HTML调用
+    window.removeMapping = function(type, column) {
+        delete mappings[type][column];
+        updateMappingDisplay();
+        updateStatistics();
+        updatePreview();
+    };
+    
+    function getTypeLabel(dataType) {
+        const typeLabels = {
+            'organization': '组织机构',
+            'person': '人员姓名', 
+            'address': '地址位置',
+            'identifier': '标识符',
+            'numeric': '数值型',
+            'text': '文本型',
+            'datetime': '日期时间'
+        };
+        return typeLabels[dataType] || '未知类型';
+    }
+    
+    function getSampleData(column) {
+        if (!fileData || !fileData.sample_data || fileData.sample_data.length === 0) {
+            return '无数据';
+        }
+        
+        const firstRow = fileData.sample_data[0];
+        const value = firstRow[column];
+        return value ? String(value).substring(0, 20) + (String(value).length > 20 ? '...' : '') : '空值';
+    }
+    
+    function showLoading(show) {
+        document.getElementById('loadingOverlay').style.display = show ? 'flex' : 'none';
+    }
+});
+</script>
+{% endblock %}

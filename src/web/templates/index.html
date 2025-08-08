@@ -10,6 +10,57 @@
         <p class="lead text-muted">欢迎使用消防单位建筑数据智能关联系统。以下是当前系统的核心数据指标。</p>
     </div>
 
+    <!-- V2.0 功能入口 -->
+    <div class="card shadow-sm mb-4" style="border-left: 5px solid #007bff;">
+        <div class="card-header bg-gradient-primary text-white">
+            <h4><i class="fas fa-rocket"></i> V2.0 智能知识图谱系统 <span class="badge bg-warning text-dark">NEW!</span></h4>
+        </div>
+        <div class="card-body">
+            <p class="card-text">
+                全新的V2.0版本支持CSV数据上传、智能字段映射、知识图谱构建等高级功能，
+                将您的数据转化为可视化的知识网络，发现隐藏的关联和洞察。
+            </p>
+            <div class="row">
+                <div class="col-md-3 mb-3">
+                    <div class="d-grid">
+                        <a href="/csv_upload" class="btn btn-primary btn-lg">
+                            <i class="fas fa-upload"></i><br>
+                            <small>CSV上传</small>
+                        </a>
+                    </div>
+                </div>
+                <div class="col-md-3 mb-3">
+                    <div class="d-grid">
+                        <a href="/data_analysis" class="btn btn-info btn-lg" onclick="checkFileId(event, '/data_analysis')">
+                            <i class="fas fa-chart-bar"></i><br>
+                            <small>数据分析</small>
+                        </a>
+                    </div>
+                </div>
+                <div class="col-md-3 mb-3">
+                    <div class="d-grid">
+                        <a href="/field_mapping" class="btn btn-success btn-lg" onclick="checkFileId(event, '/field_mapping')">
+                            <i class="fas fa-exchange-alt"></i><br>
+                            <small>字段映射</small>
+                        </a>
+                    </div>
+                </div>
+                <div class="col-md-3 mb-3">
+                    <div class="d-grid">
+                        <a href="/kg_builder" class="btn btn-warning btn-lg" onclick="checkFileId(event, '/kg_builder')">
+                            <i class="fas fa-network-wired"></i><br>
+                            <small>知识图谱</small>
+                        </a>
+                    </div>
+                </div>
+            </div>
+            <div class="alert alert-info mt-3" role="alert">
+                <i class="fas fa-info-circle"></i>
+                <strong>使用提示：</strong> 请从CSV上传开始，按照步骤完成数据处理和知识图谱构建。系统会自动保存您的进度。
+            </div>
+        </div>
+    </div>
+
     <!-- Stats Cards -->
     <div class="row">
         <div class="col-lg-4 mb-4">
@@ -118,5 +169,23 @@
         const systemInfo = stats.system_info || {};
         document.getElementById('last-updated').textContent = `最后更新于: ${systemInfo.last_update || new Date().toLocaleString()}`;
         }
+
+    // V2.0功能：检查文件ID参数
+    function checkFileId(event, targetUrl) {
+        event.preventDefault();
+        
+        // 检查localStorage中是否有最近的文件ID
+        const lastFileId = localStorage.getItem('v2_last_file_id');
+        
+        if (lastFileId) {
+            // 如果有文件ID，直接跳转
+            window.location.href = `${targetUrl}?file_id=${lastFileId}`;
+        } else {
+            // 如果没有文件ID，提示用户先上传文件
+            if (confirm('需要先上传CSV文件才能使用此功能。是否现在前往上传页面？')) {
+                window.location.href = '/csv_upload';
+            }
+        }
+    }
     </script>
 {% endblock %}

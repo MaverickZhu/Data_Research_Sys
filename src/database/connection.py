@@ -148,6 +148,18 @@ class DatabaseManager:
         if self._redis_client is None:
             raise Exception("Redis未连接")
         return self._redis_client
+    
+    @property
+    def mongo_client(self) -> MongoClient:
+        """
+        获取MongoDB客户端（属性访问）
+        
+        Returns:
+            MongoClient: MongoDB客户端对象
+        """
+        if self._mongo_client is None:
+            raise Exception("MongoDB未连接")
+        return self._mongo_client
         
     def get_db(self) -> Database:
         """

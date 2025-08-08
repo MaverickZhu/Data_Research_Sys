@@ -20,7 +20,7 @@ pagination:
 # 文件上传配置
 upload:
   max_file_size: 50MB
-  allowed_extensions: [".xlsx", ".xls", ".csv"]
+  allowed_extensions: [".xlsx", ".xls", ".csv", ".txt"]
   upload_folder: "uploads"
 
 # 导出配置

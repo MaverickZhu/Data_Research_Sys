@@ -1,0 +1,997 @@
+{% extends "base.html" %}
+
+{% block title %}字段映射 - 智能关联匹配系统V2.0{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/table-selector.css') }}">
+<style>
+    .mapping-container {
+        max-width: 1600px;
+        margin: 20px auto;
+        padding: 20px;
+    }
+    
+    .page-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 30px;
+        border-radius: 15px;
+        margin-bottom: 30px;
+        text-align: center;
+    }
+    
+    .page-header h1 {
+        margin: 0;
+        font-size: 2.2em;
+        font-weight: 700;
+    }
+    
+    .page-header p {
+        margin: 10px 0 0;
+        font-size: 1.1em;
+        opacity: 0.9;
+    }
+    
+    .mapping-layout {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 30px;
+        margin-bottom: 30px;
+    }
+    
+    .section-card {
+        background: white;
+        border-radius: 15px;
+        padding: 0;
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+    }
+    
+    .section-header {
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        color: white;
+        padding: 20px;
+        font-size: 1.3em;
+        font-weight: 600;
+    }
+    
+    .section-content {
+        padding: 25px;
+    }
+    
+    .table-selection-area {
+        min-height: 400px;
+    }
+    
+    .selected-tables {
+        margin-top: 20px;
+    }
+    
+    .selected-table-item {
+        background: #f8f9fa;
+        border: 2px solid #e9ecef;
+        border-radius: 10px;
+        padding: 15px;
+        margin-bottom: 10px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    
+    .selected-table-item.source {
+        border-color: #007bff;
+        background: linear-gradient(135deg, #e3f2fd 0%, #f8f9fa 100%);
+    }
+    
+    .selected-table-item.target {
+        border-color: #28a745;
+        background: linear-gradient(135deg, #e8f5e8 0%, #f8f9fa 100%);
+    }
+    
+    .table-info {
+        flex: 1;
+    }
+    
+    .table-name {
+        font-weight: 600;
+        font-size: 1.1em;
+        color: #333;
+    }
+    
+    .table-stats {
+        font-size: 0.9em;
+        color: #666;
+        margin-top: 5px;
+    }
+    
+    .remove-table {
+        background: #dc3545;
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 30px;
+        height: 30px;
+        cursor: pointer;
+        font-size: 1.2em;
+    }
+    
+    .mapping-workspace {
+        grid-column: 1 / -1;
+        margin-top: 30px;
+        display: none;
+    }
+    
+    .mapping-header {
+        background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        color: white;
+        padding: 20px;
+        font-size: 1.3em;
+        font-weight: 600;
+    }
+    
+    .mapping-content {
+        padding: 30px;
+    }
+    
+    .mapping-controls {
+        display: flex;
+        gap: 15px;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+    }
+    
+    .control-btn {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 8px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+    
+    .control-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+    }
+    
+    .control-btn:disabled {
+        background: #6c757d;
+        cursor: not-allowed;
+        transform: none;
+    }
+    
+    .mapping-area {
+        display: grid;
+        grid-template-columns: 1fr 100px 1fr;
+        gap: 20px;
+        align-items: start;
+    }
+    
+    .field-list {
+        background: #f8f9fa;
+        border-radius: 10px;
+        padding: 20px;
+        max-height: 500px;
+        overflow-y: auto;
+    }
+    
+    .field-list h3 {
+        margin: 0 0 15px 0;
+        color: #333;
+        font-size: 1.2em;
+    }
+    
+    .field-item {
+        background: white;
+        border: 2px solid #e9ecef;
+        border-radius: 8px;
+        padding: 12px;
+        margin-bottom: 8px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        user-select: none;
+    }
+    
+    .field-item:hover {
+        border-color: #667eea;
+        box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
+    }
+    
+    .field-item.selected {
+        border-color: #28a745;
+        background: #e8f5e8;
+    }
+    
+    .field-name {
+        font-weight: 600;
+        color: #333;
+        margin-bottom: 5px;
+    }
+    
+    .field-details {
+        font-size: 0.85em;
+        color: #666;
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+    
+    .field-type {
+        background: #e3f2fd;
+        color: #1976d2;
+        padding: 2px 6px;
+        border-radius: 12px;
+        font-size: 0.8em;
+    }
+    
+    .field-stats {
+        color: #666;
+    }
+    
+    .mapping-arrows {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+    }
+    
+    .mapping-line {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px;
+        background: #f8f9fa;
+        border-radius: 8px;
+        margin-bottom: 5px;
+        min-height: 40px;
+    }
+    
+    .mapping-arrow {
+        color: #667eea;
+        font-size: 1.5em;
+    }
+    
+    .confidence-badge {
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 0.8em;
+        font-weight: 500;
+    }
+    
+    .confidence-high {
+        background: #e8f5e8;
+        color: #2e7d32;
+    }
+    
+    .confidence-medium {
+        background: #fff3e0;
+        color: #f57c00;
+    }
+    
+    .confidence-low {
+        background: #ffebee;
+        color: #c62828;
+    }
+    
+    .preview-section {
+        margin-top: 30px;
+        padding: 20px;
+        background: #f8f9fa;
+        border-radius: 10px;
+    }
+    
+    .preview-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 15px;
+        background: white;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    }
+    
+    .preview-table th,
+    .preview-table td {
+        padding: 12px;
+        text-align: left;
+        border-bottom: 1px solid #e9ecef;
+    }
+    
+    .preview-table th {
+        background: #667eea;
+        color: white;
+        font-weight: 600;
+    }
+    
+    .preview-table tr:hover {
+        background: #f8f9fa;
+    }
+    
+    .mapping-stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 15px;
+        margin: 20px 0;
+    }
+    
+    .stat-card {
+        background: white;
+        padding: 15px;
+        border-radius: 8px;
+        text-align: center;
+        border-left: 4px solid #667eea;
+    }
+    
+    .stat-value {
+        font-size: 1.8em;
+        font-weight: 700;
+        color: #333;
+        margin-bottom: 5px;
+    }
+    
+    .stat-label {
+        font-size: 0.9em;
+        color: #666;
+    }
+    
+    .loading-spinner {
+        display: none;
+        text-align: center;
+        padding: 40px;
+    }
+    
+    .spinner {
+        border: 4px solid #f3f3f3;
+        border-top: 4px solid #667eea;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 15px;
+    }
+    
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+    
+    .error-message {
+        background: #f8d7da;
+        color: #721c24;
+        padding: 15px;
+        border-radius: 8px;
+        border: 1px solid #f5c6cb;
+        margin: 15px 0;
+    }
+    
+    .success-message {
+        background: #d4edda;
+        color: #155724;
+        padding: 15px;
+        border-radius: 8px;
+        border: 1px solid #c3e6cb;
+        margin: 15px 0;
+    }
+    
+    @media (max-width: 1200px) {
+        .mapping-layout {
+            grid-template-columns: 1fr;
+        }
+        
+        .mapping-area {
+            grid-template-columns: 1fr;
+            gap: 20px;
+        }
+        
+        .mapping-arrows {
+            order: 2;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="mapping-container">
+    <div class="page-header">
+        <h1><i class="fas fa-link"></i> 字段映射</h1>
+        <p>选择数据表进行智能字段映射，建立表间关联关系</p>
+    </div>
+    
+    <div class="mapping-layout">
+        <!-- 源表选择区域 -->
+        <div class="section-card">
+            <div class="section-header">
+                <i class="fas fa-database"></i> 选择源表
+            </div>
+            <div class="section-content">
+                <div id="source-table-selector" class="table-selection-area"></div>
+                <div class="selected-tables">
+                    <div id="selected-source-table"></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 目标表选择区域 -->
+        <div class="section-card">
+            <div class="section-header">
+                <i class="fas fa-bullseye"></i> 选择目标表
+            </div>
+            <div class="section-content">
+                <div id="target-table-selector" class="table-selection-area"></div>
+                <div class="selected-tables">
+                    <div id="selected-target-table"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 字段映射工作区 -->
+    <div class="section-card mapping-workspace" id="mapping-workspace">
+        <div class="mapping-header">
+            <i class="fas fa-arrows-alt-h"></i> 字段映射配置
+        </div>
+        <div class="mapping-content">
+            <div class="mapping-controls">
+                <button id="auto-suggest-btn" class="control-btn">
+                    <i class="fas fa-magic"></i> 智能建议
+                </button>
+                <button id="clear-mapping-btn" class="control-btn">
+                    <i class="fas fa-trash"></i> 清除映射
+                </button>
+                <button id="preview-btn" class="control-btn">
+                    <i class="fas fa-eye"></i> 预览结果
+                </button>
+                <button id="save-mapping-btn" class="control-btn">
+                    <i class="fas fa-save"></i> 保存配置
+                </button>
+            </div>
+            
+            <div class="mapping-area">
+                <!-- 源字段列表 -->
+                <div class="field-list">
+                    <h3>源表字段</h3>
+                    <div id="source-fields"></div>
+                </div>
+                
+                <!-- 映射关系显示 -->
+                <div class="mapping-arrows">
+                    <div id="mapping-lines"></div>
+                </div>
+                
+                <!-- 目标字段列表 -->
+                <div class="field-list">
+                    <h3>目标表字段</h3>
+                    <div id="target-fields"></div>
+                </div>
+            </div>
+            
+            <!-- 加载状态 -->
+            <div class="loading-spinner" id="loading-spinner">
+                <div class="spinner"></div>
+                <p>正在处理，请稍候...</p>
+            </div>
+            
+            <!-- 预览结果区域 -->
+            <div class="preview-section" id="preview-section" style="display: none;">
+                <h3>映射预览</h3>
+                <div class="mapping-stats" id="mapping-stats"></div>
+                <div style="overflow-x: auto;">
+                    <table class="preview-table" id="preview-table">
+                        <thead id="preview-header"></thead>
+                        <tbody id="preview-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/table-selector.js') }}"></script>
+<script>
+let sourceTableSelector, targetTableSelector;
+let selectedSourceTable = null;
+let selectedTargetTable = null;
+let sourceFields = [];
+let targetFields = [];
+let fieldMappings = [];
+
+document.addEventListener('DOMContentLoaded', function() {
+    initializeTableSelectors();
+    bindEvents();
+});
+
+function initializeTableSelectors() {
+    // 初始化源表选择器
+    sourceTableSelector = new TableSelector('source-table-selector', {
+        multiple: false,
+        showDetails: true,
+        filterEmpty: true,
+        onSelect: function(selectedTables, table) {
+            handleSourceTableSelection(selectedTables);
+        }
+    });
+    
+    // 初始化目标表选择器
+    targetTableSelector = new TableSelector('target-table-selector', {
+        multiple: false,
+        showDetails: true,
+        filterEmpty: true,
+        onSelect: function(selectedTables, table) {
+            handleTargetTableSelection(selectedTables);
+        }
+    });
+}
+
+function bindEvents() {
+    document.getElementById('auto-suggest-btn').addEventListener('click', generateMappingSuggestions);
+    document.getElementById('clear-mapping-btn').addEventListener('click', clearMappings);
+    document.getElementById('preview-btn').addEventListener('click', previewMapping);
+    document.getElementById('save-mapping-btn').addEventListener('click', saveMapping);
+}
+
+function handleSourceTableSelection(selectedTables) {
+    selectedSourceTable = selectedTables.length > 0 ? selectedTables[0] : null;
+    updateSelectedTableDisplay('source', selectedSourceTable);
+    
+    if (selectedSourceTable) {
+        loadTableFields([selectedSourceTable.name], 'source');
+    } else {
+        sourceFields = [];
+        updateFieldDisplay();
+    }
+    
+    checkMappingReadiness();
+}
+
+function handleTargetTableSelection(selectedTables) {
+    selectedTargetTable = selectedTables.length > 0 ? selectedTables[0] : null;
+    updateSelectedTableDisplay('target', selectedTargetTable);
+    
+    if (selectedTargetTable) {
+        loadTableFields([selectedTargetTable.name], 'target');
+    } else {
+        targetFields = [];
+        updateFieldDisplay();
+    }
+    
+    checkMappingReadiness();
+}
+
+function updateSelectedTableDisplay(type, table) {
+    const container = document.getElementById(`selected-${type}-table`);
+    
+    if (table) {
+        container.innerHTML = `
+            <div class="selected-table-item ${type}">
+                <div class="table-info">
+                    <div class="table-name">${table.display_name}</div>
+                    <div class="table-stats">${table.document_count.toLocaleString()} 条记录 | ${table.field_count} 字段</div>
+                </div>
+                <button class="remove-table" onclick="remove${type.charAt(0).toUpperCase() + type.slice(1)}Table()">×</button>
+            </div>
+        `;
+    } else {
+        container.innerHTML = '';
+    }
+}
+
+function removeSourceTable() {
+    sourceTableSelector.clearSelection();
+    selectedSourceTable = null;
+    sourceFields = [];
+    updateSelectedTableDisplay('source', null);
+    updateFieldDisplay();
+    checkMappingReadiness();
+}
+
+function removeTargetTable() {
+    targetTableSelector.clearSelection();
+    selectedTargetTable = null;
+    targetFields = [];
+    updateSelectedTableDisplay('target', null);
+    updateFieldDisplay();
+    checkMappingReadiness();
+}
+
+async function loadTableFields(tableNames, type) {
+    try {
+        showLoading(true);
+        
+        const response = await fetch('/api/get_table_fields', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                table_names: tableNames
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success && result.tables.length > 0) {
+            if (type === 'source') {
+                sourceFields = result.tables[0].fields;
+            } else {
+                targetFields = result.tables[0].fields;
+            }
+            updateFieldDisplay();
+        } else {
+            throw new Error(result.error || '获取字段信息失败');
+        }
+        
+    } catch (error) {
+        console.error('加载字段信息失败:', error);
+        showError('加载字段信息失败: ' + error.message);
+    } finally {
+        showLoading(false);
+    }
+}
+
+function updateFieldDisplay() {
+    // 更新源字段显示
+    const sourceContainer = document.getElementById('source-fields');
+    sourceContainer.innerHTML = sourceFields.map(field => `
+        <div class="field-item" data-field="${field.field_name}" onclick="selectSourceField('${field.field_name}')">
+            <div class="field-name">${field.field_name}</div>
+            <div class="field-details">
+                <span class="field-type">${field.data_type}</span>
+                <span class="field-stats">${field.non_null_rate}% 非空</span>
+                ${field.is_key_field ? '<span class="field-type" style="background: #e8f5e8; color: #2e7d32;">主键</span>' : ''}
+            </div>
+        </div>
+    `).join('');
+    
+    // 更新目标字段显示
+    const targetContainer = document.getElementById('target-fields');
+    targetContainer.innerHTML = targetFields.map(field => `
+        <div class="field-item" data-field="${field.field_name}" onclick="selectTargetField('${field.field_name}')">
+            <div class="field-name">${field.field_name}</div>
+            <div class="field-details">
+                <span class="field-type">${field.data_type}</span>
+                <span class="field-stats">${field.non_null_rate}% 非空</span>
+                ${field.is_key_field ? '<span class="field-type" style="background: #e8f5e8; color: #2e7d32;">主键</span>' : ''}
+            </div>
+        </div>
+    `).join('');
+    
+    updateMappingDisplay();
+}
+
+let selectedSourceField = null;
+let selectedTargetField = null;
+
+function selectSourceField(fieldName) {
+    // 清除之前的选择
+    document.querySelectorAll('#source-fields .field-item').forEach(item => {
+        item.classList.remove('selected');
+    });
+    
+    // 选择当前字段
+    const fieldItem = document.querySelector(`#source-fields .field-item[data-field="${fieldName}"]`);
+    if (fieldItem) {
+        fieldItem.classList.add('selected');
+        selectedSourceField = fieldName;
+        
+        // 如果已选择目标字段，创建映射
+        if (selectedTargetField) {
+            createFieldMapping(selectedSourceField, selectedTargetField);
+        }
+    }
+}
+
+function selectTargetField(fieldName) {
+    // 清除之前的选择
+    document.querySelectorAll('#target-fields .field-item').forEach(item => {
+        item.classList.remove('selected');
+    });
+    
+    // 选择当前字段
+    const fieldItem = document.querySelector(`#target-fields .field-item[data-field="${fieldName}"]`);
+    if (fieldItem) {
+        fieldItem.classList.add('selected');
+        selectedTargetField = fieldName;
+        
+        // 如果已选择源字段，创建映射
+        if (selectedSourceField) {
+            createFieldMapping(selectedSourceField, selectedTargetField);
+        }
+    }
+}
+
+function createFieldMapping(sourceField, targetField) {
+    // 检查是否已存在映射
+    const existingIndex = fieldMappings.findIndex(m => m.source_field === sourceField);
+    
+    if (existingIndex >= 0) {
+        // 更新现有映射
+        fieldMappings[existingIndex].target_field = targetField;
+    } else {
+        // 创建新映射
+        fieldMappings.push({
+            source_field: sourceField,
+            target_field: targetField,
+            mapping_type: 'manual'
+        });
+    }
+    
+    // 清除选择状态
+    selectedSourceField = null;
+    selectedTargetField = null;
+    document.querySelectorAll('.field-item').forEach(item => {
+        item.classList.remove('selected');
+    });
+    
+    updateMappingDisplay();
+}
+
+function updateMappingDisplay() {
+    const container = document.getElementById('mapping-lines');
+    
+    if (fieldMappings.length === 0) {
+        container.innerHTML = '<div style="text-align: center; color: #999; padding: 20px;">点击左右字段建立映射关系</div>';
+        return;
+    }
+    
+    container.innerHTML = fieldMappings.map((mapping, index) => `
+        <div class="mapping-line">
+            <span>${mapping.source_field}</span>
+            <i class="fas fa-arrow-right mapping-arrow"></i>
+            <span>${mapping.target_field}</span>
+            <button onclick="removeMapping(${index})" style="background: #dc3545; color: white; border: none; border-radius: 50%; width: 20px; height: 20px; cursor: pointer; margin-left: 10px;">×</button>
+        </div>
+    `).join('');
+}
+
+function removeMapping(index) {
+    fieldMappings.splice(index, 1);
+    updateMappingDisplay();
+}
+
+function checkMappingReadiness() {
+    const workspace = document.getElementById('mapping-workspace');
+    
+    if (selectedSourceTable && selectedTargetTable) {
+        workspace.style.display = 'block';
+        workspace.scrollIntoView({ behavior: 'smooth' });
+    } else {
+        workspace.style.display = 'none';
+    }
+}
+
+async function generateMappingSuggestions() {
+    if (!selectedSourceTable || !selectedTargetTable || sourceFields.length === 0 || targetFields.length === 0) {
+        showError('请先选择源表和目标表');
+        return;
+    }
+    
+    try {
+        showLoading(true);
+        
+        const response = await fetch('/api/suggest_field_mapping', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                source_table: selectedSourceTable.name,
+                target_table: selectedTargetTable.name,
+                source_fields: sourceFields,
+                target_fields: targetFields
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            applyMappingSuggestions(result.suggestions);
+            showSuccess('智能映射建议已生成');
+        } else {
+            throw new Error(result.error || '生成映射建议失败');
+        }
+        
+    } catch (error) {
+        console.error('生成映射建议失败:', error);
+        showError('生成映射建议失败: ' + error.message);
+    } finally {
+        showLoading(false);
+    }
+}
+
+function applyMappingSuggestions(suggestions) {
+    fieldMappings = [];
+    
+    suggestions.forEach(suggestion => {
+        if (suggestion.suggested_mappings.length > 0) {
+            const bestMatch = suggestion.suggested_mappings[0];
+            if (bestMatch.confidence === 'high' || bestMatch.overall_score > 0.6) {
+                fieldMappings.push({
+                    source_field: suggestion.source_field,
+                    target_field: bestMatch.target_field,
+                    mapping_type: 'suggested',
+                    confidence: bestMatch.confidence,
+                    score: bestMatch.overall_score
+                });
+            }
+        }
+    });
+    
+    updateMappingDisplay();
+}
+
+function clearMappings() {
+    fieldMappings = [];
+    updateMappingDisplay();
+    document.getElementById('preview-section').style.display = 'none';
+}
+
+async function previewMapping() {
+    if (fieldMappings.length === 0) {
+        showError('请先建立字段映射关系');
+        return;
+    }
+    
+    try {
+        showLoading(true);
+        
+        const response = await fetch('/api/preview_field_mapping', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                source_table: selectedSourceTable.name,
+                target_table: selectedTargetTable.name,
+                field_mappings: fieldMappings,
+                preview_limit: 10
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            displayPreviewResults(result.preview);
+        } else {
+            throw new Error(result.error || '预览映射失败');
+        }
+        
+    } catch (error) {
+        console.error('预览映射失败:', error);
+        showError('预览映射失败: ' + error.message);
+    } finally {
+        showLoading(false);
+    }
+}
+
+function displayPreviewResults(preview) {
+    const previewSection = document.getElementById('preview-section');
+    const statsContainer = document.getElementById('mapping-stats');
+    const previewHeader = document.getElementById('preview-header');
+    const previewBody = document.getElementById('preview-body');
+    
+    // 显示统计信息
+    const stats = preview.statistics;
+    statsContainer.innerHTML = `
+        <div class="stat-card">
+            <div class="stat-value">${stats.total_mappings}</div>
+            <div class="stat-label">映射字段数</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">${stats.successful_mappings}</div>
+            <div class="stat-label">成功映射</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">${stats.data_quality.overall_score || 0}%</div>
+            <div class="stat-label">数据质量</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">${preview.total_previewed}</div>
+            <div class="stat-label">预览记录</div>
+        </div>
+    `;
+    
+    // 显示预览表格
+    if (preview.preview_data.length > 0) {
+        const firstRow = preview.preview_data[0];
+        const headers = Object.keys(firstRow.mapped_doc);
+        
+        previewHeader.innerHTML = `
+            <tr>
+                <th>序号</th>
+                ${headers.map(header => `<th>${header}</th>`).join('')}
+            </tr>
+        `;
+        
+        previewBody.innerHTML = preview.preview_data.map(row => `
+            <tr>
+                <td>${row.index}</td>
+                ${headers.map(header => `<td>${row.mapped_doc[header] || '<em>空</em>'}</td>`).join('')}
+            </tr>
+        `).join('');
+    }
+    
+    previewSection.style.display = 'block';
+    previewSection.scrollIntoView({ behavior: 'smooth' });
+}
+
+async function saveMapping() {
+    if (fieldMappings.length === 0) {
+        showError('请先建立字段映射关系');
+        return;
+    }
+    
+    const mappingName = prompt('请输入映射配置名称:');
+    if (!mappingName) return;
+    
+    const description = prompt('请输入映射描述（可选）:') || '';
+    
+    try {
+        showLoading(true);
+        
+        const response = await fetch('/api/save_field_mapping', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                mapping_name: mappingName,
+                source_table: selectedSourceTable.name,
+                target_table: selectedTargetTable.name,
+                field_mappings: fieldMappings,
+                description: description
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showSuccess(`映射配置已${result.operation === 'created' ? '保存' : '更新'}: ${mappingName}`);
+        } else {
+            throw new Error(result.error || '保存映射配置失败');
+        }
+        
+    } catch (error) {
+        console.error('保存映射配置失败:', error);
+        showError('保存映射配置失败: ' + error.message);
+    } finally {
+        showLoading(false);
+    }
+}
+
+function showLoading(show) {
+    const spinner = document.getElementById('loading-spinner');
+    spinner.style.display = show ? 'block' : 'none';
+}
+
+function showError(message) {
+    const container = document.querySelector('.mapping-content');
+    const existingError = container.querySelector('.error-message');
+    if (existingError) existingError.remove();
+    
+    const errorDiv = document.createElement('div');
+    errorDiv.className = 'error-message';
+    errorDiv.innerHTML = `<i class="fas fa-exclamation-triangle"></i> ${message}`;
+    container.insertBefore(errorDiv, container.firstChild);
+    
+    setTimeout(() => errorDiv.remove(), 5000);
+}
+
+function showSuccess(message) {
+    const container = document.querySelector('.mapping-content');
+    const existingSuccess = container.querySelector('.success-message');
+    if (existingSuccess) existingSuccess.remove();
+    
+    const successDiv = document.createElement('div');
+    successDiv.className = 'success-message';
+    successDiv.innerHTML = `<i class="fas fa-check-circle"></i> ${message}`;
+    container.insertBefore(successDiv, container.firstChild);
+    
+    setTimeout(() => successDiv.remove(), 5000);
+}
+</script>
+{% endblock %}

@@ -20,7 +20,15 @@ class SliceEnhancedMatcher:
     def __init__(self, db_manager=None):
         """初始化切片增强匹配器"""
         if db_manager:
-            self.db = db_manager.db
+            # 使用get_db()方法获取数据库实例
+            if hasattr(db_manager, 'get_db'):
+                self.db = db_manager.get_db()
+            elif hasattr(db_manager, 'db'):
+                self.db = db_manager.db
+            else:
+                # 降级到默认连接
+                client = pymongo.MongoClient('mongodb://localhost:27017/')
+                self.db = client['Unit_Info']
         else:
             client = pymongo.MongoClient('mongodb://localhost:27017/')
             self.db = client['Unit_Info']
@@ -204,6 +212,34 @@ class SliceEnhancedMatcher:
         except Exception as e:
             logger.error(f"关键词查询失败: {e}")
             return []
+    
+    def calculate_similarity(self, source_name: str, target_name: str) -> float:
+        """
+        计算两个字符串的相似度（简化版本）
+        
+        Args:
+            source_name: 源字符串
+            target_name: 目标字符串
+            
+        Returns:
+            float: 相似度分数 (0.0-1.0)
+        """
+        if not source_name or not target_name:
+            return 0.0
+        
+        # 使用多种算法计算相似度
+        basic_similarity = fuzz.ratio(source_name, target_name) / 100.0
+        token_similarity = fuzz.token_sort_ratio(source_name, target_name) / 100.0
+        partial_similarity = fuzz.partial_ratio(source_name, target_name) / 100.0
+        
+        # 加权平均
+        weighted_score = (
+            basic_similarity * 0.4 +
+            token_similarity * 0.4 +
+            partial_similarity * 0.2
+        )
+        
+        return weighted_score
     
     def calculate_enhanced_similarity(self, source_name: str, target_record: Dict) -> float:
         """计算增强相似度"""

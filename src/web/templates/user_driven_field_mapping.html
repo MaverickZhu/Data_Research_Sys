@@ -810,6 +810,20 @@ async function proceedToMapping() {
 // 加载表字段
 async function loadTableFields() {
     try {
+        // 调试信息
+        console.log('加载表字段:', {
+            selectedSourceTable: selectedSourceTable,
+            currentTargetTable: currentTargetTable
+        });
+        
+        if (!selectedSourceTable || !currentTargetTable) {
+            showError('表名未正确设置: ' + JSON.stringify({
+                selectedSourceTable: selectedSourceTable,
+                currentTargetTable: currentTargetTable
+            }));
+            return;
+        }
+        
         // 更新界面显示
         document.getElementById('source-table-name').textContent = selectedSourceTable;
         document.getElementById('target-table-name').textContent = currentTargetTable;
@@ -837,9 +851,19 @@ async function loadTableFields() {
         const sourceData = await sourceResponse.json();
         const targetData = await targetResponse.json();
         
+        console.log('API响应:', {
+            sourceData: sourceData,
+            targetData: targetData
+        });
+        
         if (sourceData.success && targetData.success) {
             sourceFields = sourceData.fields;
             targetFields = targetData.fields;
+            
+            console.log('字段数据:', {
+                sourceFields: sourceFields,
+                targetFields: targetFields
+            });
             
             displayFields();
             
@@ -1215,10 +1239,19 @@ function backToMapping() {
 // 保存配置
 async function saveConfiguration() {
     try {
+        // 转换映射关系数据结构以匹配用户数据匹配页面的期望格式
+        const convertedMappings = mappingRelations.map(relation => ({
+            source_field: relation.source,
+            target_field: relation.target,
+            target_table: relation.targetTable,
+            similarity_score: relation.similarity,
+            data_type: 'auto' // 默认数据类型
+        }));
+        
         const configuration = {
             source_table: selectedSourceTable,
             target_tables: selectedTargetTables,
-            mappings: mappingRelations,
+            mappings: convertedMappings,
             created_at: new Date().toISOString()
         };
         
@@ -1232,9 +1265,9 @@ async function saveConfiguration() {
         
         if (data.success) {
             showSuccess('映射配置保存成功！配置ID: ' + data.config_id);
-            // 可以跳转到其他页面或重置表单
+            // 跳转到用户数据智能匹配页面
             setTimeout(() => {
-                window.location.href = '/user_driven_field_mapping';
+                window.location.href = '/user_data_matching?config_id=' + data.config_id;
             }, 2000);
         } else {
             showError('保存配置失败: ' + data.error);

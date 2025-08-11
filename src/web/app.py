@@ -31,6 +31,13 @@ from src.data_manager.data_analyzer import DataAnalyzer
 from src.data_manager.schema_detector import SchemaDetector
 from src.data_manager.validation_engine import ValidationEngine
 
+# 知识图谱模块导入
+from src.knowledge_graph.kg_store import KnowledgeGraphStore
+from src.knowledge_graph.kg_builder import KnowledgeGraphBuilder
+from src.knowledge_graph.entity_extractor import EntityExtractor
+from src.knowledge_graph.relation_extractor import RelationExtractor
+from src.knowledge_graph.kg_quality_assessor import KnowledgeGraphQualityAssessor
+
 # 设置日志
 logger = setup_logger(__name__)
 
@@ -48,6 +55,13 @@ CORS(app, resources={
 db_manager = None
 match_processor = None
 multi_match_processor = None
+
+# 知识图谱相关全局变量
+kg_store = None
+kg_builder = None
+entity_extractor = None
+relation_extractor = None
+kg_quality_assessor = None
 enhanced_association_processor = None
 optimized_match_processor = None
 config_manager = None
@@ -63,6 +77,7 @@ def create_app():
     """创建和配置Flask应用"""
     global db_manager, match_processor, multi_match_processor, enhanced_association_processor, optimized_match_processor, config_manager
     global csv_processor, data_analyzer, schema_detector, validation_engine
+    global kg_store, kg_builder, entity_extractor, relation_extractor, kg_quality_assessor
     
     try:
         # 初始化配置管理器
@@ -101,7 +116,52 @@ def create_app():
         schema_detector = SchemaDetector()
         validation_engine = ValidationEngine()
         
-        logger.info("Flask应用初始化成功")
+        # 知识图谱组件初始化
+        # 使用默认配置初始化知识图谱组件
+        kg_store = KnowledgeGraphStore(
+            db_manager=db_manager,
+            config={
+                'batch_size': 1000,
+                'use_threading': True,
+                'max_workers': 4,
+                'enable_compression': True,
+                'cache_size': 10000
+            }
+        )
+        
+        entity_extractor = EntityExtractor(
+            config={
+                'min_confidence': 0.6,
+                'max_entities_per_record': 50,
+                'enable_nlp': True
+            }
+        )
+        
+        relation_extractor = RelationExtractor(
+            config={
+                'min_confidence': 0.7,
+                'max_relations_per_record': 20,
+                'enable_semantic_reasoning': True
+            }
+        )
+        
+        kg_builder = KnowledgeGraphBuilder(
+            kg_store=kg_store,
+            config={
+                'batch_size': 500,
+                'enable_quality_check': True
+            }
+        )
+        
+        kg_quality_assessor = KnowledgeGraphQualityAssessor(
+            kg_store=kg_store,
+            config={
+                'assessment_interval': 3600,  # 1 hour
+                'quality_threshold': 0.8
+            }
+        )
+        
+        logger.info("Flask应用初始化成功（包含知识图谱组件）")
         return app
         
     except Exception as e:
@@ -3202,6 +3262,18 @@ def standalone_kg_builder():
     return render_template('standalone_kg_builder.html')
 
 
+@app.route('/dynamic_matching')
+def dynamic_matching():
+    """动态匹配页面 - 基于用户字段映射配置的智能匹配"""
+    return render_template('dynamic_matching.html')
+
+
+@app.route('/user_data_matching')
+def user_data_matching():
+    """用户数据智能匹配页面 - 专门处理用户上传数据的匹配"""
+    return render_template('user_data_matching.html')
+
+
 @app.route('/api/analyze_multi_table_relationships', methods=['POST'])
 def api_analyze_multi_table_relationships():
     """API: 分析多表关系"""
@@ -3321,6 +3393,888 @@ def _analyze_basic_table_relationships(table_schemas):
                 })
     
     return relationships
+
+
+# ====== 知识图谱增强API端点 ======
+
+@app.route('/api/kg_entity_extract', methods=['POST'])
+def api_kg_entity_extract():
+    """实体抽取API"""
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'error': '请求数据不能为空'}), 400
+        
+        # 支持两种模式：从表格抽取或从文本抽取
+        if 'table_name' in data:
+            # 从数据表抽取实体
+            table_name = data['table_name']
+            
+            # 获取表数据
+            collection = db_manager.get_collection(table_name)
+            if not collection:
+                return jsonify({'error': f'数据表 {table_name} 不存在'}), 404
+            
+            # 转换为DataFrame
+            documents = list(collection.find().limit(1000))  # 限制处理数量
+            if not documents:
+                return jsonify({'error': '数据表为空'}), 400
+            
+            df = pd.DataFrame(documents)
+            
+            # 抽取实体
+            entities = entity_extractor.extract_entities_from_dataframe(df, table_name)
+            
+            # 获取统计信息
+            stats = entity_extractor.get_entity_extraction_statistics()
+            
+            return jsonify({
+                'success': True,
+                'entities_count': len(entities),
+                'entities': [entity.to_dict() for entity in entities[:50]],  # 限制返回数量
+                'statistics': stats,
+                'table_name': table_name
+            })
+        
+        elif 'text' in data:
+            # 从文本抽取实体
+            text = data['text']
+            context = data.get('context', {})
+            
+            entities = entity_extractor.extract_entities_from_text(text, context)
+            
+            return jsonify({
+                'success': True,
+                'entities_count': len(entities),
+                'entities': [entity.to_dict() for entity in entities],
+                'text_length': len(text)
+            })
+        
+        else:
+            return jsonify({'error': '请提供 table_name 或 text 参数'}), 400
+    
+    except Exception as e:
+        logger.error(f"实体抽取API失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/kg_relation_extract', methods=['POST'])
+def api_kg_relation_extract():
+    """关系抽取API"""
+    try:
+        data = request.get_json()
+        
+        if not data or 'table_name' not in data:
+            return jsonify({'error': '请提供 table_name 参数'}), 400
+        
+        table_name = data['table_name']
+        
+        # 获取表数据
+        collection = db_manager.get_collection(table_name)
+        if not collection:
+            return jsonify({'error': f'数据表 {table_name} 不存在'}), 404
+        
+        documents = list(collection.find().limit(1000))
+        if not documents:
+            return jsonify({'error': '数据表为空'}), 400
+        
+        df = pd.DataFrame(documents)
+        
+        # 首先抽取实体
+        entities = entity_extractor.extract_entities_from_dataframe(df, table_name)
+        
+        if not entities:
+            return jsonify({'error': '未找到实体，无法抽取关系'}), 400
+        
+        # 抽取关系
+        triples = relation_extractor.extract_relations_from_dataframe(df, entities, table_name)
+        
+        # 获取统计信息
+        stats = relation_extractor.get_relation_extraction_statistics()
+        
+        return jsonify({
+            'success': True,
+            'entities_count': len(entities),
+            'relations_count': len(triples),
+            'relations': [triple.to_dict() for triple in triples[:50]],
+            'statistics': stats,
+            'table_name': table_name
+        })
+    
+    except Exception as e:
+        logger.error(f"关系抽取API失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/kg_quality_assessment', methods=['GET', 'POST'])
+def api_kg_quality_assessment():
+    """知识图谱质量评估API"""
+    try:
+        if request.method == 'POST':
+            # 执行完整质量评估
+            quality_report = kg_quality_assessor.assess_overall_quality()
+            return jsonify({
+                'success': True,
+                'assessment_type': 'full_assessment',
+                'report': quality_report
+            })
+        
+        else:
+            # GET请求：获取质量统计信息
+            stats = kg_quality_assessor.get_quality_statistics()
+            
+            # 获取质量趋势（过去7天）
+            trends = kg_quality_assessor.get_quality_trends(days=7)
+            
+            return jsonify({
+                'success': True,
+                'assessment_type': 'statistics',
+                'statistics': stats,
+                'trends': trends
+            })
+    
+    except Exception as e:
+        logger.error(f"质量评估API失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/kg_export', methods=['GET'])
+def api_kg_export():
+    """知识图谱导出API"""
+    try:
+        export_format = request.args.get('format', 'json').lower()
+        limit = int(request.args.get('limit', 1000))
+        
+        # 获取实体和关系
+        entities = kg_store.find_entities(limit=limit)
+        triples = kg_store.find_triples(limit=limit)
+        
+        if export_format == 'json':
+            export_data = {
+                'metadata': {
+                    'export_time': datetime.now().isoformat(),
+                    'entities_count': len(entities),
+                    'triples_count': len(triples),
+                    'format': 'json'
+                },
+                'entities': [entity.to_dict() for entity in entities],
+                'triples': [triple.to_dict() for triple in triples]
+            }
+            
+            return jsonify({
+                'success': True,
+                'export_data': export_data
+            })
+        
+        elif export_format == 'rdf':
+            # 简化的RDF导出
+            rdf_triples = []
+            for triple in triples:
+                rdf_triple = {
+                    'subject': triple.subject.label if triple.subject else 'unknown',
+                    'predicate': triple.predicate.type.value if triple.predicate else 'unknown',
+                    'object': triple.object.label if triple.object else 'unknown'
+                }
+                rdf_triples.append(rdf_triple)
+            
+            return jsonify({
+                'success': True,
+                'format': 'rdf',
+                'triples': rdf_triples
+            })
+        
+        elif export_format == 'csv':
+            # CSV格式导出三元组
+            csv_data = []
+            for triple in triples:
+                csv_data.append({
+                    'subject': triple.subject.label if triple.subject else '',
+                    'subject_type': triple.subject.type.value if triple.subject else '',
+                    'predicate': triple.predicate.type.value if triple.predicate else '',
+                    'object': triple.object.label if triple.object else '',
+                    'object_type': triple.object.type.value if triple.object else '',
+                    'confidence': triple.confidence or 0.0,
+                    'source': triple.source or ''
+                })
+            
+            return jsonify({
+                'success': True,
+                'format': 'csv',
+                'data': csv_data
+            })
+        
+        else:
+            return jsonify({'error': f'不支持的导出格式: {export_format}'}), 400
+    
+    except Exception as e:
+        logger.error(f"知识图谱导出API失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/kg_search', methods=['GET'])
+def api_kg_search():
+    """知识图谱搜索API"""
+    try:
+        query = request.args.get('q', '').strip()
+        search_type = request.args.get('type', 'entity').lower()
+        limit = int(request.args.get('limit', 50))
+        
+        if not query:
+            return jsonify({'error': '请提供搜索查询参数 q'}), 400
+        
+        if search_type == 'entity':
+            # 搜索实体
+            entities = kg_store.find_entities_by_text(query, limit=limit)
+            
+            return jsonify({
+                'success': True,
+                'search_type': 'entity',
+                'query': query,
+                'results_count': len(entities),
+                'results': [entity.to_dict() for entity in entities]
+            })
+        
+        elif search_type == 'relation':
+            # 搜索高置信度关系
+            triples = kg_store.find_high_confidence_triples(min_confidence=0.7, limit=limit)
+            
+            # 过滤包含查询词的关系
+            filtered_triples = []
+            query_lower = query.lower()
+            
+            for triple in triples:
+                if (triple.subject and query_lower in triple.subject.label.lower()) or \
+                   (triple.object and query_lower in triple.object.label.lower()) or \
+                   (triple.predicate and query_lower in triple.predicate.type.value.lower()):
+                    filtered_triples.append(triple)
+            
+            return jsonify({
+                'success': True,
+                'search_type': 'relation',
+                'query': query,
+                'results_count': len(filtered_triples),
+                'results': [triple.to_dict() for triple in filtered_triples[:limit]]
+            })
+        
+        else:
+            return jsonify({'error': f'不支持的搜索类型: {search_type}'}), 400
+    
+    except Exception as e:
+        logger.error(f"知识图谱搜索API失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/kg_statistics', methods=['GET'])
+def api_kg_statistics():
+    """知识图谱统计信息API"""
+    try:
+        # 获取存储统计
+        storage_stats = kg_store.get_statistics()
+        
+        # 获取性能统计
+        performance_stats = kg_store.get_performance_stats()
+        
+        # 获取质量统计
+        quality_stats = kg_quality_assessor.get_quality_statistics()
+        
+        return jsonify({
+            'success': True,
+            'timestamp': datetime.now().isoformat(),
+            'storage_statistics': storage_stats,
+            'performance_statistics': performance_stats,
+            'quality_statistics': quality_stats
+        })
+    
+    except Exception as e:
+        logger.error(f"知识图谱统计API失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/kg_optimize', methods=['POST'])
+def api_kg_optimize():
+    """知识图谱优化API"""
+    try:
+        data = request.get_json() or {}
+        operation = data.get('operation', 'collections').lower()
+        
+        if operation == 'collections':
+            # 优化集合性能
+            results = kg_store.optimize_collections()
+            
+            return jsonify({
+                'success': True,
+                'operation': 'collections_optimization',
+                'results': results
+            })
+        
+        elif operation == 'cache':
+            # 清理缓存
+            kg_store.clear_cache()
+            
+            return jsonify({
+                'success': True,
+                'operation': 'cache_cleared',
+                'message': '缓存已清理'
+            })
+        
+        else:
+            return jsonify({'error': f'不支持的优化操作: {operation}'}), 400
+    
+    except Exception as e:
+        logger.error(f"知识图谱优化API失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ====== 动态匹配相关API ======
+
+@app.route('/api/get_field_mapping_config', methods=['GET'])
+def api_get_field_mapping_config():
+    """API: 获取字段映射配置"""
+    try:
+        config_id = request.args.get('config_id')
+        if not config_id:
+            return jsonify({'success': False, 'error': '缺少配置ID参数'}), 400
+        
+        if not db_manager or not db_manager.mongo_client:
+            return jsonify({'success': False, 'error': '数据库连接未初始化'}), 500
+        
+        db = db_manager.mongo_client.get_database()
+        config_collection = db['field_mapping_configs']
+        
+        config = config_collection.find_one({'config_id': config_id})
+        
+        if not config:
+            return jsonify({'success': False, 'error': '配置不存在'}), 404
+        
+        # 移除MongoDB的_id字段
+        if '_id' in config:
+            del config['_id']
+        
+        return jsonify({
+            'success': True,
+            'config': config
+        })
+        
+    except Exception as e:
+        logger.error(f"获取字段映射配置失败: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/start_dynamic_matching', methods=['POST'])
+def api_start_dynamic_matching():
+    """API: 启动基于配置的动态匹配任务"""
+    try:
+        data = request.get_json()
+        config_id = data.get('config_id')
+        match_type = data.get('match_type', 'both')
+        batch_size = data.get('batch_size', 100)
+        similarity_threshold = data.get('similarity_threshold', 0.7)
+        max_results = data.get('max_results', 10)
+        
+        if not config_id:
+            return jsonify({'success': False, 'error': '缺少配置ID'}), 400
+        
+        # 获取字段映射配置
+        if not db_manager or not db_manager.mongo_client:
+            return jsonify({'success': False, 'error': '数据库连接未初始化'}), 500
+        
+        db = db_manager.mongo_client.get_database()
+        config_collection = db['field_mapping_configs']
+        config = config_collection.find_one({'config_id': config_id})
+        
+        if not config:
+            return jsonify({'success': False, 'error': '映射配置不存在'}), 404
+        
+        # 创建匹配任务
+        task_id = f"dynamic_match_{config_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        task_doc = {
+            'task_id': task_id,
+            'config_id': config_id,
+            'source_table': config['source_table'],
+            'target_tables': config['target_tables'],
+            'mappings': config['mappings'],
+            'match_type': match_type,
+            'batch_size': batch_size,
+            'similarity_threshold': similarity_threshold,
+            'max_results': max_results,
+            'status': 'running',
+            'progress': {
+                'percentage': 0,
+                'processed': 0,
+                'total': 0,
+                'matches': 0
+            },
+            'created_at': datetime.now().isoformat(),
+            'started_at': datetime.now().isoformat()
+        }
+        
+        # 保存任务到数据库
+        task_collection = db['dynamic_matching_tasks']
+        task_collection.insert_one(task_doc)
+        
+        # 启动后台匹配任务（简化版，实际应该用线程池）
+        import threading
+        thread = threading.Thread(
+            target=execute_dynamic_matching_task, 
+            args=(task_id, config)
+        )
+        thread.daemon = True
+        thread.start()
+        
+        return jsonify({
+            'success': True,
+            'task_id': task_id,
+            'message': '动态匹配任务已启动'
+        })
+        
+    except Exception as e:
+        logger.error(f"启动动态匹配任务失败: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/matching_progress', methods=['GET'])
+def api_matching_progress():
+    """API: 获取匹配任务进度"""
+    try:
+        task_id = request.args.get('task_id')
+        if not task_id:
+            return jsonify({'success': False, 'error': '缺少任务ID'}), 400
+        
+        if not db_manager or not db_manager.mongo_client:
+            return jsonify({'success': False, 'error': '数据库连接未初始化'}), 500
+        
+        db = db_manager.mongo_client.get_database()
+        task_collection = db['dynamic_matching_tasks']
+        
+        task = task_collection.find_one({'task_id': task_id})
+        
+        if not task:
+            return jsonify({'success': False, 'error': '任务不存在'}), 404
+        
+        return jsonify({
+            'success': True,
+            'progress': task['progress'],
+            'status': task['status']
+        })
+        
+    except Exception as e:
+        logger.error(f"获取匹配进度失败: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ====== 用户数据智能匹配API ======
+
+@app.route('/api/start_user_data_matching', methods=['POST'])
+def api_start_user_data_matching():
+    """API: 启动用户数据智能匹配任务"""
+    try:
+        data = request.get_json()
+        config_id = data.get('config_id')
+        algorithm_type = data.get('algorithm_type', 'enhanced')
+        similarity_threshold = data.get('similarity_threshold', 0.7)
+        batch_size = data.get('batch_size', 100)
+        max_results = data.get('max_results', 10)
+        
+        if not config_id:
+            return jsonify({'success': False, 'error': '缺少配置ID'}), 400
+        
+        # 获取字段映射配置
+        if not db_manager or not db_manager.mongo_client:
+            return jsonify({'success': False, 'error': '数据库连接未初始化'}), 500
+        
+        db = db_manager.mongo_client.get_database()
+        config_collection = db['field_mapping_configs']
+        config = config_collection.find_one({'config_id': config_id})
+        
+        if not config:
+            return jsonify({'success': False, 'error': '映射配置不存在'}), 404
+        
+        # 创建匹配任务
+        task_id = f"user_match_{config_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        task_doc = {
+            'task_id': task_id,
+            'config_id': config_id,
+            'source_table': config['source_table'],
+            'target_tables': config['target_tables'],
+            'mappings': config['mappings'],
+            'algorithm_type': algorithm_type,
+            'similarity_threshold': similarity_threshold,
+            'batch_size': batch_size,
+            'max_results': max_results,
+            'status': 'running',
+            'progress': {
+                'percentage': 0,
+                'processed': 0,
+                'total': 0,
+                'matches': 0,
+                'current_operation': '准备启动...'
+            },
+            'created_at': datetime.now().isoformat(),
+            'started_at': datetime.now().isoformat()
+        }
+        
+        # 保存任务到数据库
+        task_collection = db['user_matching_tasks']
+        task_collection.insert_one(task_doc)
+        
+        # 初始化用户数据匹配器
+        from src.matching.user_data_matcher import UserDataMatcher
+        user_matcher = UserDataMatcher(db_manager=db_manager, config=config)
+        
+        # 启动匹配任务
+        user_matcher.start_matching_task(task_doc)
+        
+        return jsonify({
+            'success': True,
+            'task_id': task_id,
+            'message': '用户数据智能匹配任务已启动'
+        })
+        
+    except Exception as e:
+        logger.error(f"启动用户数据匹配任务失败: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/user_matching_progress', methods=['GET'])
+def api_user_matching_progress():
+    """API: 获取用户数据匹配任务进度"""
+    try:
+        task_id = request.args.get('task_id')
+        if not task_id:
+            return jsonify({'success': False, 'error': '缺少任务ID'}), 400
+        
+        if not db_manager or not db_manager.mongo_client:
+            return jsonify({'success': False, 'error': '数据库连接未初始化'}), 500
+        
+        db = db_manager.mongo_client.get_database()
+        task_collection = db['user_matching_tasks']
+        
+        task = task_collection.find_one({'task_id': task_id})
+        
+        if not task:
+            return jsonify({'success': False, 'error': '任务不存在'}), 404
+        
+        return jsonify({
+            'success': True,
+            'progress': task.get('progress', {}),
+            'status': task.get('status', 'unknown'),
+            'error': task.get('error'),
+            'created_at': task.get('created_at'),
+            'updated_at': task.get('updated_at')
+        })
+        
+    except Exception as e:
+        logger.error(f"获取用户匹配进度失败: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/preview_user_data_matching', methods=['POST'])
+def api_preview_user_data_matching():
+    """API: 预览用户数据匹配结果"""
+    try:
+        data = request.get_json()
+        config_id = data.get('config_id')
+        preview_count = data.get('preview_count', 5)
+        algorithm_type = data.get('algorithm_type', 'enhanced')
+        similarity_threshold = data.get('similarity_threshold', 0.7)
+        
+        if not config_id:
+            return jsonify({'success': False, 'error': '缺少配置ID'}), 400
+        
+        # 初始化用户数据匹配器
+        from src.matching.user_data_matcher import UserDataMatcher
+        user_matcher = UserDataMatcher(db_manager=db_manager)
+        
+        # 执行预览匹配
+        preview_results = user_matcher.preview_matching(
+            config_id=config_id,
+            preview_count=preview_count,
+            algorithm_type=algorithm_type,
+            similarity_threshold=similarity_threshold
+        )
+        
+        return jsonify({
+            'success': True,
+            'preview_results': preview_results,
+            'count': len(preview_results)
+        })
+        
+    except Exception as e:
+        logger.error(f"预览用户数据匹配失败: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/stop_user_matching_task', methods=['POST'])
+def api_stop_user_matching_task():
+    """API: 停止用户数据匹配任务"""
+    try:
+        task_id = request.args.get('task_id')
+        if not task_id:
+            return jsonify({'success': False, 'error': '缺少任务ID'}), 400
+        
+        # 初始化用户数据匹配器
+        from src.matching.user_data_matcher import UserDataMatcher
+        user_matcher = UserDataMatcher(db_manager=db_manager)
+        
+        # 停止任务
+        success = user_matcher.stop_task(task_id)
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': '任务停止请求已发送'
+            })
+        else:
+            return jsonify({'success': False, 'error': '停止任务失败'}), 500
+        
+    except Exception as e:
+        logger.error(f"停止用户匹配任务失败: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/get_user_matching_results', methods=['GET'])
+def api_get_user_matching_results():
+    """API: 获取用户数据匹配结果"""
+    try:
+        task_id = request.args.get('task_id')
+        page = int(request.args.get('page', 1))
+        page_size = int(request.args.get('page_size', 10))
+        
+        if not task_id:
+            return jsonify({'success': False, 'error': '缺少任务ID'}), 400
+        
+        if not db_manager or not db_manager.mongo_client:
+            return jsonify({'success': False, 'error': '数据库连接未初始化'}), 500
+        
+        db = db_manager.mongo_client.get_database()
+        
+        # 获取结果集合
+        result_collection_name = f'user_match_results_{task_id}'
+        if result_collection_name not in db.list_collection_names():
+            return jsonify({
+                'success': True,
+                'results': [],
+                'total': 0,
+                'statistics': {
+                    'total_processed': 0,
+                    'total_matches': 0,
+                    'match_rate': 0,
+                    'avg_similarity': 0,
+                    'high_confidence_count': 0,
+                    'execution_time': 0
+                }
+            })
+        
+        result_collection = db[result_collection_name]
+        
+        # 获取总数
+        total_count = result_collection.count_documents({})
+        
+        # 分页查询结果
+        skip = (page - 1) * page_size
+        results = list(result_collection.find({})
+                      .sort([('similarity_score', -1)])
+                      .skip(skip)
+                      .limit(page_size))
+        
+        # 清理MongoDB的ObjectId
+        for result in results:
+            if '_id' in result:
+                del result['_id']
+        
+        # 计算统计信息
+        statistics = _calculate_matching_statistics(result_collection, task_id)
+        
+        return jsonify({
+            'success': True,
+            'results': results,
+            'total': total_count,
+            'page': page,
+            'page_size': page_size,
+            'statistics': statistics
+        })
+        
+    except Exception as e:
+        logger.error(f"获取用户匹配结果失败: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _calculate_matching_statistics(result_collection, task_id: str) -> Dict:
+    """计算匹配统计信息"""
+    try:
+        # 基础统计
+        total_matches = result_collection.count_documents({})
+        
+        if total_matches == 0:
+            return {
+                'total_processed': 0,
+                'total_matches': 0,
+                'match_rate': 0,
+                'avg_similarity': 0,
+                'high_confidence_count': 0,
+                'execution_time': 0
+            }
+        
+        # 聚合查询统计信息
+        pipeline = [
+            {
+                '$group': {
+                    '_id': None,
+                    'avg_similarity': {'$avg': '$similarity_score'},
+                    'max_similarity': {'$max': '$similarity_score'},
+                    'min_similarity': {'$min': '$similarity_score'},
+                    'high_confidence_count': {
+                        '$sum': {
+                            '$cond': [
+                                {'$gte': ['$similarity_score', 0.8]},
+                                1, 0
+                            ]
+                        }
+                    }
+                }
+            }
+        ]
+        
+        stats_result = list(result_collection.aggregate(pipeline))
+        stats = stats_result[0] if stats_result else {}
+        
+        # 获取任务信息计算处理数量和执行时间
+        db = db_manager.mongo_client.get_database()
+        task_collection = db['user_matching_tasks']
+        task = task_collection.find_one({'task_id': task_id})
+        
+        total_processed = 0
+        execution_time = 0
+        
+        if task:
+            progress = task.get('progress', {})
+            total_processed = progress.get('processed', 0)
+            
+            # 计算执行时间
+            if task.get('created_at') and task.get('updated_at'):
+                start_time = datetime.fromisoformat(task['created_at'])
+                end_time = datetime.fromisoformat(task['updated_at'])
+                execution_time = int((end_time - start_time).total_seconds())
+        
+        # 计算匹配率
+        match_rate = (total_matches / total_processed * 100) if total_processed > 0 else 0
+        
+        return {
+            'total_processed': total_processed,
+            'total_matches': total_matches,
+            'match_rate': round(match_rate, 2),
+            'avg_similarity': round((stats.get('avg_similarity', 0) * 100), 2),
+            'high_confidence_count': stats.get('high_confidence_count', 0),
+            'execution_time': execution_time
+        }
+        
+    except Exception as e:
+        logger.error(f"计算匹配统计信息失败: {str(e)}")
+        return {
+            'total_processed': 0,
+            'total_matches': 0,
+            'match_rate': 0,
+            'avg_similarity': 0,
+            'high_confidence_count': 0,
+            'execution_time': 0
+        }
+
+
+@app.route('/user_matching_results')
+def user_matching_results():
+    """用户数据匹配结果页面"""
+    return render_template('user_matching_results.html')
+
+
+def execute_dynamic_matching_task(task_id: str, config: dict):
+    """执行动态匹配任务（后台线程）"""
+    try:
+        logger.info(f"开始执行动态匹配任务: {task_id}")
+        
+        db = db_manager.mongo_client.get_database()
+        task_collection = db['dynamic_matching_tasks']
+        
+        # 更新任务状态
+        def update_progress(percentage, processed, total, matches, status='running'):
+            task_collection.update_one(
+                {'task_id': task_id},
+                {
+                    '$set': {
+                        'progress': {
+                            'percentage': percentage,
+                            'processed': processed,
+                            'total': total,
+                            'matches': matches
+                        },
+                        'status': status,
+                        'updated_at': datetime.now().isoformat()
+                    }
+                }
+            )
+        
+        # 模拟匹配过程
+        source_table = config['source_table']
+        target_tables = config['target_tables']
+        mappings = config['mappings']
+        
+        # 获取源表数据量
+        source_collection = db[source_table]
+        total_records = source_collection.count_documents({})
+        
+        update_progress(0, 0, total_records, 0, 'running')
+        
+        # 模拟批量处理
+        batch_size = 100
+        processed = 0
+        matches = 0
+        
+        for i in range(0, total_records, batch_size):
+            # 模拟处理时间
+            import time
+            time.sleep(1)
+            
+            processed += min(batch_size, total_records - i)
+            matches += min(batch_size // 2, total_records - i)  # 模拟50%匹配率
+            
+            percentage = int((processed / total_records) * 100)
+            update_progress(percentage, processed, total_records, matches)
+            
+            # 检查是否被停止
+            current_task = task_collection.find_one({'task_id': task_id})
+            if current_task and current_task.get('status') == 'stopped':
+                logger.info(f"动态匹配任务被停止: {task_id}")
+                return
+        
+        # 任务完成
+        update_progress(100, total_records, total_records, matches, 'completed')
+        
+        # 保存匹配结果到结果表
+        result_collection = db[f'dynamic_match_results_{task_id}']
+        result_collection.create_index([('source_id', 1)])
+        
+        logger.info(f"动态匹配任务完成: {task_id}, 匹配数: {matches}")
+        
+    except Exception as e:
+        logger.error(f"执行动态匹配任务失败: {str(e)}")
+        # 更新任务状态为失败
+        try:
+            db = db_manager.mongo_client.get_database()
+            task_collection = db['dynamic_matching_tasks']
+            task_collection.update_one(
+                {'task_id': task_id},
+                {
+                    '$set': {
+                        'status': 'failed',
+                        'error': str(e),
+                        'updated_at': datetime.now().isoformat()
+                    }
+                }
+            )
+        except:
+            pass
 
 
 if __name__ == '__main__':

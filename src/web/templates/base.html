@@ -160,8 +160,15 @@
                 <li class="{% if request.path == '/user_driven_field_mapping' %}active{% endif %}">
                     <a href="/user_driven_field_mapping"><i class="fas fa-link"></i> 智能字段映射</a>
                 </li>
+                
+                <p>智能匹配</p>
+                <li class="{% if request.path == '/user_data_matching' %}active{% endif %}">
+                    <a href="/user_data_matching"><i class="fas fa-brain"></i> 用户数据匹配</a>
+                    <small class="text-muted d-block px-3" style="font-size: 0.75rem;">基于上传数据的智能匹配</small>
+                </li>
                 <li class="{% if request.path == '/matching' %}active{% endif %}">
-                    <a href="/matching"><i class="fas fa-tasks"></i> 智能匹配</a>
+                    <a href="/matching"><i class="fas fa-tasks"></i> 原项目匹配</a>
+                    <small class="text-muted d-block px-3" style="font-size: 0.75rem;">固定数据源的传统匹配</small>
                 </li>
                 <li class="{% if request.path == '/results' %}active{% endif %}">
                     <a href="/results"><i class="fas fa-list-alt"></i> 匹配结果</a>

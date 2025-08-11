@@ -59,8 +59,12 @@ class KnowledgeGraphBuilder:
             if not self.ontology:
                 # 创建默认本体
                 self.ontology = create_default_ontology('general')
-                self.kg_store.save_ontology(self.ontology)
-                logger.info("创建了默认本体")
+                try:
+                    self.kg_store.save_ontology(self.ontology)
+                    logger.info("创建并保存了默认本体")
+                except Exception as save_error:
+                    logger.warning(f"本体保存失败，但不影响系统运行: {str(save_error)}")
+                    logger.info("创建了默认本体（仅内存中）")
             else:
                 logger.info("加载了现有本体")
                 

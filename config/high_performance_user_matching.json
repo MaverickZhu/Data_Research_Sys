@@ -1,0 +1,29 @@
+{
+  "user_data_matching": {
+    "batch_processing": {
+      "batch_size": 50000,
+      "max_workers": 32,
+      "timeout": 1800,
+      "memory_limit_mb": 91619
+    },
+    "prefilter_optimization": {
+      "max_candidates_per_field": 30,
+      "max_total_candidates": 60,
+      "similarity_threshold": 0.6,
+      "enable_aggressive_filtering": true,
+      "cache_size": 10000
+    },
+    "graph_optimization": {
+      "prebuild_graph": true,
+      "max_graph_nodes": 100000,
+      "graph_cache_size": 50000,
+      "enable_graph_compression": true
+    },
+    "database_optimization": {
+      "connection_pool_size": 1000,
+      "query_timeout": 30,
+      "bulk_write_size": 10000,
+      "enable_write_concern": false
+    }
+  }
+}

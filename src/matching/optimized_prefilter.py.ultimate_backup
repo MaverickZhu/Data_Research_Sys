@@ -36,14 +36,14 @@ class OptimizedPrefilter:
         
         # 预过滤配置
         self.config = {
-            'max_candidates_per_field': 30,  # 每个字段最多返回的候选数
-            'max_total_candidates': 60,      # 总候选数上限
-            'similarity_threshold': 0.6,      # 预过滤相似度阈值
+            'max_candidates_per_field': 100,  # 每个字段最多返回的候选数
+            'max_total_candidates': 200,      # 总候选数上限
+            'similarity_threshold': 0.3,      # 预过滤相似度阈值
             'enable_parallel': True,          # 启用并行处理
-            'thread_count': min(16, 32),               # 线程数
+            'thread_count': 4,               # 线程数
             'enable_cache': True,            # 启用缓存
-            'cache_size': 10000,              # 缓存大小
-            'text_search_limit': 30,         # 文本搜索限制
+            'cache_size': 1000,              # 缓存大小
+            'text_search_limit': 50,         # 文本搜索限制
             'enable_fuzzy_prefilter': True,  # 启用模糊预过滤
         }
         

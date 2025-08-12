@@ -4,6 +4,7 @@
 """
 
 import logging
+import re
 from typing import Dict, List, Any, Optional, Tuple
 import pandas as pd
 from datetime import datetime
@@ -22,6 +23,7 @@ from .smart_index_manager import SmartIndexManager
 from .optimized_prefilter import OptimizedPrefilter, CandidateRanker
 from .graph_matcher import GraphMatcher
 from .slice_enhanced_matcher import SliceEnhancedMatcher
+from .hierarchical_matcher import HierarchicalMatcher
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +53,9 @@ class UserDataMatcher:
         # 初始化高性能匹配组件（原项目算法）
         self.graph_matcher = None  # 图匹配器
         self.slice_matcher = None  # 切片增强匹配器
+        self.hierarchical_matcher = None  # 分层匹配器
         self.use_high_performance = True  # 启用高性能模式
+        self.use_hierarchical_matching = True  # 启用分层匹配
         
         # 匹配任务缓存
         self.running_tasks = {}
@@ -226,6 +230,24 @@ class UserDataMatcher:
                 # 初始化预过滤系统（作为补充）
                 self.prefilter = OptimizedPrefilter(self.db_manager, task_config['mappings'])
                 self.candidate_ranker = CandidateRanker(task_config['mappings'])
+                
+                # 初始化分层匹配器（核心优化）
+                if self.use_hierarchical_matching and task_config.get('mappings'):
+                    try:
+                        self.hierarchical_matcher = HierarchicalMatcher(
+                            mapping_config=task_config['mappings'],
+                            similarity_calculator=self.similarity_calculator
+                        )
+                        
+                        # 记录分层匹配统计
+                        stats = self.hierarchical_matcher.get_performance_stats()
+                        logger.info(f"分层匹配器初始化完成 - 主要字段: {stats['primary_fields']}, "
+                                  f"辅助字段: {stats['secondary_fields']}, "
+                                  f"阈值配置: {stats['threshold_config']}")
+                    except Exception as e:
+                        logger.warning(f"分层匹配器初始化失败: {str(e)}")
+                        self.hierarchical_matcher = None
+                
                 logger.info("高性能匹配组件初始化完成")
             
             # 第三步：创建后台线程执行匹配
@@ -375,52 +397,61 @@ class UserDataMatcher:
     
     def _process_optimized_batch(self, batch_records: List[Dict], mappings: List[Dict], 
                                source_table: str, task_id: str) -> List[Dict]:
-        """处理优化批次（使用原项目级别高性能算法）"""
+        """处理优化批次（使用批量预过滤优化）"""
         batch_results = []
         batch_start_time = time.time()
-        
-        # 【性能优化1】批量大小检查
         batch_size = len(batch_records)
-        logger.info(f"🚀 开始处理批次: {batch_size} 条记录（原项目级别优化）")
         
-        # 【性能优化2】检查图匹配器状态（图应该已经预建完成）
-        if self.graph_matcher:
-            if not hasattr(self.graph_matcher, '_is_built') or not self.graph_matcher._is_built:
-                logger.warning("图结构未预建，这可能影响性能")
-            else:
-                logger.debug("✅ 使用预建的图结构进行匹配")
+        logger.info(f"🚀 开始批量处理: {batch_size} 条记录（超高性能优化）")
         
-        # 【性能优化3】使用ThreadPoolExecutor进行并行处理（原项目级别）
-        max_workers = min(32, len(batch_records), 16)  # 动态调整线程数
-        
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # 创建任务映射
-            future_to_record = {}
+        try:
+            # 【关键优化】批量预过滤 - 一次性获取所有候选记录
+            logger.info("📊 执行批量预过滤...")
+            prefilter_start = time.time()
             
-            for source_record in batch_records:
-                future = executor.submit(
-                    self._process_single_record_optimized, 
-                    source_record, mappings, source_table, task_id
-                )
-                future_to_record[future] = source_record
+            # 批量获取所有候选记录映射 {source_id: [candidates]}
+            batch_candidates_map = self._batch_prefilter_candidates(batch_records, mappings, source_table)
             
-            # 收集结果
-            processed_count = 0
-            for future in as_completed(future_to_record):
-                source_record = future_to_record[future]
-                try:
-                    result = future.result(timeout=30)  # 30秒超时
-                    if result:
-                        batch_results.append(result)
-                    processed_count += 1
+            prefilter_time = time.time() - prefilter_start
+            logger.info(f"✅ 批量预过滤完成: {len(batch_candidates_map)} 条记录有候选, 耗时: {prefilter_time:.2f}秒")
+            
+            # 【高性能并行处理】使用批量候选进行匹配
+            max_workers = min(32, batch_size)
+            
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_record = {}
+                
+                for source_record in batch_records:
+                    source_id = str(source_record.get('_id', ''))
+                    candidates = batch_candidates_map.get(source_id, [])
                     
-                    # 每处理1000条记录报告一次进度
-                    if processed_count % 1000 == 0:
-                        logger.info(f"📊 批次进度: {processed_count}/{batch_size}")
+                    future = executor.submit(
+                        self._process_single_record_with_candidates,
+                        source_record, candidates, mappings, source_table, task_id
+                    )
+                    future_to_record[future] = source_record
+                
+                # 收集结果
+                processed_count = 0
+                for future in as_completed(future_to_record):
+                    source_record = future_to_record[future]
+                    try:
+                        result = future.result(timeout=10)  # 减少超时时间
+                        if result:
+                            batch_results.append(result)
+                        processed_count += 1
                         
-                except Exception as e:
-                    logger.error(f"❌ 处理记录失败: {source_record.get('_id', 'Unknown')}, 错误: {e}")
-                    processed_count += 1
+                        # 每处理500条记录报告一次进度
+                        if processed_count % 500 == 0:
+                            logger.info(f"📊 批次进度: {processed_count}/{batch_size}")
+                            
+                    except Exception as e:
+                        logger.error(f"❌ 处理记录失败: {source_record.get('_id', 'Unknown')}, 错误: {e}")
+                        processed_count += 1
+        
+        except Exception as e:
+            logger.error(f"批量处理失败: {str(e)}")
+            return []
         
         # 计算批次性能统计
         batch_duration = time.time() - batch_start_time
@@ -441,6 +472,258 @@ class UserDataMatcher:
             logger.warning(f"🔴 性能待优化: 当前 {records_per_second:.1f} 条/秒 < 目标 {target_speed} 条/秒")
         
         return batch_results
+    
+    def _batch_prefilter_candidates(self, batch_records: List[Dict], mappings: List[Dict], 
+                                   source_table: str) -> Dict[str, List[Dict]]:
+        """批量预过滤候选记录（核心性能优化）"""
+        batch_candidates_map = {}
+        
+        try:
+            # 构建批量查询条件
+            batch_queries = []
+            record_id_map = {}
+            
+            for source_record in batch_records:
+                source_id = str(source_record.get('_id', ''))
+                record_id_map[source_id] = source_record
+                
+                # 为每个映射字段构建查询条件
+                for mapping in mappings:
+                    source_field = mapping.get('source_field')
+                    target_field = mapping.get('target_field') 
+                    
+                    if source_field in source_record and source_record[source_field]:
+                        source_value = str(source_record[source_field]).strip()
+                        if len(source_value) >= 2:  # 最小长度过滤
+                            # 构建模糊查询条件
+                            query_conditions = []
+                            
+                            # 精确匹配
+                            query_conditions.append({target_field: source_value})
+                            
+                            # 包含匹配
+                            query_conditions.append({target_field: {"$regex": re.escape(source_value), "$options": "i"}})
+                            
+                            # 被包含匹配
+                            if len(source_value) >= 4:
+                                query_conditions.append({target_field: {"$regex": f".*{re.escape(source_value)}.*", "$options": "i"}})
+                            
+                            batch_queries.append({
+                                'source_id': source_id,
+                                'conditions': {"$or": query_conditions},
+                                'field_info': {'source_field': source_field, 'target_field': target_field}
+                            })
+            
+            # 批量执行查询（按目标表分组）
+            target_tables = set(mapping.get('target_table') for mapping in mappings)
+            
+            for target_table in target_tables:
+                if not target_table:
+                    continue
+                    
+                # 为该目标表构建批量查询
+                table_queries = [q for q in batch_queries 
+                               if any(m.get('target_table') == target_table and 
+                                     m.get('target_field') == q['field_info']['target_field'] 
+                                     for m in mappings)]
+                
+                if table_queries:
+                    # 合并所有查询条件
+                    all_conditions = []
+                    for query in table_queries:
+                        all_conditions.extend(query['conditions']['$or'])
+                    
+                    # 去重查询条件
+                    unique_conditions = []
+                    seen_conditions = set()
+                    for condition in all_conditions:
+                        condition_str = str(condition)
+                        if condition_str not in seen_conditions:
+                            unique_conditions.append(condition)
+                            seen_conditions.add(condition_str)
+                    
+                    if unique_conditions:
+                        # 执行批量查询
+                        collection = self.db_manager.get_db()[target_table]
+                        bulk_query = {"$or": unique_conditions}
+                        
+                        cursor = collection.find(bulk_query).limit(10000)  # 限制结果数量
+                        target_records = list(cursor)
+                        
+                        # 将结果分配给对应的源记录
+                        for target_record in target_records:
+                            for query in table_queries:
+                                source_id = query['source_id']
+                                source_record = record_id_map[source_id]
+                                
+                                # 检查是否匹配
+                                if self._is_candidate_match(source_record, target_record, query['field_info']):
+                                    if source_id not in batch_candidates_map:
+                                        batch_candidates_map[source_id] = []
+                                    batch_candidates_map[source_id].append(target_record)
+            
+            # 限制每个源记录的候选数量并去重
+            for source_id in batch_candidates_map:
+                candidates = batch_candidates_map[source_id]
+                # 去重（基于_id）
+                seen_ids = set()
+                unique_candidates = []
+                for candidate in candidates:
+                    candidate_id = str(candidate.get('_id', ''))
+                    if candidate_id not in seen_ids:
+                        unique_candidates.append(candidate)
+                        seen_ids.add(candidate_id)
+                
+                # 限制数量
+                batch_candidates_map[source_id] = unique_candidates[:60]  # 每个源记录最多60个候选
+            
+            logger.info(f"✅ 批量预过滤完成: 处理 {len(batch_records)} 条源记录, "
+                       f"生成 {len(batch_candidates_map)} 个候选映射")
+            
+            return batch_candidates_map
+            
+        except Exception as e:
+            logger.error(f"批量预过滤失败: {str(e)}")
+            return {}
+    
+    def _is_candidate_match(self, source_record: Dict, target_record: Dict, field_info: Dict) -> bool:
+        """检查候选记录是否匹配"""
+        source_field = field_info['source_field']
+        target_field = field_info['target_field']
+        
+        source_value = str(source_record.get(source_field, '')).strip().lower()
+        target_value = str(target_record.get(target_field, '')).strip().lower()
+        
+        if not source_value or not target_value:
+            return False
+        
+        # 快速相似度检查
+        if source_value == target_value:
+            return True
+        
+        if source_value in target_value or target_value in source_value:
+            return True
+        
+        # 简单的字符相似度检查
+        if len(source_value) >= 3 and len(target_value) >= 3:
+            common_chars = set(source_value) & set(target_value)
+            similarity = len(common_chars) / max(len(set(source_value)), len(set(target_value)))
+            return similarity >= 0.3
+        
+        return False
+    
+    def _process_single_record_with_candidates(self, source_record: Dict, candidates: List[Dict],
+                                             mappings: List[Dict], source_table: str, task_id: str) -> Optional[Dict]:
+        """使用预获取的候选记录进行单记录处理（超高性能）"""
+        try:
+            if not candidates:
+                return None
+            
+            # 使用候选排序器优化顺序（如果可用）
+            if self.candidate_ranker:
+                candidates = self.candidate_ranker.rank_candidates(candidates, source_record)
+            
+            # 优先使用分层匹配算法
+            if self.hierarchical_matcher and self.use_hierarchical_matching:
+                hierarchical_matches = self.hierarchical_matcher.match_record(source_record, candidates)
+                
+                if hierarchical_matches:
+                    best_match = hierarchical_matches[0]
+                    hierarchical_result = {
+                        'target_record': best_match.candidate,
+                        'similarity': best_match.final_score,
+                        'matched_fields': list(best_match.field_scores.keys()),
+                        'details': {
+                            'field_scores': best_match.field_scores,
+                            'match_type': best_match.match_type,
+                            'confidence_level': best_match.confidence_level,
+                            'primary_score': best_match.primary_score,
+                            'secondary_score': best_match.secondary_score
+                        }
+                    }
+                    
+                    result = self._format_optimized_match_result(
+                        source_record, hierarchical_result, mappings, task_id
+                    )
+                    
+                    # 添加分层匹配特有信息
+                    result['match_details']['hierarchical_matching'] = True
+                    result['match_details']['match_strategy'] = best_match.match_type
+                    result['match_details']['primary_score'] = best_match.primary_score
+                    result['match_details']['secondary_score'] = best_match.secondary_score
+                    
+                    return result
+            
+            # 降级到传统匹配算法
+            return self._process_candidates_with_traditional_matching(
+                source_record, candidates, mappings, source_table, task_id
+            )
+            
+        except Exception as e:
+            logger.error(f"处理带候选记录的单记录失败: {str(e)}")
+            return None
+    
+    def _process_candidates_with_traditional_matching(self, source_record: Dict, candidates: List[Dict],
+                                                    mappings: List[Dict], source_table: str, task_id: str) -> Optional[Dict]:
+        """使用传统匹配算法处理候选记录"""
+        best_match = None
+        best_similarity = 0.0
+        
+        # 使用增强模糊匹配器进行快速匹配
+        for candidate in candidates[:30]:  # 只处理前30个候选以提高速度
+            try:
+                if self.enhanced_fuzzy_matcher:
+                    similarity = self.enhanced_fuzzy_matcher.calculate_similarity(source_record, candidate)
+                else:
+                    # 简单相似度计算
+                    similarity = self._calculate_simple_similarity(source_record, candidate, mappings)
+                
+                if similarity > best_similarity and similarity >= 0.6:  # 提高阈值
+                    best_similarity = similarity
+                    best_match = {
+                        'target_record': candidate,
+                        'similarity': similarity,
+                        'matched_fields': [m['source_field'] for m in mappings],
+                        'details': {'match_type': 'traditional', 'algorithm': 'enhanced_fuzzy'}
+                    }
+            
+            except Exception as e:
+                logger.debug(f"候选匹配失败: {str(e)}")
+                continue
+        
+        if best_match:
+            return self._format_optimized_match_result(source_record, best_match, mappings, task_id)
+        
+        return None
+    
+    def _calculate_simple_similarity(self, source_record: Dict, target_record: Dict, mappings: List[Dict]) -> float:
+        """计算简单相似度"""
+        total_similarity = 0.0
+        valid_fields = 0
+        
+        for mapping in mappings:
+            source_field = mapping.get('source_field')
+            target_field = mapping.get('target_field')
+            
+            if source_field in source_record and target_field in target_record:
+                source_value = str(source_record[source_field]).strip().lower()
+                target_value = str(target_record[target_field]).strip().lower()
+                
+                if source_value and target_value:
+                    if source_value == target_value:
+                        similarity = 1.0
+                    elif source_value in target_value or target_value in source_value:
+                        similarity = 0.8
+                    else:
+                        # 简单的字符集相似度
+                        common = len(set(source_value) & set(target_value))
+                        total_chars = len(set(source_value) | set(target_value))
+                        similarity = common / total_chars if total_chars > 0 else 0.0
+                    
+                    total_similarity += similarity
+                    valid_fields += 1
+        
+        return total_similarity / valid_fields if valid_fields > 0 else 0.0
     
     def _process_single_record_optimized(self, source_record: Dict, mappings: List[Dict], 
                                        source_table: str, task_id: str) -> Optional[Dict]:
@@ -478,7 +761,42 @@ class UserDataMatcher:
             if self.candidate_ranker and candidates:
                 candidates = self.candidate_ranker.rank_candidates(candidates, source_record)
             
-            # 执行高性能匹配算法
+            # 优先使用分层匹配算法
+            if self.hierarchical_matcher and self.use_hierarchical_matching:
+                hierarchical_matches = self.hierarchical_matcher.match_record(source_record, candidates)
+                
+                if hierarchical_matches:
+                    # 转换分层匹配结果为统一格式
+                    best_hierarchical_match = hierarchical_matches[0]
+                    hierarchical_result = {
+                        'target_record': best_hierarchical_match.candidate,
+                        'similarity': best_hierarchical_match.final_score,
+                        'matched_fields': list(best_hierarchical_match.field_scores.keys()),
+                        'details': {
+                            'field_scores': best_hierarchical_match.field_scores,
+                            'match_type': best_hierarchical_match.match_type,
+                            'confidence_level': best_hierarchical_match.confidence_level,
+                            'primary_score': best_hierarchical_match.primary_score,
+                            'secondary_score': best_hierarchical_match.secondary_score
+                        }
+                    }
+                    
+                    result = self._format_optimized_match_result(
+                        source_record, hierarchical_result, mappings, task_id
+                    )
+                    
+                    # 添加分层匹配特有信息
+                    result['match_details']['hierarchical_matching'] = True
+                    result['match_details']['match_strategy'] = best_hierarchical_match.match_type
+                    result['match_details']['primary_score'] = best_hierarchical_match.primary_score
+                    result['match_details']['secondary_score'] = best_hierarchical_match.secondary_score
+                    
+                    logger.debug(f"分层匹配成功: {best_hierarchical_match.match_type}, "
+                               f"最终得分: {best_hierarchical_match.final_score:.3f}")
+                    
+                    return result
+            
+            # 降级到传统高性能匹配算法
             matches = self._execute_high_performance_matching(
                 source_record, candidates, mappings
             )
@@ -489,6 +807,7 @@ class UserDataMatcher:
                 result = self._format_optimized_match_result(
                     source_record, best_match, mappings, task_id
                 )
+                result['match_details']['hierarchical_matching'] = False  # 标记为非分层匹配
                 return result
             
             return None
@@ -1219,6 +1538,8 @@ class UserDataMatcher:
             # 使用不同的匹配器计算相似度
             if hasattr(matcher, 'calculate_similarity'):
                 return matcher.calculate_similarity(value1, value2)
+            elif hasattr(matcher, 'calculate_string_similarity'):
+                return matcher.calculate_string_similarity(value1, value2)
             elif hasattr(matcher, 'fuzzy_match_score'):
                 return matcher.fuzzy_match_score(value1, value2)
             else:

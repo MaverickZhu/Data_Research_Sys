@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class CSVProcessor:
     """CSV文件处理器"""
     
-    def __init__(self, max_file_size: int = 100 * 1024 * 1024):  # 100MB
+    def __init__(self, max_file_size: int = 500 * 1024 * 1024):  # 500MB
         """
         初始化CSV处理器
         

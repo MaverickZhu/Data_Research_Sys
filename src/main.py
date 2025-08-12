@@ -36,18 +36,18 @@ def main():
         
         logger.info("配置验证通过")
         
-        # 性能优化预建（临时禁用）
-        logger.info("跳过性能优化预建（临时禁用）...")
-        # try:
-        #     from scripts.prebuild_performance_indexes import PerformancePrebuilder
-        #     prebuilder = PerformancePrebuilder()
-        #     prebuild_success = prebuilder.prebuild_all()
-        #     if prebuild_success:
-        #         logger.info("✅ 性能优化预建完成")
-        #     else:
-        #         logger.warning("⚠️ 性能优化预建部分失败，但不影响系统启动")
-        # except Exception as e:
-        #     logger.warning(f"性能优化预建失败: {e}，但不影响系统启动")
+        # 性能优化预建（重新启用）
+        logger.info("开始性能优化预建...")
+        try:
+            from scripts.prebuild_performance_indexes import PerformancePrebuilder
+            prebuilder = PerformancePrebuilder()
+            prebuild_success = prebuilder.prebuild_all()
+            if prebuild_success:
+                logger.info("✅ 性能优化预建完成")
+            else:
+                logger.warning("⚠️ 性能优化预建部分失败，但不影响系统启动")
+        except Exception as e:
+            logger.warning(f"性能优化预建失败: {e}，但不影响系统启动")
         
         # 测试数据库连接
         logger.info("测试数据库连接...")

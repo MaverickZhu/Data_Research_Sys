@@ -43,7 +43,7 @@ def main():
         flask_config = web_config.get('flask', {})
         
         host = flask_config.get('host', '0.0.0.0')
-        port = flask_config.get('port', 8888) # 修正端口为8888
+        port = flask_config.get('port', 18888) # 使用18888端口
         debug = flask_config.get('debug', False)
 
         logger.info(f"🚀 准备在 http://{host}:{port} 上启动Web服务...")

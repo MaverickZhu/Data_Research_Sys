@@ -1674,11 +1674,11 @@ def api_upload_csv():
                     return int(s)
             except Exception:
                 pass
-            # 默认100MB
-            return 100 * 1024 * 1024
+            # 默认500MB
+            return 500 * 1024 * 1024
 
         allowed_extensions = upload_config.get('allowed_extensions', ['.csv', '.txt', '.xlsx', '.xls'])
-        max_size_bytes = _parse_size_to_bytes(upload_config.get('max_file_size', '100MB'))
+        max_size_bytes = _parse_size_to_bytes(upload_config.get('max_file_size', '500MB'))
         upload_folder = upload_config.get('upload_folder', 'uploads')  # 兼容旧配置但不再本地落盘
 
         # 检查文件是否存在
@@ -1694,7 +1694,7 @@ def api_upload_csv():
         if file_ext not in allowed_extensions:
             return jsonify({'success': False, 'error': '不支持的文件格式'}), 400
             
-        # 检查文件大小 (100MB限制)
+        # 检查文件大小 (500MB限制)
         file.seek(0, 2)  # 移动到文件末尾
         file_size = file.tell()
         file.seek(0)  # 重置到文件开头
@@ -3274,6 +3274,12 @@ def user_data_matching():
     return render_template('user_data_matching.html')
 
 
+@app.route('/user_matching_history')
+def user_matching_history():
+    """用户匹配历史页面 - 查看所有历史匹配任务"""
+    return render_template('user_matching_history.html')
+
+
 @app.route('/api/analyze_multi_table_relationships', methods=['POST'])
 def api_analyze_multi_table_relationships():
     """API: 分析多表关系"""
@@ -4099,6 +4105,172 @@ def api_get_user_matching_results():
         
     except Exception as e:
         logger.error(f"获取用户匹配结果失败: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/get_user_matching_tasks', methods=['GET'])
+def api_get_user_matching_tasks():
+    """API: 获取用户数据匹配任务列表"""
+    try:
+        if not db_manager or not db_manager.mongo_client:
+            return jsonify({'success': False, 'error': '数据库连接未初始化'}), 500
+        
+        db = db_manager.mongo_client.get_database()
+        task_collection = db['user_matching_tasks']
+        
+        # 获取所有任务，按创建时间倒序排列
+        tasks = list(task_collection.find({})
+                    .sort([('created_at', -1)])
+                    .limit(100))  # 限制最多返回100个任务
+        
+        # 处理任务数据
+        task_list = []
+        for task in tasks:
+            task_data = {
+                'task_id': task.get('task_id', ''),
+                'config_id': task.get('config_id', ''),
+                'status': task.get('status', 'unknown'),
+                'created_at': task.get('created_at', ''),
+                'updated_at': task.get('updated_at', ''),
+                'progress': task.get('progress', 0),
+                'message': task.get('message', ''),
+                'processed_count': task.get('processed_count', 0),
+                'total_count': task.get('total_count', 0),
+                'match_count': task.get('match_count', 0)
+            }
+            
+            # 检查是否有对应的结果表
+            result_collection_name = f'user_match_results_{task_data["task_id"]}'
+            if result_collection_name in db.list_collection_names():
+                result_collection = db[result_collection_name]
+                result_count = result_collection.count_documents({})
+                task_data['result_count'] = result_count
+                task_data['has_results'] = result_count > 0
+            else:
+                task_data['result_count'] = 0
+                task_data['has_results'] = False
+            
+            task_list.append(task_data)
+        
+        return jsonify({
+            'success': True,
+            'tasks': task_list,
+            'total': len(task_list)
+        })
+        
+    except Exception as e:
+        logger.error(f"获取用户匹配任务列表失败: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/delete_user_matching_task', methods=['DELETE'])
+def api_delete_user_matching_task():
+    """API: 删除用户数据匹配任务"""
+    try:
+        data = request.get_json()
+        if not data or 'task_id' not in data:
+            return jsonify({'success': False, 'error': '缺少task_id参数'}), 400
+        
+        task_id = data['task_id']
+        
+        if not db_manager or not db_manager.mongo_client:
+            return jsonify({'success': False, 'error': '数据库连接未初始化'}), 500
+        
+        db = db_manager.mongo_client.get_database()
+        
+        # 1. 检查任务是否存在
+        task_collection = db['user_matching_tasks']
+        task = task_collection.find_one({'task_id': task_id})
+        if not task:
+            return jsonify({'success': False, 'error': '任务不存在'}), 404
+        
+        # 2. 检查任务状态，如果正在运行则不允许删除
+        if task.get('status') == 'running':
+            return jsonify({'success': False, 'error': '任务正在运行中，无法删除'}), 400
+        
+        # 3. 删除结果表
+        result_collection_name = f'user_match_results_{task_id}'
+        if result_collection_name in db.list_collection_names():
+            db.drop_collection(result_collection_name)
+            logger.info(f"已删除结果表: {result_collection_name}")
+        
+        # 4. 删除任务记录
+        delete_result = task_collection.delete_one({'task_id': task_id})
+        if delete_result.deleted_count == 0:
+            return jsonify({'success': False, 'error': '删除任务记录失败'}), 500
+        
+        logger.info(f"成功删除用户匹配任务: {task_id}")
+        return jsonify({
+            'success': True,
+            'message': f'任务 {task_id} 已成功删除',
+            'deleted_task_id': task_id
+        })
+        
+    except Exception as e:
+        logger.error(f"删除用户匹配任务失败: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/cleanup_old_user_matching_tasks', methods=['DELETE'])
+def api_cleanup_old_user_matching_tasks():
+    """API: 清理旧的用户数据匹配任务"""
+    try:
+        data = request.get_json() or {}
+        days_ago = data.get('days_ago', 30)  # 默认清理30天前的任务
+        
+        if not db_manager or not db_manager.mongo_client:
+            return jsonify({'success': False, 'error': '数据库连接未初始化'}), 500
+        
+        db = db_manager.mongo_client.get_database()
+        task_collection = db['user_matching_tasks']
+        
+        # 计算时间阈值
+        from datetime import datetime, timedelta
+        cutoff_time = datetime.now() - timedelta(days=days_ago)
+        cutoff_time_str = cutoff_time.isoformat()
+        
+        # 查找需要清理的任务
+        old_tasks = list(task_collection.find({
+            'created_at': {'$lt': cutoff_time_str},
+            'status': {'$nin': ['running']}  # 排除正在运行的任务
+        }))
+        
+        deleted_tasks = []
+        deleted_collections = []
+        
+        for task in old_tasks:
+            task_id = task.get('task_id')
+            if not task_id:
+                continue
+            
+            try:
+                # 删除结果表
+                result_collection_name = f'user_match_results_{task_id}'
+                if result_collection_name in db.list_collection_names():
+                    db.drop_collection(result_collection_name)
+                    deleted_collections.append(result_collection_name)
+                
+                # 删除任务记录
+                task_collection.delete_one({'task_id': task_id})
+                deleted_tasks.append(task_id)
+                
+            except Exception as e:
+                logger.error(f"清理任务 {task_id} 时出错: {str(e)}")
+                continue
+        
+        logger.info(f"清理完成: 删除了 {len(deleted_tasks)} 个任务和 {len(deleted_collections)} 个结果表")
+        
+        return jsonify({
+            'success': True,
+            'message': f'清理完成，删除了 {len(deleted_tasks)} 个 {days_ago} 天前的任务',
+            'deleted_tasks_count': len(deleted_tasks),
+            'deleted_collections_count': len(deleted_collections),
+            'deleted_task_ids': deleted_tasks,
+            'days_ago': days_ago
+        })
+        
+    except Exception as e:
+        logger.error(f"清理旧任务失败: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 

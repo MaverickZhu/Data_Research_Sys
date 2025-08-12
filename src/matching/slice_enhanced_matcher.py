@@ -215,7 +215,7 @@ class SliceEnhancedMatcher:
     
     def calculate_similarity(self, source_name: str, target_name: str) -> float:
         """
-        计算两个字符串的相似度（简化版本）
+        计算两个字符串的相似度（修复版本）
         
         Args:
             source_name: 源字符串
@@ -224,22 +224,34 @@ class SliceEnhancedMatcher:
         Returns:
             float: 相似度分数 (0.0-1.0)
         """
-        if not source_name or not target_name:
+        try:
+            if not source_name or not target_name:
+                return 0.0
+            
+            # 转换为字符串确保类型正确
+            source_str = str(source_name).strip()
+            target_str = str(target_name).strip()
+            
+            if not source_str or not target_str:
+                return 0.0
+            
+            # 使用多种算法计算相似度
+            basic_similarity = fuzz.ratio(source_str, target_str) / 100.0
+            token_similarity = fuzz.token_sort_ratio(source_str, target_str) / 100.0
+            partial_similarity = fuzz.partial_ratio(source_str, target_str) / 100.0
+            
+            # 加权平均
+            weighted_score = (
+                basic_similarity * 0.4 +
+                token_similarity * 0.4 +
+                partial_similarity * 0.2
+            )
+            
+            return min(max(weighted_score, 0.0), 1.0)  # 确保结果在0-1之间
+            
+        except Exception as e:
+            logger.warning(f"相似度计算失败: {source_name} vs {target_name}, 错误: {e}")
             return 0.0
-        
-        # 使用多种算法计算相似度
-        basic_similarity = fuzz.ratio(source_name, target_name) / 100.0
-        token_similarity = fuzz.token_sort_ratio(source_name, target_name) / 100.0
-        partial_similarity = fuzz.partial_ratio(source_name, target_name) / 100.0
-        
-        # 加权平均
-        weighted_score = (
-            basic_similarity * 0.4 +
-            token_similarity * 0.4 +
-            partial_similarity * 0.2
-        )
-        
-        return weighted_score
     
     def calculate_enhanced_similarity(self, source_name: str, target_record: Dict) -> float:
         """计算增强相似度"""

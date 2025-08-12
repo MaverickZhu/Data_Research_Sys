@@ -173,6 +173,10 @@
                 <li class="{% if request.path == '/results' %}active{% endif %}">
                     <a href="/results"><i class="fas fa-list-alt"></i> 匹配结果</a>
                 </li>
+                <li class="{% if request.path == '/user_matching_history' %}active{% endif %}">
+                    <a href="/user_matching_history"><i class="fas fa-history"></i> 历史结果</a>
+                    <small class="text-muted d-block px-3" style="font-size: 0.75rem;">查看所有历史匹配任务</small>
+                </li>
                 
                 <p>知识图谱</p>
                 <li class="{% if request.path == '/standalone_kg_builder' %}active{% endif %}">

@@ -472,6 +472,294 @@
         0% { transform: rotate(0deg); }
         100% { transform: rotate(360deg); }
     }
+    
+    /* 字段优先级对话框样式 */
+    .priority-dialog-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.6);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+        animation: fadeIn 0.3s ease;
+    }
+    
+    .priority-dialog {
+        background: white;
+        border-radius: 15px;
+        width: 90%;
+        max-width: 600px;
+        max-height: 80vh;
+        overflow-y: auto;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        animation: slideIn 0.3s ease;
+    }
+    
+    .dialog-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 20px 25px;
+        border-bottom: 1px solid #e9ecef;
+        background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+        border-radius: 15px 15px 0 0;
+    }
+    
+    .dialog-header h3 {
+        margin: 0;
+        color: #495057;
+        font-size: 18px;
+    }
+    
+    .close-btn {
+        background: none;
+        border: none;
+        font-size: 24px;
+        cursor: pointer;
+        color: #6c757d;
+        width: 30px;
+        height: 30px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        transition: all 0.3s ease;
+    }
+    
+    .close-btn:hover {
+        background: #f8f9fa;
+        color: #dc3545;
+    }
+    
+    .dialog-content {
+        padding: 25px;
+    }
+    
+    .mapping-info {
+        background: linear-gradient(135deg, #e3f2fd, #f3e5f5);
+        padding: 15px 20px;
+        border-radius: 10px;
+        margin-bottom: 20px;
+        text-align: center;
+        border-left: 4px solid #2196f3;
+    }
+    
+    .similarity-info {
+        margin-top: 8px;
+        color: #28a745;
+        font-weight: 600;
+    }
+    
+    .config-section {
+        margin-bottom: 25px;
+    }
+    
+    .config-label {
+        display: block;
+        font-weight: 600;
+        margin-bottom: 10px;
+        color: #495057;
+    }
+    
+    .priority-options {
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+    }
+    
+    .radio-option {
+        display: flex;
+        align-items: flex-start;
+        padding: 15px;
+        border: 2px solid #e9ecef;
+        border-radius: 10px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        background: #f8f9fa;
+    }
+    
+    .radio-option:hover {
+        border-color: #007bff;
+        background: #e3f2fd;
+    }
+    
+    .radio-option input[type="radio"] {
+        margin-right: 10px;
+        margin-top: 2px;
+    }
+    
+    .radio-option span {
+        font-weight: 600;
+        color: #495057;
+        display: block;
+    }
+    
+    .radio-option small {
+        color: #6c757d;
+        margin-top: 5px;
+        display: block;
+    }
+    
+    .radio-option input[type="radio"]:checked + span {
+        color: #007bff;
+    }
+    
+    #weight-slider {
+        width: 100%;
+        margin: 10px 0;
+    }
+    
+    .weight-guide {
+        text-align: center;
+        color: #6c757d;
+    }
+    
+    .threshold-inputs {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 15px;
+    }
+    
+    .threshold-item {
+        background: #f8f9fa;
+        padding: 15px;
+        border-radius: 8px;
+        border: 1px solid #e9ecef;
+    }
+    
+    .threshold-item label {
+        display: block;
+        font-size: 14px;
+        margin-bottom: 8px;
+        color: #495057;
+    }
+    
+    .threshold-item input[type="number"] {
+        width: 100%;
+        padding: 8px 12px;
+        border: 1px solid #ced4da;
+        border-radius: 5px;
+        font-size: 14px;
+    }
+    
+    .dialog-footer {
+        display: flex;
+        justify-content: flex-end;
+        gap: 15px;
+        padding: 20px 25px;
+        border-top: 1px solid #e9ecef;
+        background: #f8f9fa;
+        border-radius: 0 0 15px 15px;
+    }
+    
+    .btn-primary, .btn-secondary {
+        padding: 10px 20px;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        font-weight: 600;
+        transition: all 0.3s ease;
+    }
+    
+    .btn-primary {
+        background: linear-gradient(135deg, #007bff, #0056b3);
+        color: white;
+    }
+    
+    .btn-secondary {
+        background: #6c757d;
+        color: white;
+    }
+    
+    .btn-primary:hover, .btn-secondary:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    }
+    
+    /* 映射关系显示增强样式 */
+    .relation-fields {
+        flex: 1;
+    }
+    
+    .relation-main {
+        display: flex;
+        align-items: center;
+        margin-bottom: 8px;
+    }
+    
+    .similarity-score {
+        margin-left: 10px;
+        color: #28a745;
+        font-weight: 600;
+    }
+    
+    .relation-config {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+    }
+    
+    .priority-tag, .weight-tag, .threshold-tag {
+        padding: 3px 8px;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+    
+    .priority-tag.priority-primary {
+        background: linear-gradient(135deg, #dc3545, #c82333);
+        color: white;
+    }
+    
+    .priority-tag.priority-secondary {
+        background: linear-gradient(135deg, #6c757d, #545b62);
+        color: white;
+    }
+    
+    .weight-tag {
+        background: linear-gradient(135deg, #17a2b8, #138496);
+        color: white;
+    }
+    
+    .threshold-tag {
+        background: linear-gradient(135deg, #ffc107, #e0a800);
+        color: #212529;
+    }
+    
+    @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+    
+    @keyframes slideIn {
+        from { transform: translateY(-50px); opacity: 0; }
+        to { transform: translateY(0); opacity: 1; }
+    }
+    
+    @keyframes fadeInOut {
+        0% {
+            opacity: 0;
+            transform: translate(-50%, -50%) scale(0.8);
+        }
+        20% {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1);
+        }
+        80% {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1);
+        }
+        100% {
+            opacity: 0;
+            transform: translate(-50%, -50%) scale(0.8);
+        }
+    }
 </style>
 {% endblock %}
 
@@ -544,7 +832,7 @@
             <div class="mapping-header">
                 <h3 id="mapping-title">字段映射配置</h3>
                 <p style="color: #6c757d; margin: 10px 0 0 0;">
-                    左侧选择源字段，右侧选择目标字段，点击中间按钮创建映射关系。系统会提供相似性建议供参考。
+                    <strong>操作步骤：</strong>① 左侧选择源字段 → ② 右侧选择目标字段 → ③ 点击"+"创建映射 → ④ 设置字段优先级和权重 → ⑤ 重复步骤①-④创建更多映射关系
                 </p>
             </div>
             
@@ -613,7 +901,17 @@
                     <i class="fas fa-link"></i> 映射关系 (<span id="mapping-count">0</span>)
                 </h6>
                 <div id="relations-list">
-                    <p style="text-align: center; color: #6c757d; margin: 20px 0;">尚未创建任何映射关系</p>
+                    <div style="text-align: center; color: #6c757d; margin: 20px 0; padding: 20px; background: #f8f9fa; border-radius: 8px; border: 2px dashed #dee2e6;">
+                        <i class="fas fa-info-circle" style="color: #17a2b8; margin-bottom: 10px; font-size: 18px;"></i>
+                        <p style="margin: 5px 0; font-weight: 500;">尚未创建任何映射关系</p>
+                        <p style="margin: 5px 0; font-size: 14px;">
+                            💡 <strong>提示：</strong>您可以创建多个映射关系！<br>
+                            每创建一个映射后，请继续选择其他字段来创建更多映射。
+                        </p>
+                        <p style="margin: 10px 0 0 0; font-size: 13px; color: #6c757d;">
+                            建议创建3-5个映射关系以提高匹配准确性
+                        </p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -981,20 +1279,134 @@ function mappingExists(sourceField, targetField) {
 function createMapping() {
     if (!selectedSourceField || !selectedTargetField) return;
     
+    // 显示字段优先级和权重设置对话框
+    showFieldPriorityDialog();
+}
+
+// 显示字段优先级设置对话框
+function showFieldPriorityDialog() {
+    const similarity = calculateSimilarity(selectedSourceField, selectedTargetField);
+    
+    const dialog = document.createElement('div');
+    dialog.className = 'priority-dialog-overlay';
+    dialog.innerHTML = `
+        <div class="priority-dialog">
+            <div class="dialog-header">
+                <h3>设置字段映射配置</h3>
+                <button class="close-btn" onclick="closePriorityDialog()">&times;</button>
+            </div>
+            <div class="dialog-content">
+                <div class="mapping-info">
+                    <strong>${selectedSourceField}</strong> → <strong>${selectedTargetField}</strong>
+                    <div class="similarity-info">相似度: ${Math.round(similarity * 100)}%</div>
+                </div>
+                
+                <div class="config-section">
+                    <label class="config-label">字段优先级:</label>
+                    <div class="priority-options">
+                        <label class="radio-option">
+                            <input type="radio" name="priority" value="primary" checked>
+                            <span>主要字段 (Primary)</span>
+                            <small>作为数据关联的主要判断依据，可选择多个主要字段</small>
+                        </label>
+                        <label class="radio-option">
+                            <input type="radio" name="priority" value="secondary">
+                            <span>辅助字段 (Secondary)</span>
+                            <small>辅助确认数据关联的补充依据，可选择多个辅助字段</small>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="config-section">
+                    <label class="config-label">字段权重: <span id="weight-display">0.5</span></label>
+                    <input type="range" id="weight-slider" min="0.1" max="1.0" step="0.1" value="0.5" 
+                           oninput="updateWeightDisplay(this.value)">
+                    <div class="weight-guide">
+                        <small>0.1 (最低) ← → 1.0 (最高)</small>
+                    </div>
+                </div>
+                
+                <div class="config-section" id="threshold-section">
+                    <label class="config-label">阈值配置 (针对所有主要字段的综合得分):</label>
+                    <div class="threshold-inputs">
+                        <div class="threshold-item">
+                            <label>高阈值 (跳过辅助字段):</label>
+                            <input type="number" id="high-threshold" min="0.8" max="1.0" step="0.05" value="0.9">
+                            <small>主要字段综合得分≥此值时，跳过辅助字段计算</small>
+                        </div>
+                        <div class="threshold-item">
+                            <label>中等阈值 (启用辅助字段):</label>
+                            <input type="number" id="medium-threshold" min="0.5" max="0.8" step="0.05" value="0.6">
+                            <small>主要字段综合得分≥此值时，结合辅助字段匹配</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="dialog-footer">
+                <button class="btn-secondary" onclick="closePriorityDialog()">取消</button>
+                <button class="btn-primary" onclick="confirmFieldMapping()">确认映射</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(dialog);
+    
+    // 监听优先级变化
+    dialog.querySelectorAll('input[name="priority"]').forEach(radio => {
+        radio.addEventListener('change', function() {
+            const thresholdSection = document.getElementById('threshold-section');
+            thresholdSection.style.display = this.value === 'primary' ? 'block' : 'none';
+        });
+    });
+}
+
+// 更新权重显示
+function updateWeightDisplay(value) {
+    document.getElementById('weight-display').textContent = value;
+}
+
+// 关闭优先级对话框
+function closePriorityDialog() {
+    const dialog = document.querySelector('.priority-dialog-overlay');
+    if (dialog) {
+        dialog.remove();
+    }
+}
+
+// 确认字段映射
+function confirmFieldMapping() {
+    const priority = document.querySelector('input[name="priority"]:checked').value;
+    const weight = parseFloat(document.getElementById('weight-slider').value);
+    const highThreshold = parseFloat(document.getElementById('high-threshold').value);
+    const mediumThreshold = parseFloat(document.getElementById('medium-threshold').value);
+    
     const relation = {
         source: selectedSourceField,
         target: selectedTargetField,
         targetTable: currentTargetTable,
-        similarity: calculateSimilarity(selectedSourceField, selectedTargetField)
+        similarity: calculateSimilarity(selectedSourceField, selectedTargetField),
+        field_priority: priority,
+        weight: weight,
+        threshold_config: priority === 'primary' ? {
+            high_threshold: highThreshold,
+            medium_threshold: mediumThreshold,
+            low_threshold: 0.3
+        } : null
     };
     
     mappingRelations.push(relation);
+    
+    // 关闭对话框
+    closePriorityDialog();
     
     // 更新界面
     updateFieldStates();
     displayMappingRelations();
     updateMappingButtons();
     updateConfirmButton();
+    
+    // 显示成功提示，引导用户继续创建映射
+    showMappingSuccessHint();
     
     // 清除选择
     clearFieldSelections();
@@ -1124,19 +1536,32 @@ function displayMappingRelations() {
         return;
     }
     
-    const relationsHtml = currentRelations.map((relation, index) => `
+    const relationsHtml = currentRelations.map((relation, index) => {
+        const priorityLabel = relation.field_priority === 'primary' ? '主要' : '辅助';
+        const priorityClass = relation.field_priority === 'primary' ? 'priority-primary' : 'priority-secondary';
+        const weight = relation.weight || 0.5;
+        
+        return `
         <div class="mapping-relation">
             <div class="relation-fields">
-                <span class="relation-source">${relation.source}</span>
-                <i class="fas fa-arrow-right relation-arrow"></i>
-                <span class="relation-target">${relation.target}</span>
-                ${relation.similarity > 0.5 ? `<small style="margin-left: 10px; color: #28a745;">(${Math.round(relation.similarity * 100)}%)</small>` : ''}
+                <div class="relation-main">
+                    <span class="relation-source">${relation.source}</span>
+                    <i class="fas fa-arrow-right relation-arrow"></i>
+                    <span class="relation-target">${relation.target}</span>
+                    ${relation.similarity > 0.5 ? `<small class="similarity-score">(${Math.round(relation.similarity * 100)}%)</small>` : ''}
+                </div>
+                <div class="relation-config">
+                    <span class="priority-tag ${priorityClass}">${priorityLabel}</span>
+                    <span class="weight-tag">权重: ${weight}</span>
+                    ${relation.threshold_config ? `<span class="threshold-tag">阈值: ${relation.threshold_config.high_threshold}/${relation.threshold_config.medium_threshold}</span>` : ''}
+                </div>
             </div>
             <button class="relation-remove" onclick="removeRelation(${index})">
                 <i class="fas fa-times"></i>
             </button>
         </div>
-    `).join('');
+        `;
+    }).join('');
     
     container.innerHTML = relationsHtml;
 }
@@ -1155,6 +1580,42 @@ function removeRelation(index) {
     updateFieldStates();
     displayMappingRelations();
     updateConfirmButton();
+}
+
+// 显示映射创建成功提示
+function showMappingSuccessHint() {
+    // 创建临时提示元素
+    const hint = document.createElement('div');
+    hint.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: #28a745;
+        color: white;
+        padding: 15px 25px;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        z-index: 10000;
+        font-size: 14px;
+        text-align: center;
+        animation: fadeInOut 3s ease-in-out forwards;
+    `;
+    
+    hint.innerHTML = `
+        <i class="fas fa-check-circle" style="margin-right: 8px;"></i>
+        <strong>映射创建成功！</strong><br>
+        <small style="opacity: 0.9;">继续选择其他字段创建更多映射关系</small>
+    `;
+    
+    document.body.appendChild(hint);
+    
+    // 3秒后自动移除
+    setTimeout(() => {
+        if (hint.parentNode) {
+            hint.parentNode.removeChild(hint);
+        }
+    }, 3000);
 }
 
 // 清除字段选择
@@ -1245,7 +1706,10 @@ async function saveConfiguration() {
             target_field: relation.target,
             target_table: relation.targetTable,
             similarity_score: relation.similarity,
-            data_type: 'auto' // 默认数据类型
+            data_type: 'auto', // 默认数据类型
+            field_priority: relation.field_priority || 'primary', // 字段优先级
+            weight: relation.weight || 0.5, // 字段权重
+            threshold_config: relation.threshold_config || null // 阈值配置
         }));
         
         const configuration = {

@@ -11,6 +11,7 @@ from datetime import datetime
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from src.utils.memory_manager import get_memory_manager, check_memory_before_task
 
 # 导入原项目成熟匹配算法
 from .exact_matcher import ExactMatcher
@@ -302,6 +303,16 @@ class UserDataMatcher:
         try:
             logger.info(f"开始执行优化匹配任务: {task_id}")
             
+            # 任务执行前内存检查
+            if not check_memory_before_task(min_available_mb=2000):
+                error_msg = "系统内存不足，无法启动匹配任务"
+                logger.error(error_msg)
+                self._update_task_status(task_id, 'failed', error=error_msg)
+                return
+            
+            # 获取内存管理器
+            memory_manager = get_memory_manager()
+            
             # 更新任务状态
             self._update_task_status(task_id, 'running', 0, '初始化匹配环境')
             
@@ -312,9 +323,25 @@ class UserDataMatcher:
             if not source_table or not mappings:
                 raise ValueError("缺少源表或字段映射配置")
             
-            # 获取源数据
-            db = self.db_manager.mongo_client.get_database()
-            source_collection = db[source_table]
+            # 获取源数据 - 添加数据库连接检查和重连机制
+            try:
+                # 使用数据库管理器的get_collection方法，它包含了连接检查和重连逻辑
+                source_collection = self.db_manager.get_collection(source_table)
+                db = source_collection.database
+                logger.info(f"数据库连接正常，获取源表: {source_table}")
+            except Exception as db_error:
+                logger.error(f"数据库连接失败，尝试重新连接: {str(db_error)}")
+                # 强制重新连接数据库
+                try:
+                    self.db_manager._reconnect_mongodb()
+                    source_collection = self.db_manager.get_collection(source_table)
+                    db = source_collection.database
+                    logger.info(f"数据库重连成功，获取源表: {source_table}")
+                except Exception as reconnect_error:
+                    error_msg = f"数据库重连失败: {str(reconnect_error)}"
+                    logger.error(error_msg)
+                    self._update_task_status(task_id, 'failed', error=error_msg)
+                    return
             
             # 统计总记录数
             total_records = source_collection.count_documents({})
@@ -327,7 +354,7 @@ class UserDataMatcher:
             # 初始化进度
             processed_count = 0
             matched_count = 0
-            batch_size = config.get('batch_size', 50000)  # 原项目级别优化
+            batch_size = config.get('batch_size', 5000)  # 优化批次大小，避免内存溢出
             
             # 创建结果集合
             result_collection_name = f'user_match_results_{task_id}'
@@ -348,13 +375,29 @@ class UserDataMatcher:
                     batch_records, mappings, source_table, task_id
                 )
                 
-                # 保存匹配结果
+                # 保存匹配结果 - 添加数据库连接检查
                 if batch_results:
                     try:
                         result_collection.insert_many(batch_results)
                         matched_count += len(batch_results)
                     except Exception as e:
                         logger.error(f"保存匹配结果失败: {str(e)}")
+                        # 检查是否是数据库连接问题
+                        if "connection" in str(e).lower() or "network" in str(e).lower():
+                            logger.warning("检测到数据库连接问题，尝试重新连接...")
+                            try:
+                                # 重新连接数据库
+                                self.db_manager._reconnect_mongodb()
+                                # 重新获取结果集合
+                                db = self.db_manager.get_collection(source_table).database
+                                result_collection = db[result_collection_name]
+                                # 重试保存
+                                result_collection.insert_many(batch_results)
+                                matched_count += len(batch_results)
+                                logger.info("数据库重连成功，匹配结果保存完成")
+                            except Exception as retry_error:
+                                logger.error(f"数据库重连后仍然保存失败: {str(retry_error)}")
+                                # 继续处理下一批次，不中断整个任务
                 
                 processed_count += len(batch_records)
                 
@@ -1122,7 +1165,7 @@ class UserDataMatcher:
         
         return matched_fields
     
-    def _get_source_records_batch(self, collection, batch_size: int = 50000):
+    def _get_source_records_batch(self, collection, batch_size: int = 5000):
         """
         批量获取源记录
         
@@ -1157,11 +1200,11 @@ class UserDataMatcher:
                 'updated_time': datetime.now()
             })
             
-            # 同时更新数据库中的任务状态
+            # 同时更新数据库中的任务状态 - 添加数据库重连机制
             try:
                 if self.db_manager and hasattr(self.db_manager, 'get_db'):
-                    db = self.db_manager.get_db()
-                    task_collection = db['user_matching_tasks']
+                    # 使用get_collection方法，它包含了连接检查逻辑
+                    task_collection = self.db_manager.get_collection('user_matching_tasks')
                     
                     task_collection.update_one(
                         {'task_id': task_id},
@@ -1182,7 +1225,34 @@ class UserDataMatcher:
                     logger.debug(f"任务状态更新（内存+数据库）: {task_id} - {status} ({progress:.1f}%)")
             except Exception as e:
                 logger.warning(f"更新数据库任务状态失败: {e}")
-                logger.debug(f"任务状态更新（仅内存）: {task_id} - {status} ({progress:.1f}%)")
+                # 检查是否是连接问题，尝试重连
+                if "connection" in str(e).lower() or "network" in str(e).lower():
+                    try:
+                        logger.info("检测到数据库连接问题，尝试重新连接并更新任务状态...")
+                        self.db_manager._reconnect_mongodb()
+                        task_collection = self.db_manager.get_collection('user_matching_tasks')
+                        task_collection.update_one(
+                            {'task_id': task_id},
+                            {
+                                '$set': {
+                                    'status': status,
+                                    'progress': {
+                                        'progress': progress,
+                                        'processed': processed,
+                                        'total': total,
+                                        'matches': matches,
+                                        'message': message
+                                    },
+                                    'updated_at': datetime.now().isoformat()
+                                }
+                            }
+                        )
+                        logger.debug(f"数据库重连成功，任务状态更新完成: {task_id} - {status} ({progress:.1f}%)")
+                    except Exception as retry_error:
+                        logger.error(f"数据库重连后任务状态更新仍然失败: {retry_error}")
+                        logger.debug(f"任务状态更新（仅内存）: {task_id} - {status} ({progress:.1f}%)")
+                else:
+                    logger.debug(f"任务状态更新（仅内存）: {task_id} - {status} ({progress:.1f}%)")
     
     def _execute_matching_task(self, task_id: str, config: Dict[str, Any]):
         """
@@ -1227,7 +1297,7 @@ class UserDataMatcher:
             mappings = config['mappings']
             algorithm_type = config.get('algorithm_type', 'optimized')
             similarity_threshold = config.get('similarity_threshold', 0.7)
-            batch_size = config.get('batch_size', 50000)  # 原项目级别优化
+            batch_size = config.get('batch_size', 5000)  # 优化批次大小，避免内存溢出
             max_results = config.get('max_results', 10)
             
             update_progress(0, 0, 0, 0, 'running', '正在准备数据...')

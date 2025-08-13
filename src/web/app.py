@@ -3897,6 +3897,19 @@ def api_start_user_data_matching():
         if not config:
             return jsonify({'success': False, 'error': '映射配置不存在'}), 404
         
+        # 检查是否已有进行中的任务（防重复提交）
+        tasks_collection = db['user_matching_tasks']
+        existing_task = tasks_collection.find_one({
+            'config_id': config_id,
+            'status': {'$in': ['running', 'pending']}
+        })
+        
+        if existing_task:
+            return jsonify({
+                'success': False, 
+                'error': f'该配置已有任务在进行中（任务ID: {existing_task["task_id"]}），请等待完成或先停止当前任务'
+            }), 409  # Conflict
+        
         # 创建匹配任务
         task_id = f"user_match_{config_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
@@ -3952,11 +3965,15 @@ def api_user_matching_progress():
         if not task_id:
             return jsonify({'success': False, 'error': '缺少任务ID'}), 400
         
-        if not db_manager or not db_manager.mongo_client:
+        if not db_manager:
             return jsonify({'success': False, 'error': '数据库连接未初始化'}), 500
         
-        db = db_manager.mongo_client.get_database()
-        task_collection = db['user_matching_tasks']
+        # 使用带连接检查的方法获取集合
+        try:
+            task_collection = db_manager.get_collection('user_matching_tasks')
+        except Exception as conn_error:
+            logger.error(f"数据库连接失败: {str(conn_error)}")
+            return jsonify({'success': False, 'error': '数据库连接失败'}), 500
         
         task = task_collection.find_one({'task_id': task_id})
         
@@ -4052,10 +4069,17 @@ def api_get_user_matching_results():
         if not task_id:
             return jsonify({'success': False, 'error': '缺少任务ID'}), 400
         
-        if not db_manager or not db_manager.mongo_client:
+        if not db_manager:
             return jsonify({'success': False, 'error': '数据库连接未初始化'}), 500
         
-        db = db_manager.mongo_client.get_database()
+        # 使用带连接检查的方法获取数据库
+        try:
+            # 先获取一个集合来测试连接并触发重连机制
+            test_collection = db_manager.get_collection('user_matching_tasks')
+            db = test_collection.database
+        except Exception as conn_error:
+            logger.error(f"数据库连接失败: {str(conn_error)}")
+            return jsonify({'success': False, 'error': '数据库连接失败'}), 500
         
         # 获取结果集合
         result_collection_name = f'user_match_results_{task_id}'
@@ -4184,9 +4208,14 @@ def api_delete_user_matching_task():
         if not task:
             return jsonify({'success': False, 'error': '任务不存在'}), 404
         
-        # 2. 检查任务状态，如果正在运行则不允许删除
+        # 2. 允许删除运行中的任务（系统崩溃后的异常状态恢复）
+        # 注释掉原有的运行状态检查，允许强制删除异常状态的任务
+        # if task.get('status') == 'running':
+        #     return jsonify({'success': False, 'error': '任务正在运行中，无法删除'}), 400
+        
+        # 记录运行中任务的强制删除操作
         if task.get('status') == 'running':
-            return jsonify({'success': False, 'error': '任务正在运行中，无法删除'}), 400
+            logger.warning(f"强制删除运行中的任务: {task_id}（可能是系统异常导致的状态错误）")
         
         # 3. 删除结果表
         result_collection_name = f'user_match_results_{task_id}'
@@ -4447,6 +4476,167 @@ def execute_dynamic_matching_task(task_id: str, config: dict):
             )
         except:
             pass
+
+
+@app.route('/api/cleanup_abnormal_user_matching_tasks', methods=['POST'])
+def api_cleanup_abnormal_user_matching_tasks():
+    """API: 清理异常的用户匹配任务"""
+    try:
+        data = request.get_json() or {}
+        timeout_hours = data.get('timeout_hours', 2)  # 默认2小时超时
+        dry_run = data.get('dry_run', False)  # 是否只是检查不实际删除
+        
+        if not db_manager or not db_manager.mongo_client:
+            return jsonify({'success': False, 'error': '数据库连接未初始化'}), 500
+        
+        db = db_manager.mongo_client.get_database()
+        tasks_collection = db['user_matching_tasks']
+        
+        # 计算超时时间点
+        from datetime import datetime, timedelta
+        timeout_time = datetime.now() - timedelta(hours=timeout_hours)
+        
+        # 查找异常任务
+        abnormal_criteria = {
+            '$or': [
+                # 长时间运行中的任务
+                {
+                    'status': 'running',
+                    'started_at': {'$lt': timeout_time.isoformat()}
+                },
+                # 状态为pending但创建时间过久的任务
+                {
+                    'status': 'pending',
+                    'created_at': {'$lt': timeout_time.isoformat()}
+                }
+            ]
+        }
+        
+        # 查找异常任务
+        abnormal_tasks = list(tasks_collection.find(abnormal_criteria))
+        
+        result = {
+            'found_abnormal_tasks': len(abnormal_tasks),
+            'timeout_hours': timeout_hours,
+            'timeout_time': timeout_time.isoformat(),
+            'tasks': []
+        }
+        
+        if abnormal_tasks:
+            for task in abnormal_tasks:
+                task_info = {
+                    'task_id': task.get('task_id'),
+                    'config_id': task.get('config_id'),
+                    'status': task.get('status'),
+                    'created_at': task.get('created_at'),
+                    'started_at': task.get('started_at'),
+                    'last_updated': task.get('last_updated'),
+                    'source_table': task.get('source_table')
+                }
+                result['tasks'].append(task_info)
+            
+            if not dry_run:
+                # 实际清理异常任务
+                deleted_count = 0
+                for task in abnormal_tasks:
+                    task_id = task.get('task_id')
+                    
+                    try:
+                        # 删除任务记录
+                        tasks_collection.delete_one({'task_id': task_id})
+                        
+                        # 检查并删除对应的结果表
+                        result_table_name = f"user_match_results_{task_id}"
+                        if result_table_name in db.list_collection_names():
+                            db.drop_collection(result_table_name)
+                            logger.info(f"已删除结果表: {result_table_name}")
+                        
+                        deleted_count += 1
+                        logger.info(f"已清理异常任务: {task_id}")
+                        
+                    except Exception as e:
+                        logger.error(f"清理任务 {task_id} 失败: {e}")
+                
+                result['deleted_count'] = deleted_count
+                result['action'] = 'cleanup_completed'
+                
+                logger.info(f"异常任务清理完成: 发现 {len(abnormal_tasks)} 个，清理 {deleted_count} 个")
+            else:
+                result['action'] = 'dry_run_only'
+                logger.info(f"异常任务检查完成（仅检查）: 发现 {len(abnormal_tasks)} 个异常任务")
+        else:
+            result['action'] = 'no_abnormal_tasks'
+            logger.info("未发现异常任务")
+        
+        return jsonify({
+            'success': True,
+            'result': result
+        })
+        
+    except Exception as e:
+        logger.error(f"清理异常任务失败: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/force_stop_user_matching_task', methods=['POST'])
+def api_force_stop_user_matching_task():
+    """API: 强制停止用户匹配任务（用于清理异常任务）"""
+    try:
+        data = request.get_json()
+        task_id = data.get('task_id')
+        
+        if not task_id:
+            return jsonify({'success': False, 'error': '缺少任务ID'}), 400
+        
+        if not db_manager or not db_manager.mongo_client:
+            return jsonify({'success': False, 'error': '数据库连接未初始化'}), 500
+        
+        db = db_manager.mongo_client.get_database()
+        tasks_collection = db['user_matching_tasks']
+        
+        # 查找任务
+        task = tasks_collection.find_one({'task_id': task_id})
+        if not task:
+            return jsonify({'success': False, 'error': '任务不存在'}), 404
+        
+        # 强制更新任务状态为停止
+        update_result = tasks_collection.update_one(
+            {'task_id': task_id},
+            {
+                '$set': {
+                    'status': 'stopped',
+                    'end_time': datetime.now().isoformat(),
+                    'error_message': '管理员强制停止',
+                    'last_updated': datetime.now().isoformat()
+                }
+            }
+        )
+        
+        if update_result.modified_count > 0:
+            logger.info(f"强制停止任务成功: {task_id}")
+            
+            # 尝试从运行任务列表中移除
+            try:
+                # 获取全局用户数据匹配器实例
+                from src.matching.user_data_matcher import UserDataMatcher
+                global_matcher = UserDataMatcher.get_instance() if hasattr(UserDataMatcher, 'get_instance') else None
+                
+                if global_matcher and hasattr(global_matcher, 'running_tasks') and task_id in global_matcher.running_tasks:
+                    del global_matcher.running_tasks[task_id]
+                    logger.info(f"已从运行任务列表中移除: {task_id}")
+            except Exception as e:
+                logger.warning(f"从运行任务列表移除失败: {e}")
+            
+            return jsonify({
+                'success': True,
+                'message': f'任务 {task_id} 已强制停止'
+            })
+        else:
+            return jsonify({'success': False, 'error': '更新任务状态失败'}), 500
+        
+    except Exception as e:
+        logger.error(f"强制停止任务失败: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 if __name__ == '__main__':

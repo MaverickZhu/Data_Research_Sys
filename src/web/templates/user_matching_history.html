@@ -32,6 +32,9 @@
                 <button class="btn btn-outline-danger btn-sm" onclick="cleanupOldTasks()" title="清理30天前的任务">
                     <i class="fas fa-trash-alt"></i> 清理旧任务
                 </button>
+                <button class="btn btn-outline-warning btn-sm" onclick="cleanupAbnormalTasks()" title="清理异常状态的任务">
+                    <i class="fas fa-wrench"></i> 清理异常任务
+                </button>
             </div>
         </div>
         <div class="card-body">
@@ -287,18 +290,30 @@ async function deleteTask(taskId) {
         return;
     }
     
-    // 检查任务状态
+    // 允许删除运行中的任务（系统崩溃后的异常状态）
+    // 注释掉原有的运行状态检查
+    // if (task.status === 'running') {
+    //     showError('任务正在运行中，无法删除');
+    //     return;
+    // }
+    
+    // 为运行中的任务添加特别警告
+    let statusWarning = '';
     if (task.status === 'running') {
-        showError('任务正在运行中，无法删除');
-        return;
+        statusWarning = `
+⚠️ 警告：此任务显示为"运行中"状态！
+这可能是由于系统异常导致的状态错误。
+删除此任务将强制清理异常状态。
+`;
     }
     
     const confirmMessage = `确定要删除这个任务吗？
     
 任务ID: ${taskId}
 创建时间: ${formatDateTime(task.created_at)}
+当前状态: ${getStatusText(task.status)}
 结果数量: ${task.result_count || 0} 条
-
+${statusWarning}
 此操作将删除任务记录和所有匹配结果，不可撤销！`;
     
     if (!confirm(confirmMessage)) {
@@ -555,4 +570,66 @@ function hideLoadingToast(toast) {
     }
 }
 </style>
+
+<script>
+// 清理异常任务
+function cleanupAbnormalTasks() {
+    // 先检查异常任务
+    fetch('/api/cleanup_abnormal_user_matching_tasks', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            timeout_hours: 2,
+            dry_run: true  // 仅检查不删除
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success && data.result.found_abnormal_tasks > 0) {
+            const taskList = data.result.tasks.map(task => 
+                `- ${task.task_id} (${task.status}, 创建于: ${task.created_at})`
+            ).join('\n');
+            
+            const message = `发现 ${data.result.found_abnormal_tasks} 个异常任务：\n\n${taskList}\n\n这些任务可能由于系统异常或网络问题导致状态不正常。\n\n确定要清理这些异常任务吗？`;
+            
+            if (confirm(message)) {
+                // 执行实际清理
+                fetch('/api/cleanup_abnormal_user_matching_tasks', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        timeout_hours: 2,
+                        dry_run: false  // 执行实际清理
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showSuccess(`成功清理了 ${data.result.deleted_count} 个异常任务`);
+                        loadTasks(); // 重新加载任务列表
+                    } else {
+                        showError('清理异常任务失败: ' + (data.error || '未知错误'));
+                    }
+                })
+                .catch(error => {
+                    console.error('清理异常任务失败:', error);
+                    showError('清理异常任务失败');
+                });
+            }
+        } else if (data.success && data.result.found_abnormal_tasks === 0) {
+            showInfo('未发现异常任务，系统状态正常');
+        } else {
+            showError('检查异常任务失败: ' + (data.error || '未知错误'));
+        }
+    })
+    .catch(error => {
+        console.error('检查异常任务失败:', error);
+        showError('检查异常任务失败');
+    });
+}
+</script>
 {% endblock %}

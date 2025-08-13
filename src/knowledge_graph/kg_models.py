@@ -274,12 +274,26 @@ class Ontology:
                          range: EntityType = None,
                          properties: Dict[str, Any] = None) -> None:
         """添加关系类型定义"""
+        # 过滤掉不可序列化的属性（如枚举类型）
+        serializable_properties = {}
+        if properties:
+            for key, value in properties.items():
+                # 跳过枚举类型和其他不可序列化的对象
+                if not isinstance(value, (EntityType, RelationType)) and not hasattr(value, '__dict__'):
+                    serializable_properties[key] = value
+                elif isinstance(value, str):
+                    serializable_properties[key] = value
+                elif isinstance(value, (int, float, bool)):
+                    serializable_properties[key] = value
+                elif isinstance(value, (list, dict)):
+                    serializable_properties[key] = value
+        
         self.relation_types[relation_type.value] = {
             'type': relation_type.value,
             'domain': domain.value if domain else None,
             'range': range.value if range else None,
-            'properties': properties or {},
-            'description': properties.get('description', '') if properties else ''
+            'properties': serializable_properties,
+            'description': serializable_properties.get('description', '')
         }
         self.updated_time = datetime.now()
     

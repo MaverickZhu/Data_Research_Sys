@@ -5,14 +5,22 @@ mongodb:
     match_results: unit_match_results
     supervision_units: xxj_shdwjbxx
   connection_pool:
-    connect_timeout_ms: 5000
-    max_connecting: 50
-    max_idle_time_ms: 30000
-    max_pool_size: 1000
-    min_pool_size: 64
-    server_selection_timeout_ms: 10000
-    socket_timeout_ms: 60000
-    wait_queue_timeout_ms: 30000
+    # 基础超时配置 - 增加超时时间防止连接被拒绝
+    connect_timeout_ms: 30000        # 连接超时：30秒
+    server_selection_timeout_ms: 60000  # 服务器选择超时：60秒
+    socket_timeout_ms: 120000        # Socket超时：2分钟
+    wait_queue_timeout_ms: 60000     # 等待队列超时：60秒
+    
+    # 连接池配置 - 优化大数据处理
+    max_pool_size: 500               # 最大连接数：500（减少避免耗尽）
+    min_pool_size: 30                # 最小连接数：30
+    max_connecting: 30               # 最大并发连接：30
+    max_idle_time_ms: 60000          # 最大空闲时间：60秒
+    
+    # 新增配置项
+    heartbeat_frequency_ms: 10000    # 心跳间隔：10秒
+    retry_writes: true               # 启用写入重试
+    retry_reads: true                # 启用读取重试
   database: Unit_Info
   host: localhost
   password: null

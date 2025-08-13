@@ -63,15 +63,37 @@ class DatabaseManager:
             self._initialized = True
         
     def _connect_mongodb(self):
-        """连接MongoDB"""
+        """连接MongoDB - 增强版本，支持自动重连和更好的容错"""
         try:
+            # 获取连接池配置，使用更保守的默认值
+            pool_config = self.mongodb_config.get('connection_pool', {})
+            
+            # 优化连接参数，防止连接耗尽
             self._mongo_client = MongoClient(
                 self.mongodb_config.get('uri', 'mongodb://localhost:27017/'),
-                maxPoolSize=self.mongodb_config.get('connection_pool', {}).get('max_pool_size', 100),
-                minPoolSize=self.mongodb_config.get('connection_pool', {}).get('min_pool_size', 10),
-                maxIdleTimeMS=self.mongodb_config.get('connection_pool', {}).get('max_idle_time_ms', 30000),
-                connectTimeoutMS=self.mongodb_config.get('connection_pool', {}).get('connect_timeout_ms', 20000),
-                serverSelectionTimeoutMS=self.mongodb_config.get('connection_pool', {}).get('server_selection_timeout_ms', 30000)
+                # 连接池配置 - 更保守的设置
+                maxPoolSize=pool_config.get('max_pool_size', 500),  # 减少最大连接数
+                minPoolSize=pool_config.get('min_pool_size', 20),   # 增加最小连接数
+                maxIdleTimeMS=pool_config.get('max_idle_time_ms', 60000),  # 增加空闲时间
+                
+                # 超时配置 - 更长的超时时间
+                connectTimeoutMS=pool_config.get('connect_timeout_ms', 30000),  # 30秒连接超时
+                serverSelectionTimeoutMS=pool_config.get('server_selection_timeout_ms', 60000),  # 60秒服务器选择超时
+                socketTimeoutMS=pool_config.get('socket_timeout_ms', 120000),  # 2分钟socket超时
+                
+                # 新增配置 - 防止连接问题
+                waitQueueTimeoutMS=pool_config.get('wait_queue_timeout_ms', 60000),  # 等待队列超时
+                maxConnecting=pool_config.get('max_connecting', 20),  # 最大并发连接数
+                
+                # 重连配置
+                retryWrites=True,  # 启用重试写入
+                retryReads=True,   # 启用重试读取
+                
+                # 心跳配置
+                heartbeatFrequencyMS=10000,  # 10秒心跳间隔
+                
+                # 事件监听 - 用于监控连接状态
+                event_listeners=[]  # 可以后续添加事件监听器
             )
             
             # 从客户端获取数据库，更稳健
@@ -80,12 +102,30 @@ class DatabaseManager:
             
             connection_info = f"URI: {self.mongodb_config.get('uri', 'mongodb://localhost:27017/')} (DB: {db_name})"
             
-            # 测试连接
-            self._mongo_client.admin.command('ping')
-            logger.info(f"MongoDB连接成功: {connection_info}")
+            # 测试连接 - 增加重试机制
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    self._mongo_client.admin.command('ping')
+                    logger.info(f"MongoDB连接成功: {connection_info}")
+                    logger.info(f"连接池配置: maxPool={pool_config.get('max_pool_size', 500)}, "
+                               f"minPool={pool_config.get('min_pool_size', 20)}, "
+                               f"maxIdle={pool_config.get('max_idle_time_ms', 60000)}ms")
+                    break
+                except Exception as e:
+                    if attempt == max_retries - 1:
+                        raise
+                    logger.warning(f"MongoDB连接测试失败 (尝试 {attempt + 1}/{max_retries}): {e}")
+                    import time
+                    time.sleep(2)  # 等待2秒后重试
             
         except ConnectionFailure as e:
             logger.error(f"MongoDB连接失败: {e}")
+            self._mongo_client = None
+            self._mongo_db = None
+            raise
+        except Exception as e:
+            logger.error(f"MongoDB连接异常: {e}")
             self._mongo_client = None
             self._mongo_db = None
             raise
@@ -124,9 +164,41 @@ class DatabaseManager:
             self._redis_client = None
             raise
             
+    def _check_mongodb_connection(self) -> bool:
+        """检查MongoDB连接健康状态"""
+        try:
+            if self._mongo_client is None or self._mongo_db is None:
+                return False
+            
+            # 执行ping命令检查连接
+            self._mongo_client.admin.command('ping')
+            return True
+        except Exception as e:
+            logger.warning(f"MongoDB连接健康检查失败: {e}")
+            return False
+    
+    def _reconnect_mongodb(self) -> bool:
+        """重新连接MongoDB"""
+        try:
+            logger.info("尝试重新连接MongoDB...")
+            
+            # 关闭旧连接
+            if self._mongo_client:
+                try:
+                    self._mongo_client.close()
+                except:
+                    pass
+            
+            # 重新建立连接
+            self._connect_mongodb()
+            return True
+        except Exception as e:
+            logger.error(f"MongoDB重连失败: {e}")
+            return False
+    
     def get_collection(self, collection_name: str) -> Collection:
         """
-        获取MongoDB集合
+        获取MongoDB集合 - 增强版本，支持自动重连
         
         Args:
             collection_name: 集合名称
@@ -134,8 +206,12 @@ class DatabaseManager:
         Returns:
             Collection: MongoDB集合对象
         """
-        if self._mongo_db is None:
-            raise Exception("MongoDB未连接")
+        # 检查连接健康状态
+        if not self._check_mongodb_connection():
+            logger.warning("MongoDB连接不健康，尝试重连...")
+            if not self._reconnect_mongodb():
+                raise Exception("MongoDB连接失败且重连失败")
+        
         return self._mongo_db[collection_name]
         
     def get_redis_client(self) -> Redis:

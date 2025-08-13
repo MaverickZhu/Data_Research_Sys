@@ -257,7 +257,7 @@
 let currentTaskId = null;
 let currentConfigId = null;
 let currentPage = 1;
-let pageSize = 50; // 增加默认页面大小
+let pageSize = 10; // 每页显示10条记录
 let totalResults = 0;
 let allResults = [];
 let filteredResults = [];
@@ -376,6 +376,7 @@ function displayStatistics(stats) {
 
 // 应用筛选
 function applyFilter() {
+    // 暂时保留前端筛选逻辑，后续可优化为后端筛选
     if (currentFilter === 'all') {
         filteredResults = allResults;
     } else {
@@ -385,7 +386,10 @@ function applyFilter() {
     }
     
     // 更新筛选结果计数
-    document.getElementById('filtered-count').textContent = filteredResults.length;
+    const filteredCountElement = document.getElementById('filtered-count');
+    if (filteredCountElement) {
+        filteredCountElement.textContent = filteredResults.length;
+    }
 }
 
 // 显示结果表格
@@ -393,11 +397,10 @@ function displayResults() {
     const tbody = document.getElementById('results-table');
     tbody.innerHTML = '';
     
+    // 使用后端分页，直接显示所有获取到的结果
     const startIndex = (currentPage - 1) * pageSize;
-    const endIndex = Math.min(startIndex + pageSize, filteredResults.length);
-    const pageResults = filteredResults.slice(startIndex, endIndex);
     
-    pageResults.forEach((result, index) => {
+    filteredResults.forEach((result, index) => {
         const row = document.createElement('tr');
         row.innerHTML = `
             <td>${startIndex + index + 1}</td>
@@ -437,13 +440,14 @@ function displayResults() {
 
 // 更新分页
 function updatePagination() {
-    const totalPages = Math.ceil(filteredResults.length / pageSize);
+    // 使用后端返回的总数计算总页数
+    const totalPages = Math.ceil(totalResults / pageSize);
     const startItem = (currentPage - 1) * pageSize + 1;
-    const endItem = Math.min(currentPage * pageSize, filteredResults.length);
+    const endItem = Math.min(currentPage * pageSize, totalResults);
     
     document.getElementById('page-start').textContent = startItem;
     document.getElementById('page-end').textContent = endItem;
-    document.getElementById('total-results').textContent = filteredResults.length;
+    document.getElementById('total-results').textContent = totalResults;
     
     // 生成分页按钮
     const pagination = document.getElementById('pagination');
@@ -475,10 +479,11 @@ function updatePagination() {
 
 // 切换页面
 function changePage(page) {
-    const totalPages = Math.ceil(filteredResults.length / pageSize);
+    const totalPages = Math.ceil(totalResults / pageSize);
     if (page >= 1 && page <= totalPages) {
         currentPage = page;
-        displayResults();
+        // 重新从后端加载对应页面的数据
+        loadMatchingResults();
     }
 }
 

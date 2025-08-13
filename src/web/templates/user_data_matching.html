@@ -324,6 +324,9 @@ let currentConfigId = null;
 let currentTaskId = null;
 let progressTimer = null;
 let startTime = null;
+// 存储最后完成的任务信息，用于查看结果
+let lastCompletedTaskId = null;
+let lastCompletedConfigId = null;
 
 // 页面加载时初始化
 document.addEventListener('DOMContentLoaded', function() {
@@ -439,6 +442,19 @@ async function startMatching(event) {
         return;
     }
     
+    // 防重复提交检查
+    const startBtn = document.getElementById('start-matching-btn');
+    if (startBtn && startBtn.disabled) {
+        showError('任务正在启动中，请勿重复提交');
+        return;
+    }
+    
+    // 检查是否已有进行中的任务
+    if (currentTaskId) {
+        showError('已有任务在进行中，请等待完成或停止当前任务');
+        return;
+    }
+    
     const matchingParams = {
         config_id: currentConfigId,
         algorithm_type: document.getElementById('algorithm-type').value,
@@ -449,6 +465,12 @@ async function startMatching(event) {
         enable_caching: document.getElementById('enable-caching').checked,
         enable_parallel: document.getElementById('enable-parallel').checked
     };
+    
+    // 禁用开始按钮，防止重复提交
+    if (startBtn) {
+        startBtn.disabled = true;
+        startBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 启动中...';
+    }
     
     try {
         const response = await fetch('/api/start_user_data_matching', {
@@ -477,9 +499,21 @@ async function startMatching(event) {
             startProgressMonitoring();
         } else {
             showError('启动匹配任务失败: ' + data.error);
+            
+            // 恢复按钮状态
+            if (startBtn) {
+                startBtn.disabled = false;
+                startBtn.innerHTML = '<i class="fas fa-play"></i> 开始匹配';
+            }
         }
     } catch (error) {
         showError('启动任务时发生错误: ' + error.message);
+        
+        // 恢复按钮状态
+        if (startBtn) {
+            startBtn.disabled = false;
+            startBtn.innerHTML = '<i class="fas fa-play"></i> 开始匹配';
+        }
     }
 }
 
@@ -527,9 +561,15 @@ function startProgressMonitoring() {
                         showSuccess(`匹配任务完成！共找到 ${progress.matches} 个匹配结果`);
                         progressBar.className = 'progress-bar bg-success';
                         
+                        // 保存任务ID用于跳转和后续查看结果（在重置之前）
+                        const completedTaskId = currentTaskId;
+                        const completedConfigId = currentConfigId;
+                        lastCompletedTaskId = completedTaskId;
+                        lastCompletedConfigId = completedConfigId;
+                        
                         // 自动跳转到结果页面
                         setTimeout(() => {
-                            window.location.href = `/user_matching_results?task_id=${currentTaskId}&config_id=${currentConfigId}`;
+                            window.location.href = `/user_matching_results?task_id=${completedTaskId}&config_id=${completedConfigId}`;
                         }, 3000);
                     } else if (status === 'failed') {
                         showError('匹配任务失败: ' + (data.error || '未知错误'));
@@ -537,6 +577,15 @@ function startProgressMonitoring() {
                     } else if (status === 'stopped') {
                         showInfo('匹配任务已停止');
                         progressBar.className = 'progress-bar bg-warning';
+                    }
+                    
+                    // 在所有完成状态下重置任务ID和按钮状态
+                    currentTaskId = null;
+                    currentConfigId = null;
+                    const startBtn = document.getElementById('start-matching-btn');
+                    if (startBtn) {
+                        startBtn.disabled = false;
+                        startBtn.innerHTML = '<i class="fas fa-play"></i> 开始匹配';
                     }
                 }
             }
@@ -588,8 +637,14 @@ async function pauseTask() {
 
 // 查看结果
 function viewResults() {
-    if (currentTaskId && currentConfigId) {
-        window.location.href = `/user_matching_results?task_id=${currentTaskId}&config_id=${currentConfigId}`;
+    // 优先使用最后完成的任务信息，如果没有则使用当前任务信息
+    const taskId = lastCompletedTaskId || currentTaskId;
+    const configId = lastCompletedConfigId || currentConfigId;
+    
+    if (taskId && configId) {
+        window.location.href = `/user_matching_results?task_id=${taskId}&config_id=${configId}`;
+    } else {
+        showError('没有可查看的匹配结果，请先完成一个匹配任务');
     }
 }
 

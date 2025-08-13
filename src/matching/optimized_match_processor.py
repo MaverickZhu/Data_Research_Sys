@@ -161,7 +161,7 @@ class OptimizedMatchProcessor:
         
         # 批处理配置
         self.batch_config = config.get('batch_processing', {})
-        self.batch_size = self.batch_config.get('batch_size', 100)
+        self.batch_size = self.batch_config.get('batch_size', 500)  # 增加批次大小提高效率，但避免内存溢出
         self.max_workers = perf_config.get('max_workers', 4)
         self.timeout = self.batch_config.get('timeout', 300)
         

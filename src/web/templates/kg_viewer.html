@@ -1,0 +1,1080 @@
+{% extends "base.html" %}
+
+{% block title %}知识图谱浏览 - 消防单位建筑数据关联系统{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <!-- 页面标题 -->
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <div>
+                    <h2><i class="fas fa-project-diagram text-primary"></i> 知识图谱浏览</h2>
+                    <p class="text-muted">浏览和探索已构建的知识图谱，查看实体、关系和知识三元组</p>
+                </div>
+                <div>
+                    <button id="delete-all-btn" class="btn btn-outline-danger me-2" onclick="showDeleteAllConfirmation()">
+                        <i class="fas fa-trash-alt"></i> 删除所有图谱
+                    </button>
+                    <a href="/" class="btn btn-outline-secondary">
+                        <i class="fas fa-home"></i> 返回主页
+                    </a>
+                </div>
+            </div>
+
+            <!-- 统计信息卡片 -->
+            <div class="row mb-4">
+                <div class="col-md-3">
+                    <div class="card text-white bg-primary">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <h4 id="entity-count">-</h4>
+                                    <p class="card-text">实体总数</p>
+                                </div>
+                                <div class="align-self-center">
+                                    <i class="fas fa-circle fa-2x"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card text-white bg-success">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <h4 id="relation-count">-</h4>
+                                    <p class="card-text">关系总数</p>
+                                </div>
+                                <div class="align-self-center">
+                                    <i class="fas fa-arrow-right fa-2x"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card text-white bg-info">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <h4 id="triple-count">-</h4>
+                                    <p class="card-text">三元组总数</p>
+                                </div>
+                                <div class="align-self-center">
+                                    <i class="fas fa-link fa-2x"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card text-white bg-warning">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <h4 id="query-speed">-</h4>
+                                    <p class="card-text">查询速度(ms)</p>
+                                </div>
+                                <div class="align-self-center">
+                                    <i class="fas fa-tachometer-alt fa-2x"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 搜索和过滤工具 -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5><i class="fas fa-search"></i> 知识图谱搜索</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="search-input" placeholder="输入实体名称或关系类型...">
+                                <button class="btn btn-primary" onclick="searchKnowledgeGraph()">
+                                    <i class="fas fa-search"></i> 搜索
+                                </button>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <select class="form-select" id="entity-type-filter">
+                                <option value="">所有实体类型</option>
+                                <option value="ORGANIZATION">机构组织</option>
+                                <option value="PERSON">人员</option>
+                                <option value="LOCATION">地点位置</option>
+                                <option value="IDENTIFIER">标识符</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <select class="form-select" id="relation-type-filter">
+                                <option value="">所有关系类型</option>
+                                <option value="BELONGS_TO">属于</option>
+                                <option value="LOCATED_IN">位于</option>
+                                <option value="MANAGES">管理</option>
+                                <option value="SIMILAR_TO">相似于</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 结果显示区域 -->
+            <div class="row">
+                <!-- 实体列表 -->
+                <div class="col-md-4">
+                    <div class="card">
+                        <div class="card-header">
+                            <h6><i class="fas fa-circle text-primary"></i> 实体列表</h6>
+                        </div>
+                        <div class="card-body" style="max-height: 600px; overflow-y: auto;">
+                            <div id="entities-list">
+                                <div class="text-center text-muted p-4">
+                                    <i class="fas fa-spinner fa-spin fa-2x"></i>
+                                    <p class="mt-2">加载实体数据中...</p>
+                                    <button class="btn btn-outline-primary btn-sm mt-2" onclick="window.location.reload()">刷新页面</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 关系列表 -->
+                <div class="col-md-4">
+                    <div class="card">
+                        <div class="card-header">
+                            <h6><i class="fas fa-arrow-right text-success"></i> 关系列表</h6>
+                        </div>
+                        <div class="card-body" style="max-height: 600px; overflow-y: auto;">
+                            <div id="relations-list">
+                                <div class="text-center text-muted p-4">
+                                    <i class="fas fa-spinner fa-spin fa-2x"></i>
+                                    <p class="mt-2">加载关系数据中...</p>
+                                    <button class="btn btn-outline-primary btn-sm mt-2" onclick="window.location.reload()">刷新页面</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 详情面板 -->
+                <div class="col-md-4">
+                    <div class="card">
+                        <div class="card-header">
+                            <h6><i class="fas fa-info-circle text-info"></i> 详细信息</h6>
+                        </div>
+                        <div class="card-body" style="max-height: 600px; overflow-y: auto;">
+                            <div id="detail-panel">
+                                <div class="text-center text-muted p-4">
+                                    <i class="fas fa-mouse-pointer fa-2x"></i>
+                                    <p class="mt-2">点击实体或关系查看详情</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 操作按钮 -->
+            <div class="row mt-4">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <button class="btn btn-outline-primary" onclick="refreshData()">
+                                        <i class="fas fa-sync-alt"></i> 刷新数据
+                                    </button>
+                                    <button class="btn btn-outline-success" onclick="exportData()">
+                                        <i class="fas fa-download"></i> 导出数据
+                                    </button>
+                                </div>
+                                <div>
+                                    <button class="btn btn-primary" onclick="viewFullGraph()">
+                                        <i class="fas fa-project-diagram"></i> 图谱可视化
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 加载提示模态框 -->
+<div class="modal fade" id="loadingModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-body text-center">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mt-3">正在加载知识图谱数据...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.entity-item, .relation-item {
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.entity-item:hover, .relation-item:hover {
+    background-color: #f8f9fa;
+    border-color: #007bff;
+    transform: translateY(-2px);
+    box-shadow: 0 2px 8px rgba(0,123,255,0.15);
+}
+
+.entity-item.selected, .relation-item.selected {
+    background-color: #e3f2fd;
+    border-color: #2196f3;
+}
+
+.entity-type-badge {
+    font-size: 0.75em;
+    padding: 2px 8px;
+    border-radius: 12px;
+}
+
+.relation-confidence {
+    font-size: 0.8em;
+    color: #6c757d;
+}
+
+.detail-section {
+    border-bottom: 1px solid #eee;
+    padding-bottom: 15px;
+    margin-bottom: 15px;
+}
+
+.detail-section:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+}
+
+.property-list {
+    list-style: none;
+    padding: 0;
+}
+
+.property-list li {
+    padding: 5px 0;
+    border-bottom: 1px solid #f1f1f1;
+}
+
+.property-list li:last-child {
+    border-bottom: none;
+}
+</style>
+
+<script>
+// 全局变量
+let currentData = {
+    entities: [],
+    relations: [],
+    stats: {}
+};
+
+// 测试函数：直接设置统计数据
+function testStatsDisplay() {
+    console.log('🧪 测试统计数据显示...');
+    
+    // 直接设置完整测试数据
+    const testStats = {
+        total_entities: 6259,
+        total_relations: 1237,
+        total_triples: 1237,
+        total_labels: 9,
+        performance_stats: {
+            avg_query_time_ms: 5.6
+        }
+    };
+    
+    currentData.stats = testStats;
+    updateStatsDisplay();
+    
+    console.log('✅ 测试数据已设置，包含三元组和查询速度');
+}
+
+// 页面加载完成后初始化
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('知识图谱浏览器页面加载完成');
+    
+    // 立即强制隐藏任何残留的加载状态
+    setTimeout(() => {
+        console.log('🔧 执行强制模态框清理...');
+        const loadingModal = document.getElementById('loadingModal');
+        if (loadingModal) {
+            loadingModal.style.display = 'none';
+            loadingModal.classList.remove('show', 'fade');
+            loadingModal.setAttribute('aria-hidden', 'true');
+        }
+        document.querySelectorAll('.modal-backdrop').forEach(backdrop => backdrop.remove());
+        document.body.classList.remove('modal-open');
+        document.body.style.paddingRight = '';
+        document.body.style.overflow = '';
+        console.log('✅ 强制清理完成');
+    }, 50);
+    
+    // 立即测试统计显示
+    setTimeout(() => {
+        testStatsDisplay();
+    }, 100);
+    
+    // 立即尝试加载数据
+    setTimeout(() => {
+        console.log('开始自动加载知识图谱数据...');
+        loadKnowledgeGraphData();
+    }, 500);
+    
+    // 如果5秒后还是加载状态，强制重试
+    setTimeout(() => {
+        const entitiesContainer = document.getElementById('entities-list');
+        const relationsContainer = document.getElementById('relations-list');
+        
+        if (entitiesContainer && entitiesContainer.innerHTML.includes('加载实体数据中')) {
+            console.log('检测到实体列表仍在加载，强制重试...');
+            loadKnowledgeGraphData();
+        }
+        
+        if (relationsContainer && (relationsContainer.innerHTML.includes('加载关系数据中') || relationsContainer.innerHTML.includes('正在加载知识图谱数据'))) {
+            console.log('检测到关系列表仍在加载，强制清理并重试...');
+            // 强制清理模态框
+            const loadingModal = document.getElementById('loadingModal');
+            if (loadingModal) {
+                loadingModal.style.display = 'none';
+                loadingModal.classList.remove('show', 'fade');
+                loadingModal.setAttribute('aria-hidden', 'true');
+            }
+            document.querySelectorAll('.modal-backdrop').forEach(backdrop => backdrop.remove());
+            document.body.classList.remove('modal-open');
+            document.body.style.paddingRight = '';
+            document.body.style.overflow = '';
+            console.log('✅ 残留加载状态清理完成');
+            loadKnowledgeGraphData();
+        }
+    }, 5000);
+    
+    // 定期检查并清理任何残留的加载状态
+    setInterval(() => {
+        const modalVisible = document.querySelector('#loadingModal[style*="block"]') || 
+                           document.querySelector('#loadingModal.show') ||
+                           document.querySelector('.modal-backdrop');
+        if (modalVisible) {
+            console.log('🔧 检测到残留模态框，执行清理...');
+            const loadingModal = document.getElementById('loadingModal');
+            if (loadingModal) {
+                loadingModal.style.display = 'none';
+                loadingModal.classList.remove('show', 'fade');
+                loadingModal.setAttribute('aria-hidden', 'true');
+            }
+            document.querySelectorAll('.modal-backdrop').forEach(backdrop => backdrop.remove());
+            document.body.classList.remove('modal-open');
+            document.body.style.paddingRight = '';
+            document.body.style.overflow = '';
+            console.log('✅ 定期清理完成');
+        }
+    }, 2000);
+});
+
+// 加载知识图谱数据
+async function loadKnowledgeGraphData() {
+    console.log('开始加载知识图谱数据...');
+    
+    let loadingModal = null;
+    try {
+        // 显示加载模态框
+        const modalElement = document.getElementById('loadingModal');
+        if (modalElement && typeof bootstrap !== 'undefined') {
+            loadingModal = new bootstrap.Modal(modalElement);
+            loadingModal.show();
+            console.log('加载模态框已显示');
+        } else {
+            console.warn('Bootstrap未加载或模态框元素未找到');
+        }
+
+        console.log('开始并行API请求...');
+        
+        // 并行加载统计信息、实体和关系数据
+        const [statsResponse, entitiesResponse, relationsResponse] = await Promise.all([
+            fetch('/api/kg/falkor/stats'),
+            fetch('/api/kg/falkor/entities?limit=100'),
+            fetch('/api/kg/falkor/relations?limit=100')
+        ]);
+
+        console.log('API响应状态:', {
+            stats: statsResponse.status,
+            entities: entitiesResponse.status, 
+            relations: relationsResponse.status
+        });
+
+        // 检查响应状态
+        if (!statsResponse.ok || !entitiesResponse.ok || !relationsResponse.ok) {
+            throw new Error(`API请求失败: stats=${statsResponse.status}, entities=${entitiesResponse.status}, relations=${relationsResponse.status}`);
+        }
+
+        // 解析响应
+        const stats = await statsResponse.json();
+        const entities = await entitiesResponse.json();
+        const relations = await relationsResponse.json();
+
+        console.log('API数据:', {
+            stats: stats,
+            entitiesCount: entities.entities ? entities.entities.length : 0,
+            relationsCount: relations.relations ? relations.relations.length : 0
+        });
+
+        // 更新全局数据
+        currentData.stats = stats || {}; // 直接使用stats，不需要stats.stats
+        currentData.entities = entities.entities || [];
+        currentData.relations = relations.relations || [];
+        
+        console.log('数据更新完成:', {
+            statsKeys: Object.keys(currentData.stats),
+            entitiesCount: currentData.entities.length,
+            relationsCount: currentData.relations.length
+        });
+
+        // 更新界面
+        console.log('更新界面显示...');
+        updateStatsDisplay();
+        updateEntitiesList();
+        updateRelationsList();
+
+        // 立即强制隐藏加载模态框
+        console.log('开始隐藏加载模态框...');
+        
+        // 方法1: Bootstrap方式隐藏
+        if (loadingModal) {
+            try {
+                loadingModal.hide();
+                console.log('✅ Bootstrap模态框隐藏成功');
+            } catch (e) {
+                console.warn('Bootstrap模态框隐藏失败:', e);
+            }
+        }
+        
+        // 方法2: 强制DOM隐藏（立即执行）
+        const modalEl = document.getElementById('loadingModal');
+        if (modalEl) {
+            modalEl.style.display = 'none';
+            modalEl.classList.remove('show', 'fade');
+            modalEl.setAttribute('aria-hidden', 'true');
+            console.log('✅ DOM强制隐藏成功');
+        }
+        
+        // 方法3: 清理所有Bootstrap残留
+        document.querySelectorAll('.modal-backdrop').forEach(backdrop => {
+            backdrop.remove();
+        });
+        document.body.classList.remove('modal-open');
+        document.body.style.paddingRight = '';
+        document.body.style.overflow = '';
+        
+        console.log('✅ 所有模态框清理完成');
+        
+        console.log('知识图谱数据加载完成');
+
+    } catch (error) {
+        console.error('加载知识图谱数据失败:', error);
+        
+        // 错误时也强制隐藏加载模态框
+        console.log('错误发生，强制隐藏模态框...');
+        
+        if (loadingModal) {
+            try {
+                loadingModal.hide();
+            } catch (e) {
+                console.warn('Bootstrap模态框隐藏失败:', e);
+            }
+        }
+        
+        const modalElem = document.getElementById('loadingModal');
+        if (modalElem) {
+            modalElem.style.display = 'none';
+            modalElem.classList.remove('show', 'fade');
+            modalElem.setAttribute('aria-hidden', 'true');
+        }
+        
+        document.querySelectorAll('.modal-backdrop').forEach(backdrop => {
+            backdrop.remove();
+        });
+        document.body.classList.remove('modal-open');
+        document.body.style.paddingRight = '';
+        document.body.style.overflow = '';
+        
+        console.log('✅ 错误处理中的模态框清理完成');
+        
+        showError('加载数据失败: ' + error.message);
+        
+        // 显示错误状态
+        document.getElementById('entities-list').innerHTML = `
+            <div class="text-center text-danger p-4">
+                <i class="fas fa-exclamation-triangle fa-2x"></i>
+                <p class="mt-2">数据加载失败</p>
+                <button class="btn btn-outline-primary btn-sm" onclick="loadKnowledgeGraphData()">重试</button>
+            </div>
+        `;
+        
+        document.getElementById('relations-list').innerHTML = `
+            <div class="text-center text-danger p-4">
+                <i class="fas fa-exclamation-triangle fa-2x"></i>
+                <p class="mt-2">数据加载失败</p>
+                <button class="btn btn-outline-primary btn-sm" onclick="loadKnowledgeGraphData()">重试</button>
+            </div>
+        `;
+    }
+}
+
+// 更新统计信息显示
+function updateStatsDisplay() {
+    const stats = currentData.stats;
+    console.log('更新统计显示，stats数据:', stats);
+    
+    // 强制更新DOM元素
+    const entityCountElement = document.getElementById('entity-count');
+    const relationCountElement = document.getElementById('relation-count');
+    const tripleCountElement = document.getElementById('triple-count');
+    const querySpeedElement = document.getElementById('query-speed');
+    
+    if (entityCountElement) {
+        entityCountElement.textContent = stats.total_entities || 0;
+        console.log('实体数更新:', stats.total_entities);
+    }
+    
+    if (relationCountElement) {
+        relationCountElement.textContent = stats.total_relations || 0;
+        console.log('关系数更新:', stats.total_relations);
+    }
+    
+    if (tripleCountElement) {
+        // 优先使用API返回的准确三元组数量
+        const tripleCount = stats.total_triples || 
+                           (stats.performance_stats && stats.performance_stats.triples_stored) || 
+                           stats.triples_stored ||
+                           0; // 移除错误的估算逻辑
+        tripleCountElement.textContent = tripleCount;
+        console.log('三元组数更新:', tripleCount, '来源数据:', {
+            total_triples: stats.total_triples,
+            performance_triples: stats.performance_stats?.triples_stored,
+            stats_triples: stats.triples_stored
+        });
+    }
+    
+    if (querySpeedElement) {
+        const queryTime = (stats.performance_stats && stats.performance_stats.avg_query_time_ms) || 
+                         stats.avg_query_time_ms || 
+                         stats.avg_query_time || 
+                         '-';
+        querySpeedElement.textContent = queryTime;
+        console.log('查询速度更新:', queryTime);
+    }
+    
+    console.log('统计显示更新完成:', {
+        entities: stats.total_entities,
+        relations: stats.total_relations,
+        DOM_updated: true
+    });
+}
+
+// 更新实体列表
+function updateEntitiesList() {
+    const container = document.getElementById('entities-list');
+    const entities = currentData.entities;
+    
+    console.log('更新实体列表，实体数据:', entities);
+    console.log('实体数量:', entities.length);
+
+    if (entities.length === 0) {
+        container.innerHTML = `
+            <div class="text-center text-muted p-4">
+                <i class="fas fa-database fa-2x"></i>
+                <p class="mt-2">暂无实体数据</p>
+                <button class="btn btn-outline-primary btn-sm mt-2" onclick="loadKnowledgeGraphData()">重新加载</button>
+            </div>
+        `;
+        return;
+    }
+
+    const html = entities.map(entity => `
+        <div class="entity-item" onclick="selectEntity('${entity.id}')">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <h6 class="mb-1">${entity.label || entity.id}</h6>
+                    <span class="entity-type-badge badge bg-primary">${entity.type || 'Unknown'}</span>
+                </div>
+                <small class="text-muted">${entity.confidence ? (entity.confidence * 100).toFixed(1) + '%' : ''}</small>
+            </div>
+            <p class="text-muted small mb-0 mt-2">${entity.description || '无描述信息'}</p>
+        </div>
+    `).join('');
+
+    container.innerHTML = html;
+}
+
+// 更新关系列表
+function updateRelationsList() {
+    const container = document.getElementById('relations-list');
+    const relations = currentData.relations;
+    
+    console.log('更新关系列表，关系数据:', relations);
+    console.log('关系数量:', relations.length);
+
+    if (relations.length === 0) {
+        container.innerHTML = `
+            <div class="text-center text-muted p-4">
+                <i class="fas fa-link fa-2x"></i>
+                <p class="mt-2">暂无关系数据</p>
+                <button class="btn btn-outline-primary btn-sm mt-2" onclick="loadKnowledgeGraphData()">重新加载</button>
+            </div>
+        `;
+        return;
+    }
+
+    const html = relations.map((relation, index) => `
+        <div class="relation-item" onclick="selectRelation('${index}')">
+            <div class="d-flex justify-content-between align-items-start">
+                <div class="flex-grow-1">
+                    <div class="relation-display">
+                        <span class="subject text-primary">${relation.subject?.label || 'Unknown'}</span>
+                        <i class="fas fa-arrow-right mx-2 text-muted"></i>
+                        <span class="predicate badge badge-primary">${relation.predicate?.type || 'Unknown'}</span>
+                        <i class="fas fa-arrow-right mx-2 text-muted"></i>
+                        <span class="object text-success">${relation.object?.label || 'Unknown'}</span>
+                    </div>
+                    <div class="mt-1">
+                        <small class="text-muted">
+                            ${relation.subject?.type || 'Unknown'} → ${relation.object?.type || 'Unknown'}
+                        </small>
+                    </div>
+                </div>
+                <small class="relation-confidence">${relation.predicate?.confidence ? (relation.predicate.confidence * 100).toFixed(1) + '%' : ''}</small>
+            </div>
+        </div>
+    `).join('');
+
+    container.innerHTML = html;
+}
+
+// 选择实体
+function selectEntity(entityId) {
+    // 移除之前的选择
+    document.querySelectorAll('.entity-item.selected').forEach(item => {
+        item.classList.remove('selected');
+    });
+
+    // 选择当前实体
+    event.target.closest('.entity-item').classList.add('selected');
+
+    // 查找实体数据
+    const entity = currentData.entities.find(e => e.id === entityId);
+    if (entity) {
+        showEntityDetails(entity);
+    }
+}
+
+// 选择关系
+function selectRelation(relationId) {
+    // 移除之前的选择
+    document.querySelectorAll('.relation-item.selected').forEach(item => {
+        item.classList.remove('selected');
+    });
+
+    // 选择当前关系
+    event.target.closest('.relation-item').classList.add('selected');
+
+    // 查找关系数据
+    const relation = currentData.relations.find(r => r.id === relationId);
+    if (relation) {
+        showRelationDetails(relation);
+    }
+}
+
+// 显示实体详情
+function showEntityDetails(entity) {
+    const container = document.getElementById('detail-panel');
+    const properties = entity.properties || {};
+
+    const html = `
+        <div class="detail-section">
+            <h6><i class="fas fa-circle text-primary"></i> 实体信息</h6>
+            <table class="table table-sm">
+                <tr><td><strong>ID:</strong></td><td>${entity.id}</td></tr>
+                <tr><td><strong>标签:</strong></td><td>${entity.label || '无'}</td></tr>
+                <tr><td><strong>类型:</strong></td><td><span class="badge bg-primary">${entity.type}</span></td></tr>
+                <tr><td><strong>置信度:</strong></td><td>${entity.confidence ? (entity.confidence * 100).toFixed(1) + '%' : '无'}</td></tr>
+                <tr><td><strong>描述:</strong></td><td>${entity.description || '无描述'}</td></tr>
+            </table>
+        </div>
+        
+        <div class="detail-section">
+            <h6><i class="fas fa-tags"></i> 属性信息</h6>
+            ${Object.keys(properties).length > 0 ? `
+                <table class="table table-sm">
+                    ${Object.entries(properties).map(([key, value]) => `
+                        <tr><td><strong>${key}:</strong></td><td>${value}</td></tr>
+                    `).join('')}
+                </table>
+            ` : '<p class="text-muted">无属性信息</p>'}
+        </div>
+        
+        <div class="detail-section">
+            <h6><i class="fas fa-clock"></i> 时间信息</h6>
+            <table class="table table-sm">
+                <tr><td><strong>创建时间:</strong></td><td>${entity.created_time || '无'}</td></tr>
+                <tr><td><strong>更新时间:</strong></td><td>${entity.updated_time || '无'}</td></tr>
+            </table>
+        </div>
+    `;
+
+    container.innerHTML = html;
+}
+
+// 显示关系详情
+function showRelationDetails(relation) {
+    const container = document.getElementById('detail-panel');
+    const properties = relation.properties || {};
+
+    const html = `
+        <div class="detail-section">
+            <h6><i class="fas fa-arrow-right text-success"></i> 关系信息</h6>
+            <table class="table table-sm">
+                <tr><td><strong>ID:</strong></td><td>${relation.id}</td></tr>
+                <tr><td><strong>标签:</strong></td><td>${relation.label || '无'}</td></tr>
+                <tr><td><strong>类型:</strong></td><td><span class="badge bg-success">${relation.type}</span></td></tr>
+                <tr><td><strong>置信度:</strong></td><td>${relation.confidence ? (relation.confidence * 100).toFixed(1) + '%' : '无'}</td></tr>
+                <tr><td><strong>定义域:</strong></td><td>${relation.domain || '无'}</td></tr>
+                <tr><td><strong>值域:</strong></td><td>${relation.range || '无'}</td></tr>
+            </table>
+        </div>
+        
+        <div class="detail-section">
+            <h6><i class="fas fa-cogs"></i> 关系特性</h6>
+            <table class="table table-sm">
+                <tr><td><strong>对称性:</strong></td><td>${relation.is_symmetric ? '是' : '否'}</td></tr>
+                <tr><td><strong>传递性:</strong></td><td>${relation.is_transitive ? '是' : '否'}</td></tr>
+                <tr><td><strong>逆关系:</strong></td><td>${relation.inverse_relation || '无'}</td></tr>
+            </table>
+        </div>
+        
+        <div class="detail-section">
+            <h6><i class="fas fa-tags"></i> 属性信息</h6>
+            ${Object.keys(properties).length > 0 ? `
+                <table class="table table-sm">
+                    ${Object.entries(properties).map(([key, value]) => `
+                        <tr><td><strong>${key}:</strong></td><td>${value}</td></tr>
+                    `).join('')}
+                </table>
+            ` : '<p class="text-muted">无属性信息</p>'}
+        </div>
+    `;
+
+    container.innerHTML = html;
+}
+
+// 搜索知识图谱
+async function searchKnowledgeGraph() {
+    const query = document.getElementById('search-input').value.trim();
+    const entityType = document.getElementById('entity-type-filter').value;
+    const relationType = document.getElementById('relation-type-filter').value;
+
+    if (!query && !entityType && !relationType) {
+        showError('请输入搜索条件');
+        return;
+    }
+
+    try {
+        // 构建查询参数
+        const params = new URLSearchParams();
+        if (query) params.append('q', query);
+        if (entityType) params.append('entity_type', entityType);
+        if (relationType) params.append('relation_type', relationType);
+        params.append('limit', '100');
+
+        // 执行搜索
+        const response = await fetch(`/api/kg/falkor/search?${params.toString()}`);
+        const result = await response.json();
+
+        if (result.error) {
+            throw new Error(result.error);
+        }
+
+        // 更新搜索结果
+        currentData.entities = result.entities || [];
+        currentData.relations = result.relations || [];
+
+        updateEntitiesList();
+        updateRelationsList();
+
+        showSuccess(`搜索完成，找到 ${currentData.entities.length} 个实体和 ${currentData.relations.length} 个关系`);
+
+    } catch (error) {
+        console.error('搜索失败:', error);
+        showError('搜索失败: ' + error.message);
+    }
+}
+
+// 刷新数据
+function refreshData() {
+    loadKnowledgeGraphData();
+}
+
+// 导出数据
+function exportData() {
+    const data = {
+        stats: currentData.stats,
+        entities: currentData.entities,
+        relations: currentData.relations,
+        export_time: new Date().toISOString()
+    };
+
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `knowledge_graph_${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    showSuccess('数据导出成功');
+}
+
+// 查看完整图谱
+function viewFullGraph() {
+    // TODO: 实现图谱可视化功能
+    showInfo('图谱可视化功能正在开发中...');
+}
+
+// 工具函数
+function showError(message) {
+    const toast = `
+        <div class="toast align-items-center text-white bg-danger border-0" role="alert">
+            <div class="d-flex">
+                <div class="toast-body">
+                    <i class="fas fa-exclamation-triangle"></i> ${message}
+                </div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+            </div>
+        </div>
+    `;
+    showToast(toast);
+}
+
+function showSuccess(message) {
+    const toast = `
+        <div class="toast align-items-center text-white bg-success border-0" role="alert">
+            <div class="d-flex">
+                <div class="toast-body">
+                    <i class="fas fa-check-circle"></i> ${message}
+                </div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+            </div>
+        </div>
+    `;
+    showToast(toast);
+}
+
+function showInfo(message) {
+    const toast = `
+        <div class="toast align-items-center text-white bg-info border-0" role="alert">
+            <div class="d-flex">
+                <div class="toast-body">
+                    <i class="fas fa-info-circle"></i> ${message}
+                </div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+            </div>
+        </div>
+    `;
+    showToast(toast);
+}
+
+function showToast(toastHtml) {
+    // 创建toast容器（如果不存在）
+    let container = document.getElementById('toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toast-container';
+        container.className = 'toast-container position-fixed top-0 end-0 p-3';
+        container.style.zIndex = '9999';
+        document.body.appendChild(container);
+    }
+
+    // 添加toast
+    container.insertAdjacentHTML('beforeend', toastHtml);
+    const toastElement = container.lastElementChild;
+    const toast = new bootstrap.Toast(toastElement);
+    toast.show();
+
+    // 自动清理
+    toastElement.addEventListener('hidden.bs.toast', () => {
+        toastElement.remove();
+    });
+}
+
+// ============= 删除功能相关 =============
+let deleteAllConfirmModal = null;
+let deleteAllProgressModal = null;
+
+// 初始化删除相关模态框
+document.addEventListener('DOMContentLoaded', function() {
+    deleteAllConfirmModal = new bootstrap.Modal(document.getElementById('deleteAllConfirmModal'));
+    deleteAllProgressModal = new bootstrap.Modal(document.getElementById('deleteAllProgressModal'));
+    
+    // 监听确认复选框变化
+    document.getElementById('confirmDeleteAll').addEventListener('change', function() {
+        document.getElementById('confirmDeleteAllBtn').disabled = !this.checked;
+    });
+});
+
+// 显示删除全部确认对话框
+async function showDeleteAllConfirmation() {
+    try {
+        // 获取删除预览信息
+        const response = await fetch('/api/kg/delete/preview', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({})
+        });
+
+        if (!response.ok) {
+            throw new Error(`获取删除预览失败: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const preview = data.preview;
+
+        // 填充删除确认对话框
+        document.getElementById('delete-all-entities-count').textContent = preview.entities_to_delete || 0;
+        document.getElementById('delete-all-relations-count').textContent = preview.relations_to_delete || 0;
+        document.getElementById('delete-all-graphs-list').textContent = (preview.graphs_affected || []).join(', ');
+
+        // 重置确认状态
+        document.getElementById('confirmDeleteAll').checked = false;
+        document.getElementById('confirmDeleteAllBtn').disabled = true;
+
+        // 显示模态框
+        deleteAllConfirmModal.show();
+
+    } catch (error) {
+        console.error('获取删除预览失败:', error);
+        alert(`获取删除预览失败: ${error.message}`);
+    }
+}
+
+// 执行删除所有操作
+async function executeDeleteAll() {
+    try {
+        // 隐藏确认对话框，显示进度对话框
+        deleteAllConfirmModal.hide();
+        deleteAllProgressModal.show();
+
+        // 执行删除
+        const response = await fetch('/api/kg/delete/all', {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                confirm: true
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`删除失败: ${response.status}`);
+        }
+
+        const result = await response.json();
+
+        // 隐藏进度对话框
+        deleteAllProgressModal.hide();
+
+        // 显示成功消息
+        alert(`✅ 所有知识图谱数据已成功删除！\n删除了 ${result.projects_deleted}/${result.total_projects} 个项目`);
+
+        // 刷新页面数据
+        location.reload();
+
+        console.log('删除操作完成:', result);
+
+    } catch (error) {
+        // 隐藏进度对话框
+        deleteAllProgressModal.hide();
+        
+        console.error('删除操作失败:', error);
+        alert(`❌ 删除失败: ${error.message}`);
+    }
+}
+</script>
+
+<!-- 删除全部确认模态框 -->
+<div class="modal fade" id="deleteAllConfirmModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title text-danger">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    确认删除所有知识图谱
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-danger">
+                    <strong>⚠️ 危险操作：</strong>此操作将删除所有知识图谱数据，包括所有项目！此操作不可逆！
+                </div>
+                <p>您即将删除<strong>所有知识图谱数据</strong>，包括：</p>
+                <ul>
+                    <li>实体数据：<span id="delete-all-entities-count">-</span> 个</li>
+                    <li>关系数据：<span id="delete-all-relations-count">-</span> 个</li>
+                    <li>涉及图谱：<span id="delete-all-graphs-list">-</span></li>
+                </ul>
+                <div class="form-check mt-3">
+                    <input class="form-check-input" type="checkbox" id="confirmDeleteAll">
+                    <label class="form-check-label text-danger" for="confirmDeleteAll">
+                        <strong>我确认要删除所有知识图谱数据</strong>
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-danger" id="confirmDeleteAllBtn" onclick="executeDeleteAll()" disabled>
+                    <i class="fas fa-trash-alt me-1"></i>
+                    确认删除所有数据
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 删除全部进度模态框 -->
+<div class="modal fade" id="deleteAllProgressModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-body text-center py-4">
+                <div class="spinner-border text-danger mb-3" role="status">
+                    <span class="visually-hidden">删除中...</span>
+                </div>
+                <h5>正在删除所有知识图谱数据...</h5>
+                <p class="text-muted mb-0">请稍候，正在清理所有数据</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}

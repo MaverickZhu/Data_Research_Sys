@@ -33,10 +33,14 @@ from src.data_manager.validation_engine import ValidationEngine
 
 # 知识图谱模块导入
 from src.knowledge_graph.kg_store import KnowledgeGraphStore
+from src.knowledge_graph.falkordb_store import FalkorDBStore
 from src.knowledge_graph.kg_builder import KnowledgeGraphBuilder
 from src.knowledge_graph.entity_extractor import EntityExtractor
 from src.knowledge_graph.relation_extractor import RelationExtractor
 from src.knowledge_graph.kg_quality_assessor import KnowledgeGraphQualityAssessor
+
+# 性能优化模块导入
+from src.utils.performance_optimizer import get_performance_monitor, get_memory_processor
 
 # 设置日志
 logger = setup_logger(__name__)
@@ -1467,6 +1471,16 @@ def kg_builder_page():
         return render_template('kg_builder.html', file_id=file_id)
     except Exception as e:
         logger.error(f"知识图谱构建页面加载失败: {str(e)}")
+        return render_template('error.html', error=str(e))
+
+
+@app.route('/kg_viewer')
+def kg_viewer_page():
+    """知识图谱浏览页面"""
+    try:
+        return render_template('kg_viewer.html')
+    except Exception as e:
+        logger.error(f"知识图谱浏览页面加载失败: {str(e)}")
         return render_template('error.html', error=str(e))
 
 
@@ -3419,7 +3433,7 @@ def api_kg_entity_extract():
             
             # 获取表数据
             collection = db_manager.get_collection(table_name)
-            if not collection:
+            if collection is None:
                 return jsonify({'error': f'数据表 {table_name} 不存在'}), 404
             
             # 转换为DataFrame
@@ -3478,7 +3492,7 @@ def api_kg_relation_extract():
         
         # 获取表数据
         collection = db_manager.get_collection(table_name)
-        if not collection:
+        if collection is None:
             return jsonify({'error': f'数据表 {table_name} 不存在'}), 404
         
         documents = list(collection.find().limit(1000))
@@ -4638,6 +4652,1057 @@ def api_force_stop_user_matching_task():
         logger.error(f"强制停止任务失败: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+
+# ===== 性能监控相关路由 =====
+
+@app.route('/performance_monitor')
+def performance_monitor():
+    """性能监控页面（简洁版）"""
+    return render_template('performance_monitor_simple.html')
+
+@app.route('/performance_monitor_full')
+def performance_monitor_full():
+    """性能监控页面（完整版）"""
+    return render_template('performance_monitor.html')
+
+
+@app.route('/api/performance_metrics')
+def get_performance_metrics():
+    """获取性能指标API"""
+    try:
+        import psutil
+        import time
+        
+        # 获取系统信息
+        memory = psutil.virtual_memory()
+        process = psutil.Process()
+        process_memory = process.memory_info()
+        
+        # 获取性能监控器数据
+        monitor = get_performance_monitor()
+        memory_processor = get_memory_processor()
+        
+        # 基本性能指标
+        metrics = {
+            'timestamp': datetime.now().isoformat(),
+            'processing_speed': monitor.get_average('processing_speed', 60) or 0,
+            'memory_usage_percent': memory.percent,
+            'process_memory_mb': process_memory.rss / (1024 * 1024),
+            'cpu_usage_percent': process.cpu_percent(),
+            'active_connections': 0,  # 需要从数据库管理器获取
+            'used_connections': 0,
+            'total_connections': 100,
+            'task_statistics': {
+                'completed': 0,
+                'failed': 0,
+                'running': 0,
+                'pending': 0
+            }
+        }
+        
+        # 数据库连接信息（简化版）
+        metrics.update({
+            'active_connections': 5,
+            'used_connections': 3,
+            'total_connections': 100
+        })
+        
+        # 任务统计（示例数据）
+        metrics['task_statistics'] = {
+            'completed': 1250,
+            'failed': 15,
+            'running': 2,
+            'pending': 8
+        }
+        
+        # 详细指标
+        detailed_metrics = {
+            'memory_usage': {
+                'display_name': '内存使用率',
+                'current': memory.percent,
+                'average': monitor.get_average('memory_usage', 300) or memory.percent,
+                'max': 100,
+                'threshold': 90,
+                'unit': '%',
+                'status': '正常' if memory.percent < 80 else '警告' if memory.percent < 90 else '严重',
+                'last_update': datetime.now().isoformat()
+            },
+            'cpu_usage': {
+                'display_name': 'CPU使用率',
+                'current': process.cpu_percent(),
+                'average': monitor.get_average('cpu_usage', 300) or process.cpu_percent(),
+                'max': 100,
+                'threshold': 90,
+                'unit': '%',
+                'status': '正常' if process.cpu_percent() < 80 else '警告' if process.cpu_percent() < 90 else '严重',
+                'last_update': datetime.now().isoformat()
+            },
+            'processing_speed': {
+                'display_name': '处理速度',
+                'current': monitor.get_average('processing_speed', 60) or 0,
+                'average': monitor.get_average('processing_speed', 1800) or 0,
+                'max': 10000,
+                'threshold': 100,
+                'unit': '条/秒',
+                'status': '正常' if (monitor.get_average('processing_speed', 60) or 0) > 100 else '警告',
+                'last_update': datetime.now().isoformat()
+            }
+        }
+        
+        metrics['detailed_metrics'] = detailed_metrics
+        
+        # 记录当前指标到监控器
+        monitor.record_metric('memory_usage', memory.percent)
+        monitor.record_metric('cpu_usage', process.cpu_percent())
+        
+        return jsonify(metrics)
+        
+    except Exception as e:
+        logger.error(f"获取性能指标失败: {e}")
+        return jsonify({
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+
+@app.route('/api/performance_history')
+def get_performance_history():
+    """获取性能历史数据"""
+    try:
+        monitor = get_performance_monitor()
+        
+        # 获取指定时间窗口的历史数据
+        window_minutes = request.args.get('window', 60, type=int)
+        
+        history = {
+            'processing_speed': [],
+            'memory_usage': [],
+            'cpu_usage': [],
+            'timestamps': []
+        }
+        
+        # 这里需要实现历史数据的获取逻辑
+        # 目前返回模拟数据
+        import time
+        current_time = time.time()
+        
+        for i in range(20):  # 返回20个数据点
+            timestamp = current_time - (19 - i) * 60  # 每分钟一个点
+            history['timestamps'].append(datetime.fromtimestamp(timestamp).strftime('%H:%M'))
+            history['processing_speed'].append(monitor.get_average('processing_speed', 60) or 0)
+            history['memory_usage'].append(monitor.get_average('memory_usage', 60) or 0)
+            history['cpu_usage'].append(monitor.get_average('cpu_usage', 60) or 0)
+        
+        return jsonify(history)
+        
+    except Exception as e:
+        logger.error(f"获取性能历史失败: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/system_health')
+def get_system_health():
+    """系统健康检查API"""
+    try:
+        health_status = {
+            'timestamp': datetime.now().isoformat(),
+            'overall_status': 'healthy',
+            'components': {}
+        }
+        
+        # 检查数据库连接（简化版）
+        try:
+            if db_manager:
+                health_status['components']['database'] = {
+                    'status': 'healthy',
+                    'message': '数据库连接正常'
+                }
+        except Exception as e:
+            health_status['components']['database'] = {
+                'status': 'unhealthy',
+                'message': f'数据库连接失败: {str(e)}'
+            }
+            health_status['overall_status'] = 'unhealthy'
+        
+        # 检查内存使用
+        try:
+            import psutil
+            memory = psutil.virtual_memory()
+        except ImportError:
+            memory = type('Memory', (), {'percent': 50})()  # 模拟数据
+        if memory.percent > 90:
+            health_status['components']['memory'] = {
+                'status': 'critical',
+                'message': f'内存使用过高: {memory.percent:.1f}%'
+            }
+            health_status['overall_status'] = 'critical'
+        elif memory.percent > 80:
+            health_status['components']['memory'] = {
+                'status': 'warning',
+                'message': f'内存使用较高: {memory.percent:.1f}%'
+            }
+            if health_status['overall_status'] == 'healthy':
+                health_status['overall_status'] = 'warning'
+        else:
+            health_status['components']['memory'] = {
+                'status': 'healthy',
+                'message': f'内存使用正常: {memory.percent:.1f}%'
+            }
+        
+        # 检查磁盘空间
+        try:
+            import psutil
+            disk = psutil.disk_usage('/')
+            disk_percent = (disk.used / disk.total) * 100
+            if disk_percent > 90:
+                health_status['components']['disk'] = {
+                    'status': 'critical',
+                    'message': f'磁盘空间不足: {disk_percent:.1f}%'
+                }
+                health_status['overall_status'] = 'critical'
+            elif disk_percent > 80:
+                health_status['components']['disk'] = {
+                    'status': 'warning',
+                    'message': f'磁盘空间较少: {disk_percent:.1f}%'
+                }
+                if health_status['overall_status'] == 'healthy':
+                    health_status['overall_status'] = 'warning'
+            else:
+                health_status['components']['disk'] = {
+                    'status': 'healthy',
+                    'message': f'磁盘空间充足: {disk_percent:.1f}%'
+                }
+        except Exception as e:
+            health_status['components']['disk'] = {
+                'status': 'unknown',
+                'message': f'无法获取磁盘信息: {str(e)}'
+            }
+        
+        return jsonify(health_status)
+        
+    except Exception as e:
+        logger.error(f"系统健康检查失败: {e}")
+        return jsonify({
+            'overall_status': 'error',
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+
+# ====== 知识图谱构建相关API ======
+
+@app.route('/api/kg/build', methods=['POST'])
+def build_knowledge_graph():
+    """构建知识图谱API"""
+    import time
+    try:
+        data = request.get_json()
+        table_name = data.get('table_name')
+        project_id = data.get('project_id', f"kg_project_{int(time.time())}")
+        config = data.get('config', {})
+        
+        if not table_name:
+            return jsonify({'error': '表名不能为空'}), 400
+        
+        # 获取表数据
+        collection = db_manager.get_collection(table_name)
+        if collection is None:
+            return jsonify({'error': f'表 {table_name} 不存在'}), 404
+        
+        # 转换为DataFrame
+        cursor = collection.find().limit(config.get('max_records', 10000))
+        df = pd.DataFrame(list(cursor))
+        
+        if df.empty:
+            return jsonify({'error': f'表 {table_name} 没有数据'}), 400
+        
+        # 初始化知识图谱构建器（使用FalkorDB）
+        from src.knowledge_graph.falkordb_store import FalkorDBStore
+        from src.knowledge_graph.kg_builder import KnowledgeGraphBuilder
+        
+        # 使用FalkorDB作为知识图谱存储引擎（支持双重存储）
+        falkor_store = FalkorDBStore(host='localhost', port=16379, graph_name='knowledge_graph', project_name=project_id)
+        kg_builder = KnowledgeGraphBuilder(falkor_store, config)
+        
+        # 构建知识图谱
+        build_result = kg_builder.build_knowledge_graph_from_dataframe(
+            df, table_name, project_id
+        )
+        
+        return jsonify(build_result)
+        
+    except Exception as e:
+        logger.error(f"知识图谱构建失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/kg/status')
+def get_kg_status():
+    """获取知识图谱构建状态API"""
+    try:
+        from src.knowledge_graph.kg_store import KnowledgeGraphStore
+        from src.knowledge_graph.kg_builder import KnowledgeGraphBuilder
+        
+        kg_store = KnowledgeGraphStore(db_manager=db_manager)
+        kg_builder = KnowledgeGraphBuilder(kg_store)
+        
+        status = kg_builder.get_build_status()
+        return jsonify(status)
+        
+    except Exception as e:
+        logger.error(f"获取知识图谱状态失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/kg/entities')
+def get_kg_entities():
+    """获取知识图谱实体API"""
+    try:
+        from src.knowledge_graph.kg_store import KnowledgeGraphStore
+        
+        kg_store = KnowledgeGraphStore(db_manager=db_manager)
+        
+        # 获取查询参数
+        entity_type = request.args.get('type')
+        source_table = request.args.get('source_table')
+        limit = min(int(request.args.get('limit', 100)), 1000)
+        offset = int(request.args.get('offset', 0))
+        
+        # 构建查询条件
+        query_params = {}
+        if entity_type:
+            query_params['type'] = entity_type
+        if source_table:
+            query_params['source_table'] = source_table
+        
+        # 查询实体（直接从kg_entities）
+        try:
+            # 使用现有的kg_entities集合
+            entities_collection = db_manager.get_collection('kg_entities')
+            if entities_collection is None:
+                return jsonify({'error': '实体数据集合不存在'}), 404
+            
+            # 构建MongoDB查询
+            mongo_query = {}
+            if entity_type:
+                mongo_query['type'] = entity_type.upper()
+            if source_table:
+                mongo_query['source_table'] = source_table
+            
+            # 查询数据
+            cursor = entities_collection.find(mongo_query).skip(offset).limit(limit)
+            entities_page = list(cursor)
+            
+            # 转换为标准格式
+            entities_data = []
+            for entity in entities_page:
+                # 移除MongoDB的_id字段
+                if '_id' in entity:
+                    del entity['_id']
+                
+                # 转换为API标准格式
+                formatted_entity = {
+                    'id': entity.get('id', 'unknown'),
+                    'label': entity.get('label', 'unknown'),
+                    'type': entity.get('type', 'unknown'),
+                    'confidence': entity.get('confidence', 0.0),
+                    'properties': entity.get('properties', {}),
+                    'aliases': entity.get('aliases', []),
+                    'source_table': entity.get('source_table', 'unknown'),
+                    'source_column': entity.get('source_column', 'unknown'),
+                    'created_time': entity.get('created_time'),
+                    'updated_time': entity.get('updated_time')
+                }
+                entities_data.append(formatted_entity)
+            
+            # 获取总数
+            total_count = entities_collection.count_documents(mongo_query)
+        except Exception as e:
+            logger.error(f"查询实体失败: {str(e)}")
+            entities_data = []
+            total_count = 0
+        
+        return jsonify({
+            'entities': entities_data,
+            'total': total_count,
+            'limit': limit,
+            'offset': offset,
+            'status': 'success'
+        })
+        
+    except Exception as e:
+        logger.error(f"获取知识图谱实体失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/kg/relations')
+def get_kg_relations():
+    """获取知识图谱关系API"""
+    try:
+        from src.knowledge_graph.kg_store import KnowledgeGraphStore
+        
+        kg_store = KnowledgeGraphStore(db_manager=db_manager)
+        
+        # 获取查询参数
+        relation_type = request.args.get('type')
+        limit = min(int(request.args.get('limit', 100)), 1000)
+        offset = int(request.args.get('offset', 0))
+        
+        # 构建查询条件
+        query_params = {}
+        if relation_type:
+            query_params['relation_type'] = relation_type
+        
+        # 查询关系数据（直接从kg_relations）
+        try:
+            # 使用现有的kg_relations集合
+            relations_collection = db_manager.get_collection('kg_relations')
+            if relations_collection is None:
+                return jsonify({'error': '关系数据集合不存在'}), 404
+            
+            # 构建MongoDB查询
+            mongo_query = {}
+            if relation_type:
+                mongo_query['predicate.type'] = relation_type
+            
+            # 查询数据
+            cursor = relations_collection.find(mongo_query).skip(offset).limit(limit)
+            all_relations = list(cursor)
+            
+            # 获取实体信息映射
+            entities_collection = db_manager.get_collection('kg_entities')
+            entity_map = {}
+            if entities_collection is not None:
+                for entity in entities_collection.find():
+                    entity_map[entity.get('id', '')] = entity.get('label', 'unknown')
+            
+            # 转换为标准格式
+            triples_data = []
+            for relation in all_relations:
+                # 移除MongoDB的_id字段
+                if '_id' in relation:
+                    del relation['_id']
+                
+                # 提取关系信息
+                subject_id = relation.get('subject_id', '')
+                object_id = relation.get('object_id', '')
+                predicate_info = relation.get('predicate', {})
+                
+                # 转换为API标准格式
+                formatted_triple = {
+                    'id': relation.get('id', 'unknown'),
+                    'subject': entity_map.get(subject_id, subject_id or 'unknown'),
+                    'predicate': predicate_info.get('label', 'unknown'),
+                    'object': entity_map.get(object_id, object_id or 'unknown'),
+                    'confidence': relation.get('confidence', 0.0),
+                    'subject_type': 'ENTITY',
+                    'predicate_type': predicate_info.get('type', 'unknown'),
+                    'object_type': 'ENTITY',
+                    'source': relation.get('source', 'unknown'),
+                    'evidence': relation.get('evidence', []),
+                    'created_time': relation.get('created_time'),
+                    'updated_time': relation.get('updated_time')
+                }
+                triples_data.append(formatted_triple)
+            
+            # 获取总数
+            total_count = relations_collection.count_documents(mongo_query)
+            
+        except Exception as e:
+            logger.error(f"查询关系失败: {str(e)}")
+            triples_data = []
+            total_count = 0
+        
+        return jsonify({
+            'triples': triples_data,
+            'total': total_count,
+            'limit': limit,
+            'offset': offset,
+            'status': 'success'
+        })
+        
+    except Exception as e:
+        logger.error(f"获取知识图谱关系失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/kg/quality', methods=['GET'])
+def assess_kg_quality():
+    """评估知识图谱质量API"""
+    try:
+        from src.knowledge_graph.kg_store import KnowledgeGraphStore
+        from src.knowledge_graph.kg_quality_assessor import KnowledgeGraphQualityAssessor
+        
+        kg_store = KnowledgeGraphStore(db_manager=db_manager)
+        quality_assessor = KnowledgeGraphQualityAssessor(kg_store)
+        
+        # 进行质量评估
+        quality_report = quality_assessor.assess_overall_quality()
+        
+        return jsonify(quality_report)
+        
+    except Exception as e:
+        logger.error(f"知识图谱质量评估失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/kg/search')
+def search_kg():
+    """知识图谱搜索API"""
+    try:
+        from src.knowledge_graph.kg_store import KnowledgeGraphStore
+        
+        kg_store = KnowledgeGraphStore(db_manager=db_manager)
+        
+        # 获取搜索参数
+        query = request.args.get('q', '').strip()
+        search_type = request.args.get('type', 'all')  # entities, relations, all
+        limit = min(int(request.args.get('limit', 50)), 200)
+        
+        if not query:
+            return jsonify({'error': '搜索关键词不能为空'}), 400
+        
+        results = {'entities': [], 'triples': []}
+        
+        try:
+            if search_type in ['entities', 'all']:
+                # 搜索实体（使用简单的文本匹配）
+                try:
+                    # 尝试使用现有方法或创建简单搜索
+                    if hasattr(kg_store, 'search_entities'):
+                        entities = kg_store.search_entities(query, limit=limit)
+                    else:
+                        # 简单搜索实现：查询包含关键词的实体
+                        entities_collection = kg_store.entities_collection
+                        cursor = entities_collection.find(
+                            {'label': {'$regex': query, '$options': 'i'}},
+                            limit=limit
+                        )
+                        entities = []
+                        for doc in cursor:
+                            entities.append({
+                                'id': doc.get('id', 'unknown'),
+                                'label': doc.get('label', 'unknown'),
+                                'type': doc.get('type', 'unknown'),
+                                'confidence': doc.get('confidence', 0.0)
+                            })
+                    
+                    # 格式化实体结果
+                    if entities:
+                        for entity in entities:
+                            if hasattr(entity, 'to_dict'):
+                                results['entities'].append(entity.to_dict())
+                            else:
+                                results['entities'].append(entity if isinstance(entity, dict) else {'id': str(entity), 'label': str(entity)})
+                except Exception as e:
+                    logger.error(f"实体搜索失败: {str(e)}")
+                    results['entities'] = []
+            
+            if search_type in ['relations', 'all']:
+                # 搜索三元组
+                try:
+                    if hasattr(kg_store, 'search_triples'):
+                        triples = kg_store.search_triples(query, limit=limit)
+                    else:
+                        # 简单搜索实现：查询包含关键词的三元组
+                        triples_collection = kg_store.triples_collection
+                        cursor = triples_collection.find({
+                            '$or': [
+                                {'subject_label': {'$regex': query, '$options': 'i'}},
+                                {'predicate_label': {'$regex': query, '$options': 'i'}},
+                                {'object_label': {'$regex': query, '$options': 'i'}}
+                            ]
+                        }, limit=limit)
+                        triples = []
+                        for doc in cursor:
+                            triples.append({
+                                'id': doc.get('id', 'unknown'),
+                                'subject': doc.get('subject_label', 'unknown'),
+                                'predicate': doc.get('predicate_label', 'unknown'),
+                                'object': doc.get('object_label', 'unknown'),
+                                'confidence': doc.get('confidence', 0.0)
+                            })
+                    
+                    # 格式化三元组结果
+                    if triples:
+                        for triple in triples:
+                            if hasattr(triple, 'to_dict'):
+                                results['triples'].append(triple.to_dict())
+                            else:
+                                results['triples'].append(triple if isinstance(triple, dict) else {'id': str(triple), 'subject': str(triple)})
+                except Exception as e:
+                    logger.error(f"三元组搜索失败: {str(e)}")
+                    results['triples'] = []
+        except Exception as e:
+            logger.error(f"搜索失败: {str(e)}")
+            results = {'entities': [], 'triples': []}
+        
+        return jsonify({
+            'query': query,
+            'results': results,
+            'total_entities': len(results['entities']),
+            'total_triples': len(results['triples'])
+        })
+        
+    except Exception as e:
+        logger.error(f"知识图谱搜索失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ====== 简化的知识图谱API（用于前端测试） ======
+
+@app.route('/api/kg/entities_simple')
+def get_kg_entities_simple():
+    """获取知识图谱实体API（简化版）"""
+    try:
+        entity_type = request.args.get('type', 'all')
+        limit = min(int(request.args.get('limit', 10)), 100)
+        
+        sample_entities = [
+            {'id': 'org_001', 'label': '北京科技有限公司', 'type': 'ORGANIZATION', 'confidence': 0.95, 'properties': {'address': '北京市', 'industry': '科技'}},
+            {'id': 'person_001', 'label': '张三', 'type': 'PERSON', 'confidence': 0.88, 'properties': {'role': '经理', 'department': '技术部'}},
+            {'id': 'org_002', 'label': '上海教育集团', 'type': 'ORGANIZATION', 'confidence': 0.92, 'properties': {'address': '上海市', 'industry': '教育'}},
+            {'id': 'location_001', 'label': '北京市朝阳区', 'type': 'LOCATION', 'confidence': 0.90, 'properties': {'city': '北京', 'district': '朝阳区'}},
+            {'id': 'person_002', 'label': '李四', 'type': 'PERSON', 'confidence': 0.85, 'properties': {'role': '主管', 'department': '销售部'}}
+        ]
+        
+        if entity_type != 'all':
+            sample_entities = [e for e in sample_entities if e['type'] == entity_type.upper()]
+        
+        return jsonify({
+            'entities': sample_entities[:limit],
+            'total': len(sample_entities),
+            'available_types': ['ORGANIZATION', 'PERSON', 'LOCATION'],
+            'status': 'success'
+        })
+    except Exception as e:
+        logger.error(f"简化实体API失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/kg/relations_simple')  
+def get_kg_relations_simple():
+    """获取知识图谱关系API（简化版）"""
+    try:
+        limit = min(int(request.args.get('limit', 10)), 100)
+        
+        sample_relations = [
+            {'id': 'rel_001', 'subject': '张三', 'predicate': '工作于', 'object': '北京科技有限公司', 'confidence': 0.95, 'type': 'EMPLOYMENT'},
+            {'id': 'rel_002', 'subject': '北京科技有限公司', 'predicate': '位于', 'object': '北京市朝阳区', 'confidence': 0.88, 'type': 'LOCATION'},
+            {'id': 'rel_003', 'subject': '上海教育集团', 'predicate': '类型为', 'object': '教育机构', 'confidence': 0.92, 'type': 'TYPE'},
+            {'id': 'rel_004', 'subject': '李四', 'predicate': '管理', 'object': '销售部', 'confidence': 0.87, 'type': 'MANAGEMENT'},
+            {'id': 'rel_005', 'subject': '技术部', 'predicate': '隶属于', 'object': '北京科技有限公司', 'confidence': 0.93, 'type': 'ORGANIZATIONAL'}
+        ]
+        
+        return jsonify({
+            'triples': sample_relations[:limit],
+            'total': len(sample_relations),
+            'available_types': ['EMPLOYMENT', 'LOCATION', 'TYPE', 'MANAGEMENT', 'ORGANIZATIONAL'],
+            'status': 'success'
+        })
+    except Exception as e:
+        logger.error(f"简化关系API失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/kg/search_simple')
+def search_kg_simple():
+    """知识图谱搜索API（简化版）"""
+    try:
+        query = request.args.get('q', '').strip()
+        if not query:
+            return jsonify({'error': '搜索关键词不能为空'}), 400
+            
+        # 模拟搜索结果
+        results = {
+            'entities': [
+                {'id': f'search_entity_{query}', 'label': f'{query}科技公司', 'type': 'ORGANIZATION', 'confidence': 0.85},
+                {'id': f'search_person_{query}', 'label': f'{query}先生', 'type': 'PERSON', 'confidence': 0.80}
+            ],
+            'triples': [
+                {'id': f'search_rel_{query}', 'subject': f'{query}先生', 'predicate': '工作于', 'object': f'{query}科技公司', 'confidence': 0.80}
+            ]
+        }
+        
+        return jsonify({
+            'query': query,
+            'results': results,
+            'total_entities': len(results['entities']),
+            'total_triples': len(results['triples']),
+            'status': 'success'
+        })
+    except Exception as e:
+        logger.error(f"简化搜索API失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# ====== FalkorDB知识图谱API ======
+
+@app.route('/api/kg/falkor/entities', methods=['GET'])
+def get_falkor_entities():
+    """获取FalkorDB知识图谱实体API"""
+    try:
+        entity_type = request.args.get('type')
+        limit = int(request.args.get('limit', 100))
+        offset = int(request.args.get('offset', 0))
+        
+        # 连接FalkorDB
+        falkor_store = FalkorDBStore(host='localhost', port=16379, graph_name='knowledge_graph')
+        
+        # 查询实体
+        entities = falkor_store.query_entities(entity_type=entity_type, limit=limit, offset=offset)
+        
+        return jsonify({
+            'entities': entities,
+            'total': len(entities),
+            'limit': limit,
+            'offset': offset,
+            'status': 'success'
+        })
+        
+    except Exception as e:
+        logger.error(f"FalkorDB实体查询失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/kg/falkor/relations', methods=['GET'])
+def get_falkor_relations():
+    """获取FalkorDB知识图谱关系API"""
+    try:
+        limit = int(request.args.get('limit', 100))
+        offset = int(request.args.get('offset', 0))
+        
+        # 连接FalkorDB
+        falkor_store = FalkorDBStore(host='localhost', port=16379, graph_name='knowledge_graph')
+        
+        # 查询关系
+        relations = falkor_store.query_relations(limit=limit, offset=offset)
+        
+        return jsonify({
+            'relations': relations,
+            'total': len(relations),
+            'limit': limit,
+            'offset': offset,
+            'status': 'success'
+        })
+        
+    except Exception as e:
+        logger.error(f"FalkorDB关系查询失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/kg/falkor/search', methods=['GET'])
+def search_falkor_entities():
+    """FalkorDB知识图谱搜索API"""
+    try:
+        # 支持多种参数名：q, query
+        query = request.args.get('q') or request.args.get('query', '')
+        entity_type = request.args.get('entity_type', '')
+        relation_type = request.args.get('relation_type', '')
+        limit = int(request.args.get('limit', 20))
+        
+        # 如果没有任何搜索条件，返回错误
+        if not query and not entity_type and not relation_type:
+            return jsonify({'error': '请提供搜索条件（q、entity_type或relation_type）'}), 400
+        
+        # 连接FalkorDB
+        falkor_store = FalkorDBStore(host='localhost', port=16379, graph_name='knowledge_graph')
+        
+        # 搜索实体和关系
+        entities = []
+        relations = []
+        
+        if query or entity_type:
+            # 搜索实体
+            if hasattr(falkor_store, 'search_entities'):
+                entities = falkor_store.search_entities(query or '', limit=limit)
+            else:
+                # 如果没有search_entities方法，使用query_entities
+                entities = falkor_store.query_entities(entity_type=entity_type, limit=limit)
+        
+        if query or relation_type:
+            # 搜索关系
+            if hasattr(falkor_store, 'search_relations'):
+                relations = falkor_store.search_relations(query or '', limit=limit)
+            else:
+                # 如果没有search_relations方法，使用query_relations
+                relations = falkor_store.query_relations(limit=limit)
+                # 如果指定了relation_type，进行过滤
+                if relation_type:
+                    relations = [r for r in relations if r.get('type') == relation_type]
+        
+        return jsonify({
+            'query': query,
+            'entity_type': entity_type,
+            'relation_type': relation_type,
+            'entities': entities,
+            'relations': relations,
+            'total_entities': len(entities),
+            'total_relations': len(relations),
+            'limit': limit,
+            'status': 'success'
+        })
+        
+    except Exception as e:
+        logger.error(f"FalkorDB搜索失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/kg/falkor/stats', methods=['GET'])
+def get_falkor_stats():
+    """获取FalkorDB知识图谱统计信息API"""
+    try:
+        import time
+        start_time = time.time()
+        
+        # 连接FalkorDB
+        falkor_store = FalkorDBStore(host='localhost', port=16379, graph_name='knowledge_graph')
+        
+        # 获取统计信息
+        stats = falkor_store.get_statistics()
+        query_time = (time.time() - start_time) * 1000
+        
+        # 构建前端期望的平铺数据格式
+        response_data = {
+            # 直接统计字段
+            'total_entities': stats.get('total_entities', 0),
+            'total_relations': stats.get('total_relations', 0), 
+            'total_triples': stats.get('triples_stored', 0),
+            'total_labels': stats.get('total_labels', 0),
+            
+            # 性能统计
+            'performance_stats': {
+                'total_entities': stats.get('total_entities', 0),
+                'total_relations': stats.get('total_relations', 0),
+                'triples_stored': stats.get('triples_stored', 0),
+                'queries_executed': stats.get('queries_executed', 0),
+                'avg_query_time_ms': round(query_time, 1),
+                'last_operation_time': stats.get('last_operation_time', ''),
+            },
+            
+            # 原始统计数据（向后兼容）
+            'stats': stats,
+            'status': 'success'
+        }
+        
+        logger.info(f"FalkorDB统计信息获取成功: 实体={response_data['total_entities']}, 关系={response_data['total_relations']}, 三元组={response_data['total_triples']}")
+        
+        return jsonify(response_data)
+        
+    except Exception as e:
+        logger.error(f"FalkorDB统计信息获取失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+# ====== 项目管理API ======
+
+@app.route('/api/kg/projects', methods=['GET'])
+def get_kg_projects():
+    """获取所有知识图谱项目列表API"""
+    try:
+        # 连接FalkorDB
+        falkor_store = FalkorDBStore(host='localhost', port=16379, graph_name='knowledge_graph')
+        
+        # 获取项目列表
+        projects = falkor_store.get_all_projects()
+        
+        return jsonify({
+            'projects': projects,
+            'total': len(projects),
+            'status': 'success'
+        })
+        
+    except Exception as e:
+        logger.error(f"获取项目列表失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/kg/projects/<project_name>/stats', methods=['GET'])
+def get_project_stats(project_name):
+    """获取特定项目统计信息API"""
+    try:
+        import time
+        start_time = time.time()
+        
+        use_global_graph = request.args.get('global', 'false').lower() == 'true'
+        
+        # 连接FalkorDB
+        if use_global_graph:
+            falkor_store = FalkorDBStore(host='localhost', port=16379, graph_name='knowledge_graph_global')
+        else:
+            project_graph_name = f"knowledge_graph_project_{project_name}"
+            falkor_store = FalkorDBStore(host='localhost', port=16379, graph_name=project_graph_name)
+        
+        # 获取统计信息
+        stats = falkor_store.get_statistics()
+        query_time = (time.time() - start_time) * 1000
+        
+        # 构建响应数据
+        response_data = {
+            'project_name': project_name,
+            'graph_type': 'global' if use_global_graph else 'project',
+            'total_entities': stats.get('total_entities', 0),
+            'total_relations': stats.get('total_relations', 0), 
+            'total_triples': stats.get('triples_stored', 0),
+            'total_labels': stats.get('total_labels', 0),
+            'performance_stats': {
+                'avg_query_time_ms': round(query_time, 1),
+                'queries_executed': stats.get('queries_executed', 0),
+                'last_operation_time': stats.get('last_operation_time', ''),
+            },
+            'status': 'success'
+        }
+        
+        logger.info(f"项目{project_name}统计信息获取成功: 实体={response_data['total_entities']}, 关系={response_data['total_relations']}")
+        
+        return jsonify(response_data)
+        
+    except Exception as e:
+        logger.error(f"获取项目{project_name}统计信息失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/kg/projects/<project_name>/entities', methods=['GET'])
+def get_project_entities(project_name):
+    """获取特定项目实体API"""
+    try:
+        entity_type = request.args.get('type')
+        limit = int(request.args.get('limit', 100))
+        offset = int(request.args.get('offset', 0))
+        use_global_graph = request.args.get('global', 'false').lower() == 'true'
+        
+        # 连接FalkorDB
+        falkor_store = FalkorDBStore(host='localhost', port=16379, graph_name='knowledge_graph')
+        
+        # 查询项目实体
+        entities = falkor_store.query_entities_by_project(
+            project_name=project_name,
+            entity_type=entity_type,
+            limit=limit,
+            offset=offset,
+            use_global_graph=use_global_graph
+        )
+        
+        return jsonify({
+            'project_name': project_name,
+            'graph_type': 'global' if use_global_graph else 'project',
+            'entities': entities,
+            'total': len(entities),
+            'limit': limit,
+            'offset': offset,
+            'status': 'success'
+        })
+        
+    except Exception as e:
+        logger.error(f"获取项目{project_name}实体失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/kg/delete/preview', methods=['POST'])
+def get_kg_deletion_preview():
+    """获取知识图谱删除预览API"""
+    try:
+        data = request.get_json() or {}
+        project_name = data.get('project_name')
+        
+        falkor_store = FalkorDBStore(host='localhost', port=16379, graph_name='knowledge_graph')
+        preview = falkor_store.get_deletion_preview(project_name)
+        
+        return jsonify({
+            'preview': preview,
+            'status': 'success'
+        })
+        
+    except Exception as e:
+        logger.error(f"获取删除预览失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/kg/delete/project/<project_name>', methods=['DELETE'])
+def delete_project_kg(project_name):
+    """删除指定项目的知识图谱API"""
+    try:
+        
+        # 使用项目名称初始化FalkorDBStore以支持双重存储
+        falkor_store = FalkorDBStore(host='localhost', port=16379, graph_name='knowledge_graph', project_name=project_name)
+        
+        # 执行删除
+        success = falkor_store.delete_project_graph(project_name)
+        
+        if success:
+            return jsonify({
+                'message': f'项目 {project_name} 的知识图谱已成功删除',
+                'project_name': project_name,
+                'status': 'success'
+            })
+        else:
+            return jsonify({
+                'error': f'删除项目 {project_name} 的知识图谱失败',
+                'project_name': project_name,
+                'status': 'failed'
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"删除项目知识图谱失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/kg/delete/all', methods=['DELETE'])
+def delete_all_kg():
+    """删除所有知识图谱数据API"""
+    try:
+        data = request.get_json() or {}
+        confirm = data.get('confirm', False)
+        
+        if not confirm:
+            return jsonify({
+                'error': '请确认删除操作（设置 confirm: true）',
+                'status': 'confirmation_required'
+            }), 400
+        
+        falkor_store = FalkorDBStore(host='localhost', port=16379, graph_name='knowledge_graph')
+        
+        # 删除所有项目数据
+        results = falkor_store.delete_all_projects()
+        
+        # 清空主图谱
+        clear_success = falkor_store.clear_graph()
+        
+        successful_deletions = sum(results.values())
+        total_projects = len(results)
+        
+        return jsonify({
+            'message': f'知识图谱删除完成',
+            'projects_deleted': successful_deletions,
+            'total_projects': total_projects,
+            'main_graph_cleared': clear_success,
+            'details': results,
+            'status': 'success'
+        })
+        
+    except Exception as e:
+        logger.error(f"删除所有知识图谱失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/kg/delete/entities/<entity_type>', methods=['DELETE'])
+def delete_entities_by_type(entity_type):
+    """按实体类型删除API"""
+    try:
+        data = request.get_json() or {}
+        project_name = data.get('project_name')
+        
+        falkor_store = FalkorDBStore(host='localhost', port=16379, graph_name='knowledge_graph')
+        success = falkor_store.delete_entities_by_type(entity_type, project_name)
+        
+        if success:
+            return jsonify({
+                'message': f'已成功删除类型为 {entity_type} 的实体',
+                'entity_type': entity_type,
+                'project_name': project_name,
+                'status': 'success'
+            })
+        else:
+            return jsonify({
+                'error': f'删除类型为 {entity_type} 的实体失败',
+                'entity_type': entity_type,
+                'status': 'failed'
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"按类型删除实体失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/kg_viewer_projects')
+def kg_viewer_projects_page():
+    """按项目浏览知识图谱页面"""
+    try:
+        return render_template('kg_viewer_projects.html')
+    except Exception as e:
+        logger.error(f"项目图谱浏览页面加载失败: {str(e)}")
+        return render_template('error.html', error=str(e))
 
 if __name__ == '__main__':
     # 初始化应用

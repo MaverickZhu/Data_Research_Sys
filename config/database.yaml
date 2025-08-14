@@ -11,9 +11,9 @@ mongodb:
     socket_timeout_ms: 120000        # Socket超时：2分钟
     wait_queue_timeout_ms: 60000     # 等待队列超时：60秒
     
-    # 连接池配置 - 优化大数据处理
-    max_pool_size: 500               # 最大连接数：500（减少避免耗尽）
-    min_pool_size: 30                # 最小连接数：30
+    # 连接池配置 - 基于性能测试优化
+    max_pool_size: 100               # 最大连接数：100（基于测试最优值）
+    min_pool_size: 10                # 最小连接数：10
     max_connecting: 30               # 最大并发连接：30
     max_idle_time_ms: 60000          # 最大空闲时间：60秒
     

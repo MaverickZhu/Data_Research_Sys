@@ -556,10 +556,30 @@ class KnowledgeGraphStore:
                     continue
                 
                 triple.updated_time = datetime.now()
+                
+                # 创建简化的存储格式，避免深度嵌套导致MongoDB错误
+                simplified_dict = {
+                    'id': triple.id,
+                    'subject_id': triple.subject.id,
+                    'subject_label': triple.subject.label,
+                    'subject_type': triple.subject.type.value,
+                    'predicate_id': triple.predicate.id,
+                    'predicate_label': triple.predicate.label,
+                    'predicate_type': triple.predicate.type.value,
+                    'object_id': triple.object.id,
+                    'object_label': triple.object.label,
+                    'object_type': triple.object.type.value,
+                    'confidence': triple.confidence,
+                    'source': triple.source,
+                    'evidence': triple.evidence,
+                    'created_time': triple.created_time.isoformat(),
+                    'updated_time': triple.updated_time.isoformat()
+                }
+                
                 operations.append({
                     'replaceOne': {
                         'filter': {'id': triple.id},
-                        'replacement': triple.to_dict(),
+                        'replacement': simplified_dict,
                         'upsert': True
                     }
                 })

@@ -8,8 +8,10 @@ import logging
 from typing import Dict, List, Any, Optional, Set, Tuple
 import pandas as pd
 import math
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from .kg_models import Entity, EntityType
-from ..data_manager.schema_detector import SchemaDetector
+# 延迟导入以避免循环依赖
+# from ..data_manager.schema_detector import SchemaDetector
 
 # NLP相关导入 - 可选依赖
 try:
@@ -50,7 +52,7 @@ class EntityExtractor:
             config: 配置参数
         """
         self.config = config or {}
-        self.schema_detector = SchemaDetector()
+        self.schema_detector = None
         
         # 初始化NLP组件
         self._init_nlp_components()
@@ -93,6 +95,51 @@ class EntityExtractor:
             'low': 0.5
         })
         
+    def _detect_entity_fields(self, df: pd.DataFrame) -> Dict[str, List[str]]:
+        """
+        简化的实体字段检测
+        
+        Args:
+            df: 数据框
+            
+        Returns:
+            Dict[str, List[str]]: 实体类型到字段名的映射
+        """
+        entity_fields = {
+            EntityType.ORGANIZATION.value: [],
+            EntityType.PERSON.value: [],
+            EntityType.LOCATION.value: [],
+            EntityType.IDENTIFIER.value: []
+        }
+        
+        for col in df.columns:
+            col_lower = col.lower()
+            
+            # 组织机构字段 - 扩展识别规则
+            if (any(keyword in col_lower for keyword in ['unit', 'company', 'corp', '公司', '单位', '机构', '企业']) or
+                col in ['JGMC', 'FWCS_JGMC', 'YY_JGMC', 'COMPANY_NAME', '单位名称', '使用名称', '主管单位名称']):
+                entity_fields[EntityType.ORGANIZATION.value].append(col)
+            
+            # 人员字段 - 扩展识别规则
+            elif (any(keyword in col_lower for keyword in ['person', 'name', 'manager', '姓名', '法人', '负责人', '经理']) or
+                  col in ['FDDBR', 'YY_FRXM', 'YY_LXR', 'COMPANY_LEGAL', '法定代表人', '消防安全管理人', '消防安全责任人']):
+                entity_fields[EntityType.PERSON.value].append(col)
+            
+            # 地址字段 - 扩展识别规则
+            elif (any(keyword in col_lower for keyword in ['address', 'location', '地址', '位置', '所在地']) or
+                  col in ['ZCDZ', 'FWCS_DZ', 'NSYLJGDZ', 'COMPANY_ADDRESS', '单位地址']):
+                entity_fields[EntityType.LOCATION.value].append(col)
+            
+            # 标识符字段 - 扩展识别规则
+            elif (any(keyword in col_lower for keyword in ['id', 'code', 'phone', 'tel', '编号', '代码', '电话']) or
+                  col in ['TYSHXYDM', '单位编码', '组织机构代码(营业执照代码)']):
+                entity_fields[EntityType.IDENTIFIER.value].append(col)
+        
+        # 移除空的字段列表
+        entity_fields = {k: v for k, v in entity_fields.items() if v}
+        
+        return entity_fields
+    
     def _init_nlp_components(self) -> None:
         """初始化NLP组件"""
         if HAS_JIEBA:
@@ -214,8 +261,7 @@ class EntityExtractor:
             entities = []
             
             # 首先进行模式检测，识别实体字段
-            schema = self.schema_detector.detect_schema(df, table_name)
-            entity_fields = schema.get('entity_fields', {})
+            entity_fields = self._detect_entity_fields(df)
             
             # 为每个实体类型抽取实体
             for entity_type_str, field_names in entity_fields.items():
@@ -909,8 +955,76 @@ class EntityExtractor:
             logger.warning(f"实体上下文增强失败: {e}")
             return entities
     
-    def get_entity_extraction_statistics(self) -> Dict[str, Any]:
-        """获取实体抽取统计信息"""
+    def extract_entities_batch_optimized(self, df_list: List[pd.DataFrame],
+                                        table_names: List[str],
+                                        batch_size: int = 1000) -> List[List[Entity]]:
+        """
+        批量优化的实体抽取（基于今日性能突破）
+        
+        Args:
+            df_list: 数据框列表
+            table_names: 表名列表
+            batch_size: 批处理大小
+            
+        Returns:
+            List[List[Entity]]: 每个表的实体列表
+        """
+        logger.info(f"开始批量优化实体抽取，共 {len(df_list)} 个表")
+        
+        all_results = []
+        
+        # 使用多线程并行处理
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            future_to_table = {}
+            
+            for i, (df, table_name) in enumerate(zip(df_list, table_names)):
+                future = executor.submit(
+                    self._extract_entities_optimized_single, 
+                    df, table_name, batch_size
+                )
+                future_to_table[future] = (i, table_name)
+            
+            # 收集结果
+            results = [None] * len(df_list)
+            for future in as_completed(future_to_table):
+                table_index, table_name = future_to_table[future]
+                try:
+                    entities = future.result()
+                    results[table_index] = entities
+                    logger.info(f"表 {table_name} 实体抽取完成: {len(entities)} 个实体")
+                except Exception as e:
+                    logger.error(f"表 {table_name} 实体抽取失败: {str(e)}")
+                    results[table_index] = []
+            
+            all_results = results
+        
+        total_entities = sum(len(entities) for entities in all_results)
+        logger.info(f"批量实体抽取完成，总计 {total_entities} 个实体")
+        
+        return all_results
+    
+    def _extract_entities_optimized_single(self, df: pd.DataFrame, 
+                                         table_name: str, 
+                                         batch_size: int) -> List[Entity]:
+        """单表优化实体抽取"""
+        entities = []
+        
+        # 分批处理大型数据集
+        for start_idx in range(0, len(df), batch_size):
+            end_idx = min(start_idx + batch_size, len(df))
+            batch_df = df.iloc[start_idx:end_idx]
+            
+            batch_entities = self.extract_entities_from_dataframe(batch_df, table_name)
+            entities.extend(batch_entities)
+            
+            # 内存管理：定期清理
+            if len(entities) > 10000:
+                entities = self._deduplicate_entities(entities)
+        
+        return entities
+
+    def get_advanced_entity_statistics(self) -> Dict[str, Any]:
+        """获取高级实体抽取统计信息"""
         return {
             'nlp_available': HAS_JIEBA,
             'sklearn_available': HAS_SKLEARN,
@@ -922,6 +1036,21 @@ class EntityExtractor:
                 'dataframe_extraction',
                 'text_extraction' if HAS_JIEBA else 'text_extraction_disabled',
                 'nlp_enhanced_validation',
-                'vector_similarity' if HAS_SKLEARN else 'vector_similarity_disabled'
-            ]
+                'vector_similarity' if HAS_SKLEARN else 'vector_similarity_disabled',
+                'batch_optimized_extraction',  # 新增
+                'parallel_processing',         # 新增
+                'memory_optimized_processing'  # 新增
+            ],
+            'performance_features': {
+                'batch_processing': True,
+                'parallel_extraction': True,
+                'memory_optimization': True,
+                'nlp_acceleration': HAS_JIEBA,
+                'vector_acceleration': HAS_SKLEARN,
+                'smart_deduplication': True
+            }
         }
+    
+    def get_entity_extraction_statistics(self) -> Dict[str, Any]:
+        """获取实体抽取统计信息（保持向后兼容）"""
+        return self.get_advanced_entity_statistics()

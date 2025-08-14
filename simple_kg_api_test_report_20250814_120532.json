@@ -1,0 +1,42 @@
+{
+  "test_time": "2025-08-14T12:05:32.860756",
+  "success_rate": "4/4",
+  "results": [
+    {
+      "test": "简化实体API",
+      "status": "success",
+      "data_summary": {
+        "entities_count": 5,
+        "triples_count": 0,
+        "has_results": false
+      }
+    },
+    {
+      "test": "简化实体API（按类型）",
+      "status": "success",
+      "data_summary": {
+        "entities_count": 2,
+        "triples_count": 0,
+        "has_results": false
+      }
+    },
+    {
+      "test": "简化关系API",
+      "status": "success",
+      "data_summary": {
+        "entities_count": 0,
+        "triples_count": 5,
+        "has_results": false
+      }
+    },
+    {
+      "test": "简化搜索API",
+      "status": "success",
+      "data_summary": {
+        "entities_count": 0,
+        "triples_count": 0,
+        "has_results": true
+      }
+    }
+  ]
+}

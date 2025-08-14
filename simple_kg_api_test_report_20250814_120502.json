@@ -1,0 +1,26 @@
+{
+  "test_time": "2025-08-14T12:05:02.820417",
+  "success_rate": "0/4",
+  "results": [
+    {
+      "test": "简化实体API",
+      "status": "failed",
+      "error": "HTTP 404"
+    },
+    {
+      "test": "简化实体API（按类型）",
+      "status": "failed",
+      "error": "HTTP 404"
+    },
+    {
+      "test": "简化关系API",
+      "status": "failed",
+      "error": "HTTP 404"
+    },
+    {
+      "test": "简化搜索API",
+      "status": "failed",
+      "error": "HTTP 404"
+    }
+  ]
+}

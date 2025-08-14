@@ -182,8 +182,17 @@
                 <li class="{% if request.path == '/standalone_kg_builder' %}active{% endif %}">
                     <a href="/standalone_kg_builder"><i class="fas fa-project-diagram"></i> 图谱构建</a>
                 </li>
-                <li class="{% if request.path == '/kg_builder' %}active{% endif %}">
-                    <a href="/kg_builder"><i class="fas fa-sitemap"></i> 图谱浏览</a>
+                <li class="{% if request.path == '/kg_viewer' %}active{% endif %}">
+                    <a href="/kg_viewer"><i class="fas fa-globe"></i> 全局浏览</a>
+                </li>
+                <li class="{% if request.path == '/kg_viewer_projects' %}active{% endif %}">
+                    <a href="/kg_viewer_projects"><i class="fas fa-folder-open"></i> 项目浏览</a>
+                </li>
+                
+                <p>系统监控</p>
+                <li class="{% if request.path == '/performance_monitor' %}active{% endif %}">
+                    <a href="/performance_monitor"><i class="fas fa-tachometer-alt"></i> 性能监控</a>
+                    <small class="text-muted d-block px-3" style="font-size: 0.75rem;">实时性能指标和系统状态</small>
                 </li>
                 
                 <p>高级功能</p>

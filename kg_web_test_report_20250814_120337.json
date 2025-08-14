@@ -1,0 +1,110 @@
+{
+  "test_time": "2025-08-14T12:03:37.148085",
+  "base_url": "http://127.0.0.1:18888",
+  "total_tests": 8,
+  "success_count": 5,
+  "success_rate": "62.5%",
+  "results": [
+    {
+      "name": "首页访问",
+      "url": "/",
+      "status_code": 200,
+      "expected_status": 200,
+      "response_time": "0.00s",
+      "success": true,
+      "content_length": 15594
+    },
+    {
+      "name": "知识图谱构建页面",
+      "url": "/standalone_kg_builder",
+      "status_code": 200,
+      "expected_status": 200,
+      "response_time": "0.03s",
+      "success": true,
+      "content_length": 55911
+    },
+    {
+      "name": "性能监控页面",
+      "url": "/performance_monitor",
+      "status_code": 200,
+      "expected_status": 200,
+      "response_time": "0.00s",
+      "success": true,
+      "content_length": 15901
+    },
+    {
+      "name": "知识图谱状态API",
+      "url": "/api/kg/status",
+      "status_code": 200,
+      "expected_status": 200,
+      "response_time": "0.05s",
+      "success": true,
+      "content_length": 395,
+      "json_valid": true,
+      "response_keys": [
+        "build_config",
+        "knowledge_graph_statistics",
+        "ontology_info",
+        "status"
+      ]
+    },
+    {
+      "name": "知识图谱实体API",
+      "url": "/api/kg/entities",
+      "status_code": 500,
+      "expected_status": 200,
+      "response_time": "0.03s",
+      "success": false,
+      "content_length": 92,
+      "json_valid": true,
+      "response_keys": [
+        "error"
+      ]
+    },
+    {
+      "name": "知识图谱关系API",
+      "url": "/api/kg/relations",
+      "status_code": 500,
+      "expected_status": 200,
+      "response_time": "0.03s",
+      "success": false,
+      "content_length": 91,
+      "json_valid": true,
+      "response_keys": [
+        "error"
+      ]
+    },
+    {
+      "name": "知识图谱质量评估API",
+      "url": "/api/kg/quality",
+      "status_code": 200,
+      "expected_status": 200,
+      "response_time": "0.03s",
+      "success": true,
+      "content_length": 2225,
+      "json_valid": true,
+      "response_keys": [
+        "assessment_time",
+        "detailed_scores",
+        "overall_score",
+        "recommendations",
+        "thresholds",
+        "timestamp",
+        "weights"
+      ]
+    },
+    {
+      "name": "知识图谱搜索API",
+      "url": "/api/kg/search?q=测试",
+      "status_code": 500,
+      "expected_status": 200,
+      "response_time": "0.02s",
+      "success": false,
+      "content_length": 76,
+      "json_valid": true,
+      "response_keys": [
+        "error"
+      ]
+    }
+  ]
+}

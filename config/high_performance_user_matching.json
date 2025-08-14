@@ -1,8 +1,8 @@
 {
   "user_data_matching": {
     "batch_processing": {
-      "batch_size": 50000,
-      "max_workers": 32,
+      "batch_size": 10000,
+      "max_workers": 8,
       "timeout": 1800,
       "memory_limit_mb": 91619
     },
@@ -20,7 +20,7 @@
       "enable_graph_compression": true
     },
     "database_optimization": {
-      "connection_pool_size": 1000,
+      "connection_pool_size": 100,
       "query_timeout": 30,
       "bulk_write_size": 10000,
       "enable_write_concern": false

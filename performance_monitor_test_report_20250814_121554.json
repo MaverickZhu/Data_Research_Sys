@@ -1,0 +1,38 @@
+{
+  "test_time": "2025-08-14T12:15:54.502821",
+  "success_rate": "2/4",
+  "key_fixes": {
+    "page_accessible": true,
+    "return_button_exists": false,
+    "api_working": true
+  },
+  "results": [
+    {
+      "test": "简洁监控页面访问",
+      "status": "success",
+      "page_checks": {
+        "has_title": true,
+        "has_return_button": false,
+        "has_bootstrap": true
+      }
+    },
+    {
+      "test": "完整监控页面访问",
+      "status": "failed",
+      "status_code": 404
+    },
+    {
+      "test": "性能指标API",
+      "status": "success",
+      "api_response": {
+        "valid_json": true,
+        "field_count": 10
+      }
+    },
+    {
+      "test": "系统健康检查API",
+      "status": "failed",
+      "status_code": 500
+    }
+  ]
+}

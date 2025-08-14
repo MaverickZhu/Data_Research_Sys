@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>按项目浏览知识图谱</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .project-card {
+            transition: transform 0.2s, box-shadow 0.2s;
+            cursor: pointer;
+            border: 2px solid transparent;
+        }
+        .project-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            border-color: #007bff;
+        }
+        .project-card.selected {
+            border-color: #28a745;
+            background-color: #f8fff9;
+        }
+        .stats-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 15px;
+        }
+        .entity-item, .relation-item {
+            border-left: 4px solid #007bff;
+            transition: all 0.2s;
+        }
+        .entity-item:hover, .relation-item:hover {
+            background-color: #f8f9fa;
+            border-left-color: #28a745;
+        }
+        .view-toggle {
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+            border: none;
+            color: white;
+            font-weight: bold;
+        }
+        .view-toggle.active {
+            background: linear-gradient(45deg, #28a745, #20c997);
+        }
+    </style>
+</head>
+<body>
+    {% extends "base.html" %}
+    
+    {% block content %}
+    <div class="container-fluid mt-4">
+        <div class="row">
+            <!-- 项目选择面板 -->
+            <div class="col-md-3">
+                <div class="card">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="mb-0">
+                            <i class="fas fa-folder-open me-2"></i>
+                            项目列表
+                        </h5>
+                    </div>
+                    <div class="card-body p-0">
+                        <div id="projects-list" class="list-group list-group-flush">
+                            <div class="list-group-item text-center py-4">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">加载项目中...</span>
+                                </div>
+                                <div class="mt-2">加载项目中...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 视图切换 -->
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <h6 class="mb-0">视图模式</h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="btn-group w-100" role="group">
+                            <button type="button" class="btn view-toggle active" id="project-view-btn" onclick="switchViewMode('project')">
+                                <i class="fas fa-layer-group me-1"></i>
+                                项目视图
+                            </button>
+                            <button type="button" class="btn view-toggle" id="global-view-btn" onclick="switchViewMode('global')">
+                                <i class="fas fa-globe me-1"></i>
+                                全局视图
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 主内容区域 -->
+            <div class="col-md-9">
+                <!-- 项目信息和统计 -->
+                <div id="project-info" class="row mb-4" style="display: none;">
+                    <div class="col-md-12">
+                        <div class="stats-card p-4">
+                            <div class="row align-items-center">
+                                <div class="col-md-8">
+                                    <h3 id="project-title" class="mb-1">项目名称</h3>
+                                    <p id="project-description" class="mb-0 opacity-75">选择一个项目查看详细信息</p>
+                                </div>
+                                <div class="col-md-4 text-end">
+                                    <div class="d-flex justify-content-end align-items-center gap-3">
+                                        <div class="text-center">
+                                            <div id="project-entities-count" class="h4 mb-0">-</div>
+                                            <small>实体数量</small>
+                                        </div>
+                                        <div class="text-center">
+                                            <div id="project-relations-count" class="h4 mb-0">-</div>
+                                            <small>关系数量</small>
+                                        </div>
+                                        <div class="text-center">
+                                            <div id="project-triples-count" class="h4 mb-0">-</div>
+                                            <small>三元组数量</small>
+                                        </div>
+                                        <div class="ms-3">
+                                            <button id="delete-project-btn" class="btn btn-outline-danger btn-sm" onclick="showDeleteConfirmation()" style="display: none;">
+                                                <i class="fas fa-trash-alt me-1"></i>
+                                                删除图谱
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 数据展示区域 -->
+                <div class="row">
+                    <!-- 实体列表 -->
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-circle text-primary me-2"></i>
+                                    实体列表
+                                </h5>
+                                <small id="entities-count" class="text-muted">0 个实体</small>
+                            </div>
+                            <div class="card-body" style="max-height: 500px; overflow-y: auto;">
+                                <div id="entities-list">
+                                    <div class="text-center py-4 text-muted">
+                                        <i class="fas fa-folder-open fa-2x mb-2"></i>
+                                        <div>请选择一个项目</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 关系列表 -->
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-arrow-right text-success me-2"></i>
+                                    关系列表
+                                </h5>
+                                <small id="relations-count" class="text-muted">0 个关系</small>
+                            </div>
+                            <div class="card-body" style="max-height: 500px; overflow-y: auto;">
+                                <div id="relations-list">
+                                    <div class="text-center py-4 text-muted">
+                                        <i class="fas fa-project-diagram fa-2x mb-2"></i>
+                                        <div>请选择一个项目</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap Modal -->
+    <div class="modal fade" id="loadingModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-body text-center py-4">
+                    <div class="spinner-border text-primary mb-3" role="status">
+                        <span class="visually-hidden">加载中...</span>
+                    </div>
+                    <h5>加载项目数据中...</h5>
+                    <p class="text-muted mb-0">请稍候，正在获取知识图谱数据</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 删除确认模态框 -->
+    <div class="modal fade" id="deleteConfirmModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title text-danger">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        确认删除知识图谱
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-warning">
+                        <strong>⚠️ 警告：</strong>此操作不可逆！删除后将无法恢复。
+                    </div>
+                    <p>您即将删除项目 <strong id="delete-project-name">-</strong> 的所有知识图谱数据，包括：</p>
+                    <ul id="delete-preview-list">
+                        <li>实体数据：<span id="delete-entities-count">-</span> 个</li>
+                        <li>关系数据：<span id="delete-relations-count">-</span> 个</li>
+                        <li>涉及图谱：<span id="delete-graphs-list">-</span></li>
+                    </ul>
+                    <div class="form-check mt-3">
+                        <input class="form-check-input" type="checkbox" id="confirmDelete">
+                        <label class="form-check-label text-danger" for="confirmDelete">
+                            我确认要删除此项目的知识图谱数据
+                        </label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-danger" id="confirmDeleteBtn" onclick="executeDelete()" disabled>
+                        <i class="fas fa-trash-alt me-1"></i>
+                        确认删除
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 删除进度模态框 -->
+    <div class="modal fade" id="deleteProgressModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-body text-center py-4">
+                    <div class="spinner-border text-danger mb-3" role="status">
+                        <span class="visually-hidden">删除中...</span>
+                    </div>
+                    <h5>正在删除知识图谱...</h5>
+                    <p class="text-muted mb-0">请稍候，正在清理数据</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 全局状态
+        let currentProject = null;
+        let currentViewMode = 'project'; // 'project' 或 'global'
+        let allProjects = [];
+        let loadingModal = null;
+
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('按项目浏览知识图谱页面加载完成');
+            
+            // 立即强制隐藏任何残留的加载状态
+            setTimeout(() => {
+                console.log('🔧 执行强制模态框清理...');
+                const loadingModal = document.getElementById('loadingModal');
+                if (loadingModal) {
+                    loadingModal.style.display = 'none';
+                    loadingModal.classList.remove('show', 'fade');
+                    loadingModal.setAttribute('aria-hidden', 'true');
+                }
+                document.querySelectorAll('.modal-backdrop').forEach(backdrop => backdrop.remove());
+                document.body.classList.remove('modal-open');
+                document.body.style.paddingRight = '';
+                document.body.style.overflow = '';
+                console.log('✅ 强制清理完成');
+            }, 50);
+            
+            // 初始化Bootstrap Modal
+            loadingModal = new bootstrap.Modal(document.getElementById('loadingModal'), {
+                keyboard: false,
+                backdrop: 'static'
+            });
+            
+            // 加载项目列表
+            loadProjects();
+            
+            // 定期检查并清理任何残留的加载状态
+            setInterval(() => {
+                const modalVisible = document.querySelector('#loadingModal[style*="block"]') || 
+                                   document.querySelector('#loadingModal.show') ||
+                                   document.querySelector('.modal-backdrop');
+                if (modalVisible) {
+                    console.log('🔧 检测到残留模态框，执行清理...');
+                    hideLoading();
+                }
+            }, 2000);
+        });
+
+        // 加载项目列表
+        async function loadProjects() {
+            try {
+                console.log('开始加载项目列表...');
+                
+                const response = await fetch('/api/kg/projects');
+                if (!response.ok) {
+                    throw new Error(`项目列表API失败: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                allProjects = data.projects || [];
+                
+                console.log('项目列表加载成功:', allProjects);
+                
+                renderProjectsList();
+                
+            } catch (error) {
+                console.error('加载项目列表失败:', error);
+                document.getElementById('projects-list').innerHTML = `
+                    <div class="list-group-item text-center py-4 text-danger">
+                        <i class="fas fa-exclamation-triangle fa-2x mb-2"></i>
+                        <div>加载项目失败</div>
+                        <small>${error.message}</small>
+                        <div class="mt-2">
+                            <button class="btn btn-sm btn-outline-primary" onclick="loadProjects()">
+                                <i class="fas fa-redo me-1"></i>重试
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        // 渲染项目列表
+        function renderProjectsList() {
+            const container = document.getElementById('projects-list');
+            
+            if (allProjects.length === 0) {
+                container.innerHTML = `
+                    <div class="list-group-item text-center py-4 text-muted">
+                        <i class="fas fa-folder-open fa-2x mb-2"></i>
+                        <div>暂无项目</div>
+                        <small>请先构建知识图谱</small>
+                    </div>
+                `;
+                return;
+            }
+            
+            const html = allProjects.map(project => `
+                <div class="list-group-item list-group-item-action project-card" 
+                     onclick="selectProject('${project.project_name}')">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div class="flex-grow-1">
+                            <h6 class="mb-1">${project.project_name}</h6>
+                            <div class="d-flex gap-3 text-muted small">
+                                ${project.has_global_graph ? `<span><i class="fas fa-globe me-1"></i>${project.global_entities}</span>` : ''}
+                                ${project.has_project_graph ? `<span><i class="fas fa-layer-group me-1"></i>${project.project_entities}</span>` : ''}
+                            </div>
+                        </div>
+                        <div class="text-end">
+                            <small class="text-muted">
+                                ${project.has_global_graph && project.has_project_graph ? '双模式' : 
+                                  project.has_global_graph ? '全局' : '项目'}
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+            
+            container.innerHTML = html;
+        }
+
+        // 选择项目
+        async function selectProject(projectName) {
+            if (currentProject === projectName) return;
+            
+            console.log(`选择项目: ${projectName}, 视图模式: ${currentViewMode}`);
+            
+            // 更新UI状态
+            document.querySelectorAll('.project-card').forEach(card => {
+                card.classList.remove('selected');
+            });
+            event.currentTarget.classList.add('selected');
+            
+            currentProject = projectName;
+            
+            // 显示加载状态
+            showLoading();
+            
+            try {
+                // 加载项目数据
+                await loadProjectData(projectName);
+                
+                // 显示项目信息
+                document.getElementById('project-info').style.display = 'block';
+                document.getElementById('project-title').textContent = projectName;
+                document.getElementById('project-description').textContent = 
+                    `当前查看模式: ${currentViewMode === 'global' ? '全局视图（带项目标签）' : '项目视图（独立数据）'}`;
+                
+                // 显示删除按钮
+                document.getElementById('delete-project-btn').style.display = 'block';
+                
+            } catch (error) {
+                console.error('加载项目数据失败:', error);
+                showError(`加载项目数据失败: ${error.message}`);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // 加载项目数据
+        async function loadProjectData(projectName) {
+            console.log(`开始加载项目数据: ${projectName}`);
+            
+            // 并行加载统计信息和实体数据
+            const [statsResponse, entitiesResponse] = await Promise.all([
+                fetch(`/api/kg/projects/${projectName}/stats?global=${currentViewMode === 'global'}`),
+                fetch(`/api/kg/projects/${projectName}/entities?limit=100&global=${currentViewMode === 'global'}`)
+            ]);
+
+            if (!statsResponse.ok || !entitiesResponse.ok) {
+                throw new Error(`API请求失败: stats=${statsResponse.status}, entities=${entitiesResponse.status}`);
+            }
+
+            const stats = await statsResponse.json();
+            const entities = await entitiesResponse.json();
+
+            console.log('项目数据加载成功:', { stats, entities });
+
+            // 更新统计信息
+            document.getElementById('project-entities-count').textContent = stats.total_entities || 0;
+            document.getElementById('project-relations-count').textContent = stats.total_relations || 0;
+            document.getElementById('project-triples-count').textContent = stats.total_triples || 0;
+
+            // 更新实体列表
+            renderEntitiesList(entities.entities || []);
+            document.getElementById('entities-count').textContent = `${entities.entities?.length || 0} 个实体`;
+
+            // 暂时显示关系为空（后续可以添加关系API）
+            document.getElementById('relations-list').innerHTML = `
+                <div class="text-center py-4 text-muted">
+                    <i class="fas fa-project-diagram fa-2x mb-2"></i>
+                    <div>关系数据开发中</div>
+                </div>
+            `;
+            document.getElementById('relations-count').textContent = '0 个关系';
+        }
+
+        // 渲染实体列表
+        function renderEntitiesList(entities) {
+            const container = document.getElementById('entities-list');
+            
+            console.log('开始渲染实体列表:', entities);
+            
+            if (entities.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-4 text-muted">
+                        <i class="fas fa-circle fa-2x mb-2"></i>
+                        <div>暂无实体数据</div>
+                    </div>
+                `;
+                return;
+            }
+            
+            try {
+                const html = entities.map((entity, index) => {
+                    // 安全处理实体类型
+                    let entityType = 'UNKNOWN';
+                    try {
+                        if (typeof entity.type === 'string') {
+                            entityType = entity.type;
+                        } else if (entity.type && typeof entity.type === 'object') {
+                            entityType = entity.type.value || entity.type.name || JSON.stringify(entity.type);
+                        }
+                    } catch (typeError) {
+                        console.warn(`处理实体类型失败 (${index}):`, typeError, entity);
+                        entityType = 'ERROR';
+                    }
+
+                    return `
+                        <div class="entity-item p-3 mb-2 rounded" onclick="selectEntity('${entity.id}')">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div class="flex-grow-1">
+                                    <div class="fw-bold text-primary">${entity.label || entity.id}</div>
+                                    <div class="small text-muted mt-1">
+                                        <span class="badge bg-secondary me-2">${entityType}</span>
+                                        ${entity.project_name ? `<span class="badge bg-info">${entity.project_name}</span>` : ''}
+                                    </div>
+                                </div>
+                                <div class="text-end">
+                                    <small class="confidence text-muted">
+                                        ${entity.confidence ? (entity.confidence * 100).toFixed(1) + '%' : ''}
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+                
+                container.innerHTML = html;
+                console.log('实体列表渲染完成');
+                
+            } catch (error) {
+                console.error('渲染实体列表时出错:', error);
+                container.innerHTML = `
+                    <div class="text-center py-4 text-danger">
+                        <i class="fas fa-exclamation-triangle fa-2x mb-2"></i>
+                        <div>渲染实体列表失败</div>
+                        <small>${error.message}</small>
+                    </div>
+                `;
+            }
+        }
+
+        // 切换视图模式
+        function switchViewMode(mode) {
+            if (currentViewMode === mode) return;
+            
+            console.log(`切换视图模式: ${currentViewMode} -> ${mode}`);
+            
+            currentViewMode = mode;
+            
+            // 更新按钮状态
+            document.querySelectorAll('.view-toggle').forEach(btn => btn.classList.remove('active'));
+            document.getElementById(`${mode}-view-btn`).classList.add('active');
+            
+            // 如果有选中的项目，重新加载数据
+            if (currentProject) {
+                selectProject(currentProject);
+            }
+        }
+
+        // 选择实体
+        function selectEntity(entityId) {
+            console.log('选择实体:', entityId);
+            // 这里可以添加实体详情显示逻辑
+        }
+
+        // 显示加载状态
+        function showLoading() {
+            if (loadingModal) {
+                loadingModal.show();
+            }
+        }
+
+        // 隐藏加载状态（强制隐藏）
+        function hideLoading() {
+            console.log('🔧 开始隐藏加载模态框...');
+            
+            try {
+                // 1. 尝试Bootstrap方式隐藏
+                if (loadingModal) {
+                    loadingModal.hide();
+                }
+                
+                // 2. 强制DOM隐藏
+                const modalElement = document.getElementById('loadingModal');
+                if (modalElement) {
+                    modalElement.style.display = 'none';
+                    modalElement.classList.remove('show', 'fade');
+                    modalElement.setAttribute('aria-hidden', 'true');
+                    modalElement.removeAttribute('aria-modal');
+                    modalElement.removeAttribute('role');
+                }
+                
+                // 3. 清理背景遮罩
+                document.querySelectorAll('.modal-backdrop').forEach(backdrop => backdrop.remove());
+                
+                // 4. 恢复body状态
+                document.body.classList.remove('modal-open');
+                document.body.style.paddingRight = '';
+                document.body.style.overflow = '';
+                
+                console.log('✅ 加载模态框隐藏完成');
+                
+            } catch (error) {
+                console.error('隐藏加载模态框时出错:', error);
+            }
+        }
+
+        // 显示错误信息
+        function showError(message) {
+            // 可以添加错误提示逻辑
+            console.error('错误:', message);
+        }
+
+        // 删除功能相关
+        let deleteConfirmModal = null;
+        let deleteProgressModal = null;
+
+        // 初始化删除相关模态框
+        document.addEventListener('DOMContentLoaded', function() {
+            deleteConfirmModal = new bootstrap.Modal(document.getElementById('deleteConfirmModal'));
+            deleteProgressModal = new bootstrap.Modal(document.getElementById('deleteProgressModal'));
+            
+            // 监听确认复选框变化
+            document.getElementById('confirmDelete').addEventListener('change', function() {
+                document.getElementById('confirmDeleteBtn').disabled = !this.checked;
+            });
+        });
+
+        // 显示删除确认对话框
+        async function showDeleteConfirmation() {
+            if (!currentProject) {
+                alert('请先选择一个项目');
+                return;
+            }
+
+            try {
+                // 获取删除预览信息
+                const response = await fetch('/api/kg/delete/preview', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        project_name: currentProject
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`获取删除预览失败: ${response.status}`);
+                }
+
+                const data = await response.json();
+                const preview = data.preview;
+
+                // 填充删除确认对话框
+                document.getElementById('delete-project-name').textContent = currentProject;
+                document.getElementById('delete-entities-count').textContent = preview.entities_to_delete || 0;
+                document.getElementById('delete-relations-count').textContent = preview.relations_to_delete || 0;
+                document.getElementById('delete-graphs-list').textContent = (preview.graphs_affected || []).join(', ');
+
+                // 重置确认状态
+                document.getElementById('confirmDelete').checked = false;
+                document.getElementById('confirmDeleteBtn').disabled = true;
+
+                // 显示模态框
+                deleteConfirmModal.show();
+
+            } catch (error) {
+                console.error('获取删除预览失败:', error);
+                alert(`获取删除预览失败: ${error.message}`);
+            }
+        }
+
+        // 执行删除操作
+        async function executeDelete() {
+            if (!currentProject) {
+                return;
+            }
+
+            try {
+                // 隐藏确认对话框，显示进度对话框
+                deleteConfirmModal.hide();
+                deleteProgressModal.show();
+
+                // 执行删除
+                const response = await fetch(`/api/kg/delete/project/${encodeURIComponent(currentProject)}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`删除失败: ${response.status}`);
+                }
+
+                const result = await response.json();
+
+                // 隐藏进度对话框
+                deleteProgressModal.hide();
+
+                // 显示成功消息
+                alert(`✅ 项目 "${currentProject}" 的知识图谱已成功删除！`);
+
+                // 重置界面状态
+                currentProject = null;
+                document.getElementById('project-info').style.display = 'none';
+                document.getElementById('delete-project-btn').style.display = 'none';
+
+                // 重新加载项目列表
+                await loadProjects();
+
+                console.log('删除操作完成:', result);
+
+            } catch (error) {
+                // 隐藏进度对话框
+                deleteProgressModal.hide();
+                
+                console.error('删除操作失败:', error);
+                alert(`❌ 删除失败: ${error.message}`);
+            }
+        }
+
+
+    </script>
+    {% endblock %}
+</body>
+</html>

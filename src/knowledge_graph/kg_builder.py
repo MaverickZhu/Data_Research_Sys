@@ -10,6 +10,12 @@ from datetime import datetime
 
 from .kg_models import Entity, Relation, KnowledgeTriple, Ontology, create_default_ontology
 from .kg_store import KnowledgeGraphStore
+from typing import Union
+try:
+    from .falkordb_store import FalkorDBStore
+    KGStoreType = Union[KnowledgeGraphStore, FalkorDBStore]
+except ImportError:
+    KGStoreType = KnowledgeGraphStore
 from .entity_extractor import EntityExtractor
 from .relation_extractor import RelationExtractor
 
@@ -18,7 +24,7 @@ logger = logging.getLogger(__name__)
 class KnowledgeGraphBuilder:
     """知识图谱构建器"""
     
-    def __init__(self, kg_store: KnowledgeGraphStore, config: Dict[str, Any] = None):
+    def __init__(self, kg_store: KGStoreType, config: Dict[str, Any] = None):
         """
         初始化知识图谱构建器
         

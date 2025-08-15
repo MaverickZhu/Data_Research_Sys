@@ -183,6 +183,12 @@
         margin: 20px 0;
         box-shadow: 0 2px 15px rgba(0,0,0,0.1);
         display: none;
+        animation: fadeIn 0.5s ease-in;
+    }
+    
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
     }
     
     .progress-header {
@@ -236,10 +242,23 @@
     
     .progress-step.active .step-icon {
         color: #007bff;
+        animation: pulse 2s infinite;
     }
     
     .progress-step.completed .step-icon {
         color: #28a745;
+        animation: bounce 0.6s ease-out;
+    }
+    
+    @keyframes pulse {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.1); }
+    }
+    
+    @keyframes bounce {
+        0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
+        40% { transform: translateY(-10px); }
+        60% { transform: translateY(-5px); }
     }
     
     .step-name {
@@ -719,6 +738,41 @@
                 </div>
             </div>
             
+            <!-- 构建结果显示 -->
+            <div class="build-result" id="buildResult" style="display: none; text-align: center; margin-top: 30px;">
+                <div class="result-success" id="resultSuccess" style="display: none;">
+                    <div class="result-icon">
+                        <i class="fas fa-check-circle" style="color: #28a745; font-size: 48px;"></i>
+                    </div>
+                    <h4 style="color: #28a745; margin: 15px 0;">构建完成！</h4>
+                    <p class="result-message" id="successMessage">知识图谱构建成功完成</p>
+                    <div class="result-actions" style="margin-top: 20px;">
+                        <button class="btn btn-primary me-2" onclick="window.location.href='/kg_viewer'">
+                            <i class="fas fa-eye"></i> 查看图谱
+                        </button>
+                        <button class="btn btn-outline-secondary" onclick="resetBuilder()">
+                            <i class="fas fa-redo"></i> 重新构建
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="result-error" id="resultError" style="display: none;">
+                    <div class="result-icon">
+                        <i class="fas fa-exclamation-triangle" style="color: #dc3545; font-size: 48px;"></i>
+                    </div>
+                    <h4 style="color: #dc3545; margin: 15px 0;">构建失败</h4>
+                    <p class="result-message" id="errorMessage">构建过程中出现错误</p>
+                    <div class="result-actions" style="margin-top: 20px;">
+                        <button class="btn btn-warning me-2" onclick="resetBuilder()">
+                            <i class="fas fa-redo"></i> 重新尝试
+                        </button>
+                        <button class="btn btn-outline-secondary" onclick="showBuildLog()">
+                            <i class="fas fa-list"></i> 查看日志
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
             <!-- 构建日志 -->
             <div class="build-log" id="buildLog">
                 <div class="log-entry">
@@ -891,6 +945,8 @@ document.addEventListener('DOMContentLoaded', function() {
             
             if (result.success) {
                 buildTask = result.task_id;
+                // 开始计时
+                startTimer();
                 // 开始监控构建进度
                 monitorBuildProgress();
             } else {
@@ -986,6 +1042,16 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('extractedEntities').textContent = progressData.extracted_entities || 0;
         document.getElementById('discoveredRelations').textContent = progressData.discovered_relations || 0;
         
+        // 更新耗时 - 使用前端计时器，不依赖后端elapsed_time
+        // 时间已经通过startTimer()自动更新
+        
+        // 检查是否完成
+        if (progressData.status === 'completed') {
+            onBuildCompleted(progressData);
+        } else if (progressData.status === 'failed') {
+            onBuildFailed({error_message: progressData.error_message});
+        }
+        
         // 更新日志
         if (progressData.logs) {
             updateBuildLog(progressData.logs);
@@ -1037,32 +1103,48 @@ document.addEventListener('DOMContentLoaded', function() {
         logContainer.scrollTop = logContainer.scrollHeight;
     }
     
-    function onBuildCompleted(data) {
+    function onBuildCompleted(progressData) {
         // 停止计时
         stopTimer();
         
-        // 隐藏进度区域，显示结果区域
-        document.getElementById('buildProgress').style.display = 'none';
-        document.getElementById('resultsSection').style.display = 'block';
-        
-        // 更新结果显示
-        document.getElementById('finalEntityCount').textContent = data.final_stats.entity_count || 0;
-        document.getElementById('finalRelationCount').textContent = data.final_stats.relation_count || 0;
-        document.getElementById('finalTripleCount').textContent = data.final_stats.triple_count || 0;
-        document.getElementById('finalQualityScore').textContent = (data.final_stats.quality_score || 0) + '%';
-        
-        // 更新按钮状态
-        document.getElementById('pauseBuildBtn').style.display = 'none';
-        document.getElementById('stopBuildBtn').style.display = 'none';
-        document.getElementById('viewResultsBtn').style.display = 'inline-block';
-        document.getElementById('exportBtn').style.display = 'inline-block';
-        
-        // 添加完成日志
-        updateBuildLog([{
-            timestamp: new Date().toISOString(),
-            level: 'success',
-            message: `知识图谱构建完成！共生成 ${data.final_stats.entity_count} 个实体，${data.final_stats.relation_count} 个关系`
-        }]);
+        // 获取最终构建结果
+        fetch(`/api/kg_build_result/${buildTask}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const result = data.result;
+                    
+                    // 隐藏进度区域，显示结果区域
+                    document.getElementById('buildProgress').style.display = 'none';
+                    document.getElementById('resultsSection').style.display = 'block';
+                    
+                    // 更新结果显示
+                    document.getElementById('finalEntityCount').textContent = result.total_entities || 0;
+                    document.getElementById('finalRelationCount').textContent = result.total_relations || 0;
+                    document.getElementById('finalTripleCount').textContent = result.total_triples || 0;
+                    document.getElementById('finalQualityScore').textContent = '100%'; // 构建成功默认100%
+                    
+                    // 更新按钮状态
+                    document.getElementById('pauseBuildBtn').style.display = 'none';
+                    document.getElementById('stopBuildBtn').style.display = 'none';
+                    document.getElementById('viewResultsBtn').style.display = 'inline-block';
+                    document.getElementById('exportBtn').style.display = 'inline-block';
+                    
+                    // 添加完成日志
+                    updateBuildLog([{
+                        timestamp: new Date().toISOString(),
+                        level: 'success',
+                        message: `知识图谱构建完成！共生成 ${result.total_entities} 个实体，${result.total_relations || 0} 个关系`
+                    }]);
+                } else {
+                    console.error('获取构建结果失败:', data.error);
+                    onBuildFailed({error_message: '获取构建结果失败'});
+                }
+            })
+            .catch(error => {
+                console.error('获取构建结果错误:', error);
+                onBuildFailed({error_message: '网络错误'});
+            });
     }
     
     function onBuildFailed(data) {

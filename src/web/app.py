@@ -2895,10 +2895,34 @@ def api_kg_build_progress(task_id):
     try:
         progress_info = get_kg_build_progress(task_id)
         
+        if 'error' in progress_info:
+            return jsonify({'success': False, 'error': progress_info['error']}), 404
+        
+        # 转换为前端期望的格式
+        stage_details = progress_info.get('stage_details', {})
+        
+        formatted_progress = {
+            'status': progress_info.get('status', 'running'),
+            'overall_progress': progress_info.get('progress', 0),
+            'current_step': stage_details.get('current_step', 1),
+            'steps': ['数据加载', '实体抽取', '关系发现', '图谱构建', '质量验证'],
+            'processed_records': stage_details.get('processed_records', 0),
+            'extracted_entities': stage_details.get('extracted_entities', 0),
+            'discovered_relations': stage_details.get('discovered_relations', 0),
+            'current_table': stage_details.get('current_table', ''),
+            'step_name': stage_details.get('step_name', ''),
+            'table_index': stage_details.get('table_index', 1),
+            'total_tables': stage_details.get('total_tables', 1),
+            'logs': [],
+            'start_time': progress_info.get('start_time'),
+            'updated_time': progress_info.get('updated_time'),
+            'error_message': progress_info.get('error_message')
+        }
+        
         return jsonify({
             'success': True,
             'task_id': task_id,
-            'progress': progress_info
+            'data': formatted_progress
         })
         
     except Exception as e:
@@ -3126,10 +3150,10 @@ def execute_kg_build_task(task_id, table_names, build_config, project_name):
             )
         
         # 初始化知识图谱构建器
-        from src.knowledge_graph.kg_store import KnowledgeGraphStore
+        from src.knowledge_graph.falkordb_store import FalkorDBStore
         from src.knowledge_graph.kg_builder import KnowledgeGraphBuilder
         
-        kg_store = KnowledgeGraphStore(db_manager)
+        kg_store = FalkorDBStore(project_name=project_name or "全局")
         kg_builder = KnowledgeGraphBuilder(kg_store, build_config)
         
         total_tables = len(table_names)
@@ -3140,7 +3164,10 @@ def execute_kg_build_task(task_id, table_names, build_config, project_name):
             update_task_progress(f'processing_table_{i+1}', current_progress, {
                 'current_table': table_name,
                 'table_index': i + 1,
-                'total_tables': total_tables
+                'total_tables': total_tables,
+                'processed_records': 0,
+                'extracted_entities': 0,
+                'discovered_relations': 0
             })
             
             # 获取数据表数据
@@ -3156,9 +3183,23 @@ def execute_kg_build_task(task_id, table_names, build_config, project_name):
             if '_id' in df.columns:
                 df = df.drop('_id', axis=1)
             
-            # 构建知识图谱
+            # 创建进度回调函数
+            def progress_callback(progress_data):
+                table_progress = int((i / total_tables) * 100) + int((progress_data.get('current_step', 1) / 4) * (100 / total_tables))
+                update_task_progress(f'processing_table_{i+1}', table_progress, {
+                    'current_table': table_name,
+                    'table_index': i + 1,
+                    'total_tables': total_tables,
+                    'step_name': progress_data.get('step_name', ''),
+                    'current_step': progress_data.get('current_step', 1),
+                    'processed_records': progress_data.get('processed_records', 0),
+                    'extracted_entities': progress_data.get('extracted_entities', 0),
+                    'discovered_relations': progress_data.get('discovered_relations', 0)
+                })
+            
+            # 构建知识图谱（带进度回调）
             table_result = kg_builder.build_knowledge_graph_from_dataframe(
-                df, table_name, project_name
+                df, table_name, project_name, progress_callback=progress_callback
             )
             
             build_results.append(table_result)
@@ -3168,6 +3209,7 @@ def execute_kg_build_task(task_id, table_names, build_config, project_name):
             'project_name': project_name,
             'total_tables_processed': len(build_results),
             'total_entities': sum(r.get('entities_created', 0) for r in build_results),
+            'total_relations': sum(r.get('triples_created', 0) for r in build_results),
             'total_triples': sum(r.get('triples_created', 0) for r in build_results),
             'table_results': build_results,
             'build_summary': generate_build_summary(build_results)
@@ -5329,57 +5371,7 @@ def search_kg_simple():
         return jsonify({'error': str(e)}), 500
 
 # ====== FalkorDB知识图谱API ======
-
-@app.route('/api/kg/falkor/entities', methods=['GET'])
-def get_falkor_entities():
-    """获取FalkorDB知识图谱实体API"""
-    try:
-        entity_type = request.args.get('type')
-        limit = int(request.args.get('limit', 100))
-        offset = int(request.args.get('offset', 0))
-        
-        # 连接FalkorDB
-        falkor_store = FalkorDBStore(host='localhost', port=16379, graph_name='knowledge_graph')
-        
-        # 查询实体
-        entities = falkor_store.query_entities(entity_type=entity_type, limit=limit, offset=offset)
-        
-        return jsonify({
-            'entities': entities,
-            'total': len(entities),
-            'limit': limit,
-            'offset': offset,
-            'status': 'success'
-        })
-        
-    except Exception as e:
-        logger.error(f"FalkorDB实体查询失败: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/kg/falkor/relations', methods=['GET'])
-def get_falkor_relations():
-    """获取FalkorDB知识图谱关系API"""
-    try:
-        limit = int(request.args.get('limit', 100))
-        offset = int(request.args.get('offset', 0))
-        
-        # 连接FalkorDB
-        falkor_store = FalkorDBStore(host='localhost', port=16379, graph_name='knowledge_graph')
-        
-        # 查询关系
-        relations = falkor_store.query_relations(limit=limit, offset=offset)
-        
-        return jsonify({
-            'relations': relations,
-            'total': len(relations),
-            'limit': limit,
-            'offset': offset,
-            'status': 'success'
-        })
-        
-    except Exception as e:
-        logger.error(f"FalkorDB关系查询失败: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+# 注意：实际的API实现在文件后面的聚合版本中
 
 @app.route('/api/kg/falkor/search', methods=['GET'])
 def search_falkor_entities():
@@ -5391,9 +5383,10 @@ def search_falkor_entities():
         relation_type = request.args.get('relation_type', '')
         limit = int(request.args.get('limit', 20))
         
-        # 如果没有任何搜索条件，返回错误
+        # 如果没有任何搜索条件，返回默认数据
         if not query and not entity_type and not relation_type:
-            return jsonify({'error': '请提供搜索条件（q、entity_type或relation_type）'}), 400
+            # 返回默认数据集
+            entity_type = 'ORGANIZATION'  # 默认返回机构类型实体
         
         # 连接FalkorDB
         falkor_store = FalkorDBStore(host='localhost', port=16379, graph_name='knowledge_graph')
@@ -5410,16 +5403,19 @@ def search_falkor_entities():
                 # 如果没有search_entities方法，使用query_entities
                 entities = falkor_store.query_entities(entity_type=entity_type, limit=limit)
         
-        if query or relation_type:
-            # 搜索关系
-            if hasattr(falkor_store, 'search_relations'):
-                relations = falkor_store.search_relations(query or '', limit=limit)
+        # 总是尝试获取关系数据
+        try:
+            if hasattr(falkor_store, 'search_relations') and query:
+                relations = falkor_store.search_relations(query, limit=limit)
             else:
-                # 如果没有search_relations方法，使用query_relations
+                # 使用query_relations获取关系数据
                 relations = falkor_store.query_relations(limit=limit)
                 # 如果指定了relation_type，进行过滤
                 if relation_type:
                     relations = [r for r in relations if r.get('type') == relation_type]
+        except Exception as e:
+            logger.warning(f"获取关系数据失败: {e}")
+            relations = []
         
         return jsonify({
             'query': query,
@@ -5437,19 +5433,202 @@ def search_falkor_entities():
         logger.error(f"FalkorDB搜索失败: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/kg/falkor/entities', methods=['GET'])
+def get_falkor_entities():
+    """FalkorDB知识图谱实体API - 聚合所有图谱"""
+    try:
+        limit = int(request.args.get('limit', 100))
+        offset = int(request.args.get('offset', 0))
+        entity_type = request.args.get('entity_type', '')
+        
+        import falkordb
+        client = falkordb.FalkorDB(host='localhost', port=16379)
+        graphs_result = client.execute_command('GRAPH.LIST')
+        
+        all_entities = []
+        
+        for graph_name in graphs_result:
+            try:
+                # 构建查询条件
+                if entity_type:
+                    cypher_query = f"""
+                    MATCH (e:{entity_type.upper()})
+                    RETURN COALESCE(e.entity_id, e.id, toString(id(e))) AS id,
+                           e.label AS label, e.type AS type,
+                           e.confidence AS confidence, e.source_table AS source_table
+                    LIMIT {limit}
+                    """
+                else:
+                    cypher_query = f"""
+                    MATCH (e)
+                    WHERE e.type IS NOT NULL
+                    RETURN COALESCE(e.entity_id, e.id, toString(id(e))) AS id,
+                           e.label AS label, e.type AS type,
+                           e.confidence AS confidence, e.source_table AS source_table
+                    LIMIT {limit}
+                    """
+                
+                result = client.execute_command('GRAPH.QUERY', graph_name, cypher_query)
+                
+                if len(result) > 1 and result[1]:
+                    for row in result[1]:
+                        entity = {
+                            'id': row[0],
+                            'label': row[1],
+                            'type': row[2],
+                            'confidence': row[3] if row[3] is not None else 0.9,
+                            'source_table': row[4],
+                            'graph_name': graph_name
+                        }
+                        all_entities.append(entity)
+                        
+                        if len(all_entities) >= limit:
+                            break
+                            
+            except Exception as e:
+                logger.warning(f"查询图谱 {graph_name} 实体失败: {e}")
+                continue
+                
+            if len(all_entities) >= limit:
+                break
+        
+        # 应用offset
+        entities = all_entities[offset:offset+limit] if offset > 0 else all_entities[:limit]
+        
+        return jsonify({
+            'entities': entities,
+            'total': len(entities),
+            'limit': limit,
+            'offset': offset,
+            'status': 'success'
+        })
+        
+    except Exception as e:
+        logger.error(f"FalkorDB实体查询失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/kg/falkor/relations', methods=['GET'])
+def get_falkor_relations():
+    """FalkorDB知识图谱关系API - 聚合所有图谱"""
+    try:
+        limit = int(request.args.get('limit', 100))
+        offset = int(request.args.get('offset', 0))
+        
+        import falkordb
+        client = falkordb.FalkorDB(host='localhost', port=16379)
+        graphs_result = client.execute_command('GRAPH.LIST')
+        
+        all_relations = []
+        
+        for graph_name in graphs_result:
+            try:
+                logger.info(f"正在查询图谱: {graph_name}")
+                
+                cypher_query = f"""
+                MATCH (s)-[r]->(o)
+                RETURN toString(id(r)) AS id, type(r) AS type,
+                       s.label AS subject_label, o.label AS object_label,
+                       toString(id(s)) AS subject_id, toString(id(o)) AS object_id,
+                       r.confidence AS confidence
+                LIMIT {limit}
+                """
+                
+                result = client.execute_command('GRAPH.QUERY', graph_name, cypher_query)
+                logger.info(f"图谱 {graph_name} 查询结果长度: {len(result)}")
+                
+                if len(result) > 1 and result[1]:
+                    logger.info(f"图谱 {graph_name} 找到 {len(result[1])} 个关系")
+                    for row in result[1]:
+                        relation = {
+                            'id': row[0],
+                            'type': row[1],
+                            'predicate': row[1],  # 兼容前端
+                            'subject_label': row[2],
+                            'object_label': row[3],
+                            'subject_id': row[4],
+                            'object_id': row[5],
+                            'confidence': row[6] if row[6] is not None else 0.9,
+                            'graph_name': graph_name
+                        }
+                        all_relations.append(relation)
+                        
+                        if len(all_relations) >= limit:
+                            break
+                else:
+                    logger.info(f"图谱 {graph_name} 无关系数据")
+                            
+            except Exception as e:
+                logger.error(f"查询图谱 {graph_name} 关系失败: {e}")
+                continue
+                
+            if len(all_relations) >= limit:
+                break
+        
+        # 应用offset
+        relations = all_relations[offset:offset+limit] if offset > 0 else all_relations[:limit]
+        
+        logger.info(f"聚合关系查询完成: 找到 {len(relations)} 个关系")
+        
+        return jsonify({
+            'relations': relations,
+            'total': len(relations),
+            'limit': limit,
+            'offset': offset,
+            'status': 'success'
+        })
+        
+    except Exception as e:
+        logger.error(f"FalkorDB关系查询失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/kg/falkor/stats', methods=['GET'])
 def get_falkor_stats():
     """获取FalkorDB知识图谱统计信息API"""
     try:
         import time
+        import falkordb
         start_time = time.time()
         
-        # 连接FalkorDB
-        falkor_store = FalkorDBStore(host='localhost', port=16379, graph_name='knowledge_graph')
+        # 直接连接FalkorDB获取所有图谱统计
+        client = falkordb.FalkorDB(host='localhost', port=16379)
+        graphs_result = client.execute_command('GRAPH.LIST')
         
-        # 获取统计信息
-        stats = falkor_store.get_statistics()
+        # 聚合所有图谱的统计信息
+        total_entities = 0
+        total_relations = 0
+        total_triples = 0
+        
+        for graph_name in graphs_result:
+            try:
+                # 获取节点数（实体数）
+                node_result = client.execute_command('GRAPH.QUERY', graph_name, 'MATCH (n) RETURN count(n) as count')
+                node_count = node_result[1][0][0] if len(node_result) > 1 and len(node_result[1]) > 0 else 0
+                
+                # 获取边数（关系数/三元组数）
+                edge_result = client.execute_command('GRAPH.QUERY', graph_name, 'MATCH ()-[r]->() RETURN count(r) as count')
+                edge_count = edge_result[1][0][0] if len(edge_result) > 1 and len(edge_result[1]) > 0 else 0
+                
+                logger.info(f"图谱 {graph_name}: {node_count}节点, {edge_count}边")
+                
+                total_entities += node_count
+                total_relations += edge_count
+                total_triples += edge_count  # 在图数据库中，边就是三元组
+                
+            except Exception as e:
+                logger.warning(f"获取图谱 {graph_name} 统计失败: {e}")
+                continue
+        
         query_time = (time.time() - start_time) * 1000
+        
+        # 构建统计对象（兼容原有接口）
+        stats = {
+            'total_entities': total_entities,
+            'total_relations': total_relations,
+            'triples_stored': total_triples,
+            'total_labels': len(graphs_result),
+            'queries_executed': 0,
+            'last_operation_time': ''
+        }
         
         # 构建前端期望的平铺数据格式
         response_data = {
@@ -5475,6 +5654,14 @@ def get_falkor_stats():
         }
         
         logger.info(f"FalkorDB统计信息获取成功: 实体={response_data['total_entities']}, 关系={response_data['total_relations']}, 三元组={response_data['total_triples']}")
+        
+        # 添加调试信息
+        response_data['debug_info'] = {
+            'graphs_found': len(graphs_result),
+            'aggregated_entities': total_entities,
+            'aggregated_relations': total_relations,
+            'aggregated_triples': total_triples
+        }
         
         return jsonify(response_data)
         

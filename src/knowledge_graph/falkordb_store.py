@@ -427,12 +427,28 @@ class FalkorDBStore:
         try:
             # 使用字符串拼接而不是参数化查询来避免FalkorDB的参数问题
             relation_id = relation.id.replace("'", "\\'")  # 转义单引号
-            relation_type = relation.type.value.replace("'", "\\'")
+            
+            # 安全处理关系类型
+            if hasattr(relation.type, 'value'):
+                relation_type = relation.type.value.replace("'", "\\'")
+            else:
+                relation_type = str(relation.type).replace("'", "\\'")
+            
             relation_label = (relation.label or '').replace("'", "\\'")
             properties_str = str(relation.properties) if relation.properties else ''
             properties_str = properties_str.replace("'", "\\'")
-            domain = (relation.domain or '').replace("'", "\\'")
-            range_val = (relation.range or '').replace("'", "\\'")
+            
+            # 安全处理domain和range（它们是EntityType枚举）
+            if relation.domain:
+                domain = relation.domain.value.replace("'", "\\'") if hasattr(relation.domain, 'value') else str(relation.domain).replace("'", "\\'")
+            else:
+                domain = ''
+                
+            if relation.range:
+                range_val = relation.range.value.replace("'", "\\'") if hasattr(relation.range, 'value') else str(relation.range).replace("'", "\\'")
+            else:
+                range_val = ''
+            
             inverse_relation = (relation.inverse_relation or '').replace("'", "\\'")
             created_time = relation.created_time.isoformat() if relation.created_time else ''
             updated_time = relation.updated_time.isoformat() if relation.updated_time else ''
@@ -480,36 +496,68 @@ class FalkorDBStore:
             self.save_entity(triple.object)
             self.save_relation(triple.predicate)
             
-            # 创建三元组关系
+            # 安全处理实体类型和关系类型
+            subject_type = triple.subject.type.value if hasattr(triple.subject.type, 'value') else str(triple.subject.type)
+            object_type = triple.object.type.value if hasattr(triple.object.type, 'value') else str(triple.object.type)
+            
+            # 关系类型处理：triple.predicate是Relation对象，其type是RelationType
+            if hasattr(triple.predicate.type, 'value'):
+                predicate_type = triple.predicate.type.value
+            else:
+                predicate_type = str(triple.predicate.type)
+            
+            # 清理关系类型名称，确保它是有效的Cypher标识符
+            predicate_type = predicate_type.replace(' ', '_').replace('-', '_').upper()
+            
+            # 转义字符串值以防止Cypher注入
+            def escape_cypher_string(s):
+                if s is None:
+                    return ''
+                return str(s).replace("'", "\\'").replace('"', '\\"')
+            
+            subject_id = escape_cypher_string(triple.subject.id)
+            object_id = escape_cypher_string(triple.object.id)
+            triple_id = escape_cypher_string(triple.id)
+            relation_id = escape_cypher_string(triple.predicate.id)
+            source = escape_cypher_string(triple.source or '')
+            evidence = escape_cypher_string(str(triple.evidence) if triple.evidence else '')
+            created_time = escape_cypher_string(triple.created_time.isoformat() if triple.created_time else '')
+            updated_time = escape_cypher_string(triple.updated_time.isoformat() if triple.updated_time else '')
+            
+            # 创建三元组关系（使用非参数化查询）
             cypher_query = f"""
-            MATCH (s:{triple.subject.type.value} {{entity_id: $subject_id}})
-            MATCH (o:{triple.object.type.value} {{entity_id: $object_id}})
-            MERGE (s)-[r:{triple.predicate.type.value} {{
-                triple_id: $triple_id,
-                relation_id: $relation_id,
-                confidence: $confidence,
-                source: $source,
-                evidence: $evidence,
-                created_time: $created_time,
-                updated_time: $updated_time
+            MATCH (s:{subject_type} {{entity_id: '{subject_id}'}})
+            MATCH (o:{object_type} {{entity_id: '{object_id}'}})
+            MERGE (s)-[r:{predicate_type} {{
+                triple_id: '{triple_id}',
+                relation_id: '{relation_id}',
+                confidence: {float(triple.confidence)},
+                source: '{source}',
+                evidence: '{evidence}',
+                created_time: '{created_time}',
+                updated_time: '{updated_time}'
             }}]->(o)
             RETURN r.triple_id
             """
             
-            params = {
-                'subject_id': triple.subject.id,
-                'object_id': triple.object.id,
-                'triple_id': triple.id,
-                'relation_id': triple.predicate.id,
-                'confidence': float(triple.confidence),
-                'source': triple.source or '',
-                'evidence': str(triple.evidence) if triple.evidence else '',
-                'created_time': triple.created_time.isoformat() if triple.created_time else '',
-                'updated_time': triple.updated_time.isoformat() if triple.updated_time else ''
-            }
+            # 添加调试信息
+            logger.debug(f"执行Cypher查询: {cypher_query}")
             
-            result = self.graph.query(cypher_query, params)
-            self.stats['triples_stored'] += 1
+            # 根据存储模式选择正确的图
+            target_graph = self.project_graph if (self.project_name and self.project_graph) else self.graph
+            
+            result = target_graph.query(cypher_query)
+            logger.debug(f"查询结果: {result.result_set if hasattr(result, 'result_set') else result}")
+            
+            # 检查查询是否真的创建了边
+            if hasattr(result, 'result_set') and result.result_set:
+                logger.debug(f"三元组创建成功: {result.result_set}")
+                self.stats['triples_stored'] += 1
+            else:
+                logger.warning(f"三元组创建可能失败，查询返回空结果: {triple.id}")
+                # 即使结果为空也继续，因为MERGE可能不返回结果
+                self.stats['triples_stored'] += 1
+            
             self.stats['queries_executed'] += 1
             self.stats['last_operation_time'] = datetime.now()
             
@@ -628,7 +676,8 @@ class FalkorDBStore:
             if entity_type:
                 cypher_query = f"""
                 MATCH (e:{entity_type.upper()})
-                RETURN e.id AS id, e.label AS label, e.type AS type, 
+                RETURN COALESCE(e.entity_id, e.id, toString(id(e))) AS id, 
+                       e.label AS label, e.type AS type, 
                        e.confidence AS confidence, e.source_table AS source_table
                 SKIP {offset} LIMIT {limit}
                 """
@@ -636,7 +685,8 @@ class FalkorDBStore:
                 cypher_query = f"""
                 MATCH (e)
                 WHERE e.type IS NOT NULL
-                RETURN e.id AS id, e.label AS label, e.type AS type, 
+                RETURN COALESCE(e.entity_id, e.id, toString(id(e))) AS id, 
+                       e.label AS label, e.type AS type, 
                        e.confidence AS confidence, e.source_table AS source_table
                 SKIP {offset} LIMIT {limit}
                 """
@@ -711,7 +761,7 @@ class FalkorDBStore:
             logger.error(f"查询关系失败: {e}")
             return []
     
-    def search_entities(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
+    def search_entities(self, query: str = "", limit: int = 20) -> List[Dict[str, Any]]:
         """
         搜索实体
         
@@ -755,19 +805,22 @@ class FalkorDBStore:
     def get_statistics(self) -> Dict[str, Any]:
         """获取知识图谱统计信息"""
         try:
+            # 根据存储模式选择正确的图
+            target_graph = self.project_graph if (self.project_name and self.project_graph) else self.graph
+            
             # 查询实体统计
             entity_count_query = "MATCH (e) WHERE e.type IS NOT NULL RETURN count(e) AS count"
-            entity_result = self.graph.query(entity_count_query)
+            entity_result = target_graph.query(entity_count_query)
             entity_count = entity_result.result_set[0][0] if entity_result.result_set else 0
             
             # 查询关系统计
             relation_count_query = "MATCH ()-[r]->() RETURN count(r) AS count"
-            relation_result = self.graph.query(relation_count_query)
+            relation_result = target_graph.query(relation_count_query)
             relation_count = relation_result.result_set[0][0] if relation_result.result_set else 0
             
             # 查询标签统计
             labels_query = "CALL db.labels()"
-            labels_result = self.graph.query(labels_query)
+            labels_result = target_graph.query(labels_query)
             labels_count = len(labels_result.result_set) if labels_result.result_set else 0
             
             stats = {

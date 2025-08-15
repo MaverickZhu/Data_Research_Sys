@@ -81,7 +81,8 @@ class KnowledgeGraphBuilder:
     
     def build_knowledge_graph_from_dataframe(self, df: pd.DataFrame,
                                            table_name: str,
-                                           project_id: str = None) -> Dict[str, Any]:
+                                           project_id: str = None,
+                                           progress_callback=None) -> Dict[str, Any]:
         """
         从DataFrame构建知识图谱
         
@@ -110,7 +111,27 @@ class KnowledgeGraphBuilder:
             
             # 第一阶段：实体抽取
             logger.info("第一阶段：实体抽取")
+            if progress_callback:
+                progress_callback({
+                    'current_step': 1,
+                    'step_name': '实体抽取',
+                    'processed_records': 0,
+                    'extracted_entities': 0,
+                    'discovered_relations': 0,
+                    'current_table': table_name
+                })
+            
             entities = self.entity_extractor.extract_entities_from_dataframe(df, table_name)
+            
+            if progress_callback:
+                progress_callback({
+                    'current_step': 1,
+                    'step_name': '实体抽取',
+                    'processed_records': len(df),
+                    'extracted_entities': len(entities),
+                    'discovered_relations': 0,
+                    'current_table': table_name
+                })
             
             if self.build_config['enable_validation']:
                 entities = self._validate_entities(entities)
@@ -120,9 +141,29 @@ class KnowledgeGraphBuilder:
             
             # 第二阶段：关系抽取
             logger.info("第二阶段：关系抽取")
+            if progress_callback:
+                progress_callback({
+                    'current_step': 2,
+                    'step_name': '关系抽取',
+                    'processed_records': len(df),
+                    'extracted_entities': len(entities),
+                    'discovered_relations': 0,
+                    'current_table': table_name
+                })
+            
             triples = self.relation_extractor.extract_relations_from_dataframe(
                 df, entities, table_name
             )
+            
+            if progress_callback:
+                progress_callback({
+                    'current_step': 2,
+                    'step_name': '关系抽取',
+                    'processed_records': len(df),
+                    'extracted_entities': len(entities),
+                    'discovered_relations': len(triples),
+                    'current_table': table_name
+                })
             
             if self.build_config['enable_validation']:
                 triples = self._validate_triples(triples)
@@ -133,8 +174,28 @@ class KnowledgeGraphBuilder:
             
             # 第三阶段：批量存储
             logger.info("第三阶段：批量存储")
+            if progress_callback:
+                progress_callback({
+                    'current_step': 3,
+                    'step_name': '批量存储',
+                    'processed_records': len(df),
+                    'extracted_entities': len(entities),
+                    'discovered_relations': len(triples),
+                    'current_table': table_name
+                })
+            
             entities_saved = self._batch_save_entities(entities)
             triples_saved = self._batch_save_triples(triples)
+            
+            if progress_callback:
+                progress_callback({
+                    'current_step': 3,
+                    'step_name': '批量存储',
+                    'processed_records': len(df),
+                    'extracted_entities': entities_saved,
+                    'discovered_relations': triples_saved,
+                    'current_table': table_name
+                })
             
             # 第四阶段：统计和索引
             logger.info("第四阶段：生成统计信息")

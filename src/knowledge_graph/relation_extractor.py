@@ -105,8 +105,8 @@ class RelationExtractor:
             }
         }
         
-        # 置信度阈值
-        self.confidence_threshold = self.config.get('confidence_threshold', 0.6)
+        # 置信度阈值 - 降低阈值以获得更多关系
+        self.confidence_threshold = self.config.get('confidence_threshold', 0.3)
         
     def _init_semantic_components(self) -> None:
         """初始化语义推理组件"""
@@ -401,7 +401,7 @@ class RelationExtractor:
     
     def _get_field_value(self, row: pd.Series, field_pattern: str) -> Optional[str]:
         """
-        获取字段值，支持模糊匹配
+        获取字段值，支持模糊匹配和备选字段
         
         Args:
             row: 数据行
@@ -410,13 +410,40 @@ class RelationExtractor:
         Returns:
             Optional[str]: 字段值
         """
-        # 直接匹配
-        if field_pattern in row.index:
-            value = row[field_pattern]
-            if pd.notna(value) and str(value).strip():
-                return str(value).strip()
+        # 定义字段备选方案
+        field_alternatives = {
+            'unit_name': ['ZT_JGMC', 'JGMC', 'FWCS_JGMC', 'YY_JGMC', 'NSYLJGMC', '机构名称', '单位名称'],
+            'unit_address': ['ZCDZ', 'FWCS_DZ', 'NSYLJGDZ', '注册地址', '地址'],
+            'legal_person': ['FDDBR', 'YY_FRXM', 'NSYLJGFR', '法定代表人', '法人'],
+            'contact_phone': ['YY_LXDH', 'LXDH', '联系电话', '电话'],
+            'company_name': ['ZT_JGMC', 'JGMC', 'FWCS_JGMC', 'YY_JGMC', '公司名称'],
+            'address': ['ZCDZ', 'FWCS_DZ', 'NSYLJGDZ', '地址'],
+            'person_name': ['YY_FRXM', 'FDDBR', 'NSYLJGFR', '姓名', '人员']
+        }
         
-        # 模糊匹配
+        # 获取备选字段列表
+        alternatives = field_alternatives.get(field_pattern, [field_pattern])
+        
+        # 按优先级尝试每个备选字段
+        for alt_field in alternatives:
+            # 直接匹配
+            if alt_field in row.index:
+                value = row[alt_field]
+                if pd.notna(value) and str(value).strip() and str(value).strip() != '':
+                    return str(value).strip()
+            
+            # 模糊匹配
+            alt_field_lower = alt_field.lower()
+            for col in row.index:
+                col_lower = col.lower()
+                if (alt_field_lower in col_lower or 
+                    col_lower in alt_field_lower or
+                    self._are_similar_fields(alt_field_lower, col_lower)):
+                    value = row[col]
+                    if pd.notna(value) and str(value).strip() and str(value).strip() != '':
+                        return str(value).strip()
+        
+        # 原有的模糊匹配逻辑作为最后备选
         field_pattern_lower = field_pattern.lower()
         for col in row.index:
             col_lower = col.lower()
@@ -424,7 +451,7 @@ class RelationExtractor:
                 col_lower in field_pattern_lower or
                 self._are_similar_fields(field_pattern_lower, col_lower)):
                 value = row[col]
-                if pd.notna(value) and str(value).strip():
+                if pd.notna(value) and str(value).strip() and str(value).strip() != '':
                     return str(value).strip()
         
         return None
@@ -440,26 +467,40 @@ class RelationExtractor:
         Returns:
             bool: 是否相似
         """
-        # 定义同义词映射
+        # 扩展的同义词映射
         synonyms = {
-            'name': ['名称', '姓名', 'dwmc', 'unit_name'],
-            'address': ['地址', '位置', 'dwdz', 'unit_address'],
-            'phone': ['电话', '手机', 'lxdh', 'contact_phone'],
-            'legal_person': ['法人', '代表', 'fddbr', 'legal_people'],
-            'manager': ['管理', '负责', '经理', 'security_manager']
+            'name': ['名称', '姓名', 'dwmc', 'unit_name', 'jgmc', 'zt_jgmc', 'fwcs_jgmc', 'yy_jgmc', 'nsyljgmc'],
+            'address': ['地址', '位置', 'dwdz', 'unit_address', 'zcdz', 'fwcs_dz', 'nsyljgdz'],
+            'phone': ['电话', '手机', 'lxdh', 'contact_phone', 'yy_lxdh', 'dh'],
+            'legal_person': ['法人', '代表', 'fddbr', 'legal_people', 'yy_frxm', 'nsyljgfr', 'frxm'],
+            'manager': ['管理', '负责', '经理', 'security_manager', 'nsyljgzyfzr'],
+            'organization': ['机构', '组织', '单位', 'jg', 'dw'],
+            'location': ['位置', '地点', '地址', 'wz', 'dd', 'dz']
         }
         
+        # 转换为小写进行比较
+        field1_lower = field1.lower()
+        field2_lower = field2.lower()
+        
         for key, values in synonyms.items():
-            if ((field1 in values and field2 in values) or
-                (key in field1 and any(v in field2 for v in values)) or
-                (key in field2 and any(v in field1 for v in values))):
+            # 将所有值转换为小写
+            values_lower = [v.lower() for v in values]
+            
+            if ((field1_lower in values_lower and field2_lower in values_lower) or
+                (key in field1_lower and any(v in field2_lower for v in values_lower)) or
+                (key in field2_lower and any(v in field1_lower for v in values_lower))):
+                return True
+        
+        # 检查直接包含关系
+        if len(field1_lower) > 2 and len(field2_lower) > 2:
+            if field1_lower in field2_lower or field2_lower in field1_lower:
                 return True
         
         return False
     
     def _find_matching_entity(self, value: str, entities: List[Entity]) -> Optional[Entity]:
         """
-        查找匹配的实体
+        查找匹配的实体（优化版：更宽松的匹配）
         
         Args:
             value: 要匹配的值
@@ -468,6 +509,9 @@ class RelationExtractor:
         Returns:
             Optional[Entity]: 匹配的实体
         """
+        if not value or not value.strip():
+            return None
+            
         value_lower = value.lower().strip()
         
         # 精确匹配
@@ -487,15 +531,46 @@ class RelationExtractor:
                 if str(prop_value).lower().strip() == value_lower:
                     return entity
         
-        # 部分匹配（用于长文本）
-        if len(value) > 5:
+        # 部分匹配（降低长度要求）
+        if len(value) > 3:
             for entity in entities:
                 entity_label_lower = entity.label.lower()
                 if (value_lower in entity_label_lower or 
                     entity_label_lower in value_lower):
                     return entity
         
+        # 更宽松的匹配：基于关键词
+        if len(value) > 2:
+            value_keywords = set(value_lower.split())
+            for entity in entities:
+                entity_keywords = set(entity.label.lower().split())
+                # 如果有共同关键词，认为匹配
+                if value_keywords & entity_keywords:
+                    return entity
+        
+        # 最后的尝试：模糊匹配（适用于短字符串）
+        if len(value) >= 2:
+            for entity in entities:
+                # 计算简单相似度
+                if self._simple_similarity(value_lower, entity.label.lower()) > 0.6:
+                    return entity
+        
         return None
+    
+    def _simple_similarity(self, str1: str, str2: str) -> float:
+        """计算简单字符串相似度"""
+        if not str1 or not str2:
+            return 0.0
+        if str1 == str2:
+            return 1.0
+        
+        # Jaccard相似度
+        set1 = set(str1)
+        set2 = set(str2)
+        intersection = len(set1 & set2)
+        union = len(set1 | set2)
+        
+        return intersection / union if union > 0 else 0.0
     
     def _create_relation(self, relation_type: RelationType, 
                         rule: Dict[str, Any]) -> Relation:

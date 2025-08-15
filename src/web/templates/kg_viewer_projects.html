@@ -262,12 +262,21 @@
             // 立即强制隐藏任何残留的加载状态
             setTimeout(() => {
                 console.log('🔧 执行强制模态框清理...');
-                const loadingModal = document.getElementById('loadingModal');
-                if (loadingModal) {
-                    loadingModal.style.display = 'none';
-                    loadingModal.classList.remove('show', 'fade');
-                    loadingModal.setAttribute('aria-hidden', 'true');
-                }
+                
+                // 清理所有模态框（包括删除相关的）
+                const allModals = ['loadingModal', 'deleteConfirmModal', 'deleteProgressModal'];
+                allModals.forEach(modalId => {
+                    const modalEl = document.getElementById(modalId);
+                    if (modalEl) {
+                        modalEl.style.display = 'none';
+                        modalEl.classList.remove('show', 'fade');
+                        modalEl.setAttribute('aria-hidden', 'true');
+                        modalEl.removeAttribute('aria-modal');
+                        modalEl.removeAttribute('role');
+                        console.log(`✅ 清理模态框: ${modalId}`);
+                    }
+                });
+                
                 document.querySelectorAll('.modal-backdrop').forEach(backdrop => backdrop.remove());
                 document.body.classList.remove('modal-open');
                 document.body.style.paddingRight = '';
@@ -283,6 +292,34 @@
             
             // 加载项目列表
             loadProjects();
+            
+            // 设置定期清理机制，防止模态框卡住
+            setInterval(() => {
+                // 检查是否有残留的删除进度模态框
+                const deleteProgressModal = document.getElementById('deleteProgressModal');
+                if (deleteProgressModal && deleteProgressModal.style.display !== 'none') {
+                    const modalBody = deleteProgressModal.querySelector('.modal-body');
+                    if (modalBody && modalBody.textContent.includes('正在删除知识图谱')) {
+                        console.warn('🚨 检测到可能卡住的删除进度模态框，执行强制清理...');
+                        
+                        deleteProgressModal.style.display = 'none';
+                        deleteProgressModal.classList.remove('show', 'fade');
+                        deleteProgressModal.setAttribute('aria-hidden', 'true');
+                        deleteProgressModal.removeAttribute('aria-modal');
+                        deleteProgressModal.removeAttribute('role');
+                        
+                        // 清理Bootstrap残留
+                        document.querySelectorAll('.modal-backdrop').forEach(backdrop => {
+                            backdrop.remove();
+                        });
+                        document.body.classList.remove('modal-open');
+                        document.body.style.paddingRight = '';
+                        document.body.style.overflow = '';
+                        
+                        console.log('✅ 强制清理卡住的删除模态框完成');
+                    }
+                }
+            }, 2000); // 每2秒检查一次
             
             // 定期检查并清理任何残留的加载状态
             setInterval(() => {
@@ -668,8 +705,39 @@
 
                 const result = await response.json();
 
-                // 隐藏进度对话框
-                deleteProgressModal.hide();
+                // 隐藏进度对话框 - 使用强制隐藏机制
+                console.log('开始隐藏删除进度模态框...');
+                
+                // 方法1: Bootstrap方式隐藏
+                if (deleteProgressModal) {
+                    try {
+                        deleteProgressModal.hide();
+                        console.log('✅ Bootstrap模态框隐藏成功');
+                    } catch (e) {
+                        console.warn('Bootstrap模态框隐藏失败:', e);
+                    }
+                }
+
+                // 方法2: 强制DOM隐藏（立即执行）
+                const modalEl = document.getElementById('deleteProgressModal');
+                if (modalEl) {
+                    modalEl.style.display = 'none';
+                    modalEl.classList.remove('show', 'fade');
+                    modalEl.setAttribute('aria-hidden', 'true');
+                    modalEl.removeAttribute('aria-modal');
+                    modalEl.removeAttribute('role');
+                    console.log('✅ DOM强制隐藏成功');
+                }
+
+                // 方法3: 清理所有Bootstrap残留
+                document.querySelectorAll('.modal-backdrop').forEach(backdrop => {
+                    backdrop.remove();
+                });
+                document.body.classList.remove('modal-open');
+                document.body.style.paddingRight = '';
+                document.body.style.overflow = '';
+
+                console.log('✅ 删除进度模态框完全清理完成');
 
                 // 显示成功消息
                 alert(`✅ 项目 "${currentProject}" 的知识图谱已成功删除！`);
@@ -685,8 +753,39 @@
                 console.log('删除操作完成:', result);
 
             } catch (error) {
-                // 隐藏进度对话框
-                deleteProgressModal.hide();
+                // 隐藏进度对话框 - 使用强制隐藏机制
+                console.log('删除失败，开始隐藏删除进度模态框...');
+                
+                // 方法1: Bootstrap方式隐藏
+                if (deleteProgressModal) {
+                    try {
+                        deleteProgressModal.hide();
+                        console.log('✅ Bootstrap模态框隐藏成功');
+                    } catch (e) {
+                        console.warn('Bootstrap模态框隐藏失败:', e);
+                    }
+                }
+
+                // 方法2: 强制DOM隐藏
+                const modalEl = document.getElementById('deleteProgressModal');
+                if (modalEl) {
+                    modalEl.style.display = 'none';
+                    modalEl.classList.remove('show', 'fade');
+                    modalEl.setAttribute('aria-hidden', 'true');
+                    modalEl.removeAttribute('aria-modal');
+                    modalEl.removeAttribute('role');
+                    console.log('✅ DOM强制隐藏成功');
+                }
+
+                // 方法3: 清理所有Bootstrap残留
+                document.querySelectorAll('.modal-backdrop').forEach(backdrop => {
+                    backdrop.remove();
+                });
+                document.body.classList.remove('modal-open');
+                document.body.style.paddingRight = '';
+                document.body.style.overflow = '';
+
+                console.log('✅ 删除进度模态框完全清理完成');
                 
                 console.error('删除操作失败:', error);
                 alert(`❌ 删除失败: ${error.message}`);

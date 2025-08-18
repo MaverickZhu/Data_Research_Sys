@@ -649,64 +649,71 @@ function updateRelationsList() {
         return;
     }
 
-    const html = relations.map((relation, index) => `
-        <div class="relation-item" onclick="selectRelation('${index}')">
-            <div class="d-flex justify-content-between align-items-start">
-                <div class="flex-grow-1">
-                    <div class="relation-display">
-                        <span class="subject text-primary">${relation.subject?.label || 'Unknown'}</span>
-                        <i class="fas fa-arrow-right mx-2 text-muted"></i>
-                        <span class="predicate badge badge-primary">${relation.predicate?.type || 'Unknown'}</span>
-                        <i class="fas fa-arrow-right mx-2 text-muted"></i>
-                        <span class="object text-success">${relation.object?.label || 'Unknown'}</span>
-                    </div>
-                    <div class="mt-1">
-                        <small class="text-muted">
-                            ${relation.subject?.type || 'Unknown'} → ${relation.object?.type || 'Unknown'}
-                        </small>
-                    </div>
-                </div>
-                <small class="relation-confidence">${relation.predicate?.confidence ? (relation.predicate.confidence * 100).toFixed(1) + '%' : ''}</small>
-            </div>
-        </div>
-    `).join('');
+         const html = relations.map((relation, index) => `
+         <div class="relation-item" onclick="selectRelation('${index}')">
+             <div class="d-flex justify-content-between align-items-start">
+                 <div class="flex-grow-1">
+                     <div class="relation-display">
+                         <span class="subject text-primary">${relation.subject_label || 'Unknown'}</span>
+                         <i class="fas fa-arrow-right mx-2 text-muted"></i>
+                         <span class="predicate badge bg-primary">${relation.type || relation.predicate || 'Unknown'}</span>
+                         <i class="fas fa-arrow-right mx-2 text-muted"></i>
+                         <span class="object text-success">${relation.object_label || 'Unknown'}</span>
+                     </div>
+                     <div class="mt-1">
+                         <small class="text-muted">
+                             实体 → ${relation.type || relation.predicate || 'Unknown'} → 实体
+                         </small>
+                     </div>
+                 </div>
+                 <small class="relation-confidence">${relation.confidence ? (relation.confidence * 100).toFixed(1) + '%' : ''}</small>
+             </div>
+         </div>
+     `).join('');
 
     container.innerHTML = html;
 }
 
-// 选择实体
-function selectEntity(entityId) {
-    // 移除之前的选择
-    document.querySelectorAll('.entity-item.selected').forEach(item => {
-        item.classList.remove('selected');
-    });
+ // 选择实体
+ function selectEntity(entityId) {
+     console.log('选择实体:', entityId);
+     
+     // 移除之前的选择
+     document.querySelectorAll('.entity-item.selected').forEach(item => {
+         item.classList.remove('selected');
+     });
+ 
+     // 选择当前实体
+     event.target.closest('.entity-item').classList.add('selected');
+ 
+     // 查找实体数据
+     const entity = currentData.entities.find(e => e.id === entityId);
+     if (entity) {
+         showEntityDetails(entity);
+         // 加载相关关系
+         loadEntityRelations(entityId);
+     } else {
+         console.error('未找到实体:', entityId);
+         showError('未找到选中的实体');
+     }
+ }
 
-    // 选择当前实体
-    event.target.closest('.entity-item').classList.add('selected');
-
-    // 查找实体数据
-    const entity = currentData.entities.find(e => e.id === entityId);
-    if (entity) {
-        showEntityDetails(entity);
-    }
-}
-
-// 选择关系
-function selectRelation(relationId) {
-    // 移除之前的选择
-    document.querySelectorAll('.relation-item.selected').forEach(item => {
-        item.classList.remove('selected');
-    });
-
-    // 选择当前关系
-    event.target.closest('.relation-item').classList.add('selected');
-
-    // 查找关系数据
-    const relation = currentData.relations.find(r => r.id === relationId);
-    if (relation) {
-        showRelationDetails(relation);
-    }
-}
+ // 选择关系
+ function selectRelation(relationIndex) {
+     // 移除之前的选择
+     document.querySelectorAll('.relation-item.selected').forEach(item => {
+         item.classList.remove('selected');
+     });
+ 
+     // 选择当前关系
+     event.target.closest('.relation-item').classList.add('selected');
+ 
+     // 通过索引查找关系数据
+     const relation = currentData.relations[parseInt(relationIndex)];
+     if (relation) {
+         showRelationDetails(relation);
+     }
+ }
 
 // 显示实体详情
 function showEntityDetails(entity) {
@@ -748,47 +755,49 @@ function showEntityDetails(entity) {
     container.innerHTML = html;
 }
 
-// 显示关系详情
-function showRelationDetails(relation) {
-    const container = document.getElementById('detail-panel');
-    const properties = relation.properties || {};
-
-    const html = `
-        <div class="detail-section">
-            <h6><i class="fas fa-arrow-right text-success"></i> 关系信息</h6>
-            <table class="table table-sm">
-                <tr><td><strong>ID:</strong></td><td>${relation.id}</td></tr>
-                <tr><td><strong>标签:</strong></td><td>${relation.label || '无'}</td></tr>
-                <tr><td><strong>类型:</strong></td><td><span class="badge bg-success">${relation.type}</span></td></tr>
-                <tr><td><strong>置信度:</strong></td><td>${relation.confidence ? (relation.confidence * 100).toFixed(1) + '%' : '无'}</td></tr>
-                <tr><td><strong>定义域:</strong></td><td>${relation.domain || '无'}</td></tr>
-                <tr><td><strong>值域:</strong></td><td>${relation.range || '无'}</td></tr>
-            </table>
-        </div>
-        
-        <div class="detail-section">
-            <h6><i class="fas fa-cogs"></i> 关系特性</h6>
-            <table class="table table-sm">
-                <tr><td><strong>对称性:</strong></td><td>${relation.is_symmetric ? '是' : '否'}</td></tr>
-                <tr><td><strong>传递性:</strong></td><td>${relation.is_transitive ? '是' : '否'}</td></tr>
-                <tr><td><strong>逆关系:</strong></td><td>${relation.inverse_relation || '无'}</td></tr>
-            </table>
-        </div>
-        
-        <div class="detail-section">
-            <h6><i class="fas fa-tags"></i> 属性信息</h6>
-            ${Object.keys(properties).length > 0 ? `
-                <table class="table table-sm">
-                    ${Object.entries(properties).map(([key, value]) => `
-                        <tr><td><strong>${key}:</strong></td><td>${value}</td></tr>
-                    `).join('')}
-                </table>
-            ` : '<p class="text-muted">无属性信息</p>'}
-        </div>
-    `;
-
-    container.innerHTML = html;
-}
+ // 显示关系详情
+ function showRelationDetails(relation) {
+     const container = document.getElementById('detail-panel');
+     const properties = relation.properties || {};
+ 
+     const html = `
+         <div class="detail-section">
+             <h6><i class="fas fa-arrow-right text-success"></i> 关系信息</h6>
+             <table class="table table-sm">
+                 <tr><td><strong>ID:</strong></td><td>${relation.id || '无'}</td></tr>
+                 <tr><td><strong>关系类型:</strong></td><td><span class="badge bg-success">${relation.type || relation.predicate || '无'}</span></td></tr>
+                 <tr><td><strong>主体:</strong></td><td>${relation.subject_label || '无'}</td></tr>
+                 <tr><td><strong>客体:</strong></td><td>${relation.object_label || '无'}</td></tr>
+                 <tr><td><strong>置信度:</strong></td><td>${relation.confidence ? (relation.confidence * 100).toFixed(1) + '%' : '无'}</td></tr>
+                 <tr><td><strong>图谱来源:</strong></td><td>${relation.graph_name || '无'}</td></tr>
+             </table>
+         </div>
+         
+         <div class="detail-section">
+             <h6><i class="fas fa-link"></i> 三元组表示</h6>
+             <div class="alert alert-info">
+                 <strong>${relation.subject_label || '主体'}</strong> 
+                 <i class="fas fa-arrow-right mx-2"></i>
+                 <strong>${relation.type || relation.predicate || '关系'}</strong>
+                 <i class="fas fa-arrow-right mx-2"></i>
+                 <strong>${relation.object_label || '客体'}</strong>
+             </div>
+         </div>
+         
+         ${Object.keys(properties).length > 0 ? `
+         <div class="detail-section">
+             <h6><i class="fas fa-tags"></i> 属性信息</h6>
+             <table class="table table-sm">
+                 ${Object.entries(properties).map(([key, value]) => `
+                     <tr><td><strong>${key}:</strong></td><td>${value}</td></tr>
+                 `).join('')}
+             </table>
+         </div>
+         ` : ''}
+     `;
+ 
+     container.innerHTML = html;
+ }
 
 // 搜索知识图谱
 async function searchKnowledgeGraph() {
@@ -859,78 +868,13 @@ function exportData() {
     showSuccess('数据导出成功');
 }
 
-// 查看完整图谱
-function viewFullGraph() {
-    // TODO: 实现图谱可视化功能
-    showInfo('图谱可视化功能正在开发中...');
-}
+ // 查看完整图谱
+ function viewFullGraph() {
+     // 跳转到图谱可视化页面
+     window.open('/kg_visualization', '_blank');
+ }
 
-// 选择实体
-function selectEntity(entityId) {
-    console.log('选择实体:', entityId);
-    
-    // 查找选中的实体
-    const entity = currentData.entities.find(e => e.id === entityId);
-    if (!entity) {
-        console.error('未找到实体:', entityId);
-        showError('未找到选中的实体');
-        return;
-    }
-    
-    // 显示实体详情
-    showEntityDetails(entity);
-    
-    // 查找相关关系
-    loadEntityRelations(entityId);
-}
 
-// 显示实体详情
-function showEntityDetails(entity) {
-    const container = document.getElementById('detail-panel');
-    
-    const properties = entity.properties || {};
-    const html = `
-        <div class="entity-details">
-            <div class="d-flex justify-content-between align-items-start mb-3">
-                <div>
-                    <h5 class="mb-1">${entity.label || entity.id}</h5>
-                    <span class="badge bg-primary">${entity.type || 'Unknown'}</span>
-                </div>
-                <small class="text-muted">
-                    ${entity.confidence ? '置信度: ' + (entity.confidence * 100).toFixed(1) + '%' : ''}
-                </small>
-            </div>
-            
-            <div class="mb-3">
-                <h6>基本信息</h6>
-                <table class="table table-sm">
-                    <tr><td><strong>ID:</strong></td><td>${entity.id || '未知'}</td></tr>
-                    <tr><td><strong>标签:</strong></td><td>${entity.label || '未知'}</td></tr>
-                    <tr><td><strong>类型:</strong></td><td>${entity.type || '未知'}</td></tr>
-                    ${entity.confidence ? `<tr><td><strong>置信度:</strong></td><td>${(entity.confidence * 100).toFixed(1)}%</td></tr>` : ''}
-                </table>
-            </div>
-            
-            ${Object.keys(properties).length > 0 ? `
-                <div class="mb-3">
-                    <h6>属性信息</h6>
-                    <table class="table table-sm">
-                        ${Object.entries(properties).map(([key, value]) => `
-                            <tr><td><strong>${key}:</strong></td><td>${value}</td></tr>
-                        `).join('')}
-                    </table>
-                </div>
-            ` : ''}
-            
-            <div class="text-muted small">
-                <i class="fas fa-info-circle"></i> 
-                点击其他实体或关系查看详情
-            </div>
-        </div>
-    `;
-    
-    container.innerHTML = html;
-}
 
 // 加载实体相关关系
 async function loadEntityRelations(entityId) {
@@ -991,57 +935,7 @@ function updateEntityRelationsList(relations, selectedEntityId) {
     container.innerHTML = html;
 }
 
-// 选择关系
-function selectRelation(relationId) {
-    console.log('选择关系:', relationId);
-    
-    // 查找选中的关系
-    const relation = currentData.relations.find(r => r.id === relationId);
-    if (!relation) {
-        console.error('未找到关系:', relationId);
-        showError('未找到选中的关系');
-        return;
-    }
-    
-    // 显示关系详情
-    showRelationDetails(relation);
-}
 
-// 显示关系详情
-function showRelationDetails(relation) {
-    const container = document.getElementById('detail-panel');
-    
-    const html = `
-        <div class="relation-details">
-            <div class="d-flex justify-content-between align-items-start mb-3">
-                <div>
-                    <h5 class="mb-1">${relation.predicate || relation.type || '未知关系'}</h5>
-                    <span class="badge bg-success">关系</span>
-                </div>
-                <small class="text-muted">
-                    ${relation.confidence ? '置信度: ' + (relation.confidence * 100).toFixed(1) + '%' : ''}
-                </small>
-            </div>
-            
-            <div class="mb-3">
-                <h6>关系信息</h6>
-                <table class="table table-sm">
-                    <tr><td><strong>关系类型:</strong></td><td>${relation.predicate || relation.type || '未知'}</td></tr>
-                    <tr><td><strong>主体:</strong></td><td>${relation.subject_label || relation.subject?.label || '未知'}</td></tr>
-                    <tr><td><strong>客体:</strong></td><td>${relation.object_label || relation.object?.label || '未知'}</td></tr>
-                    ${relation.confidence ? `<tr><td><strong>置信度:</strong></td><td>${(relation.confidence * 100).toFixed(1)}%</td></tr>` : ''}
-                </table>
-            </div>
-            
-            <div class="text-muted small">
-                <i class="fas fa-info-circle"></i> 
-                点击其他实体或关系查看详情
-            </div>
-        </div>
-    `;
-    
-    container.innerHTML = html;
-}
 
 // 工具函数
 function showError(message) {

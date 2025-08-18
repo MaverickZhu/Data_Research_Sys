@@ -118,6 +118,10 @@
                                             <small>三元组数量</small>
                                         </div>
                                         <div class="ms-3">
+                                            <button id="table-schema-btn" class="btn btn-outline-success btn-sm me-2" onclick="viewTableSchema()" style="display: none;">
+                                                <i class="fas fa-project-diagram me-1"></i>
+                                                表结构图谱
+                                            </button>
                                             <button id="delete-project-btn" class="btn btn-outline-danger btn-sm" onclick="showDeleteConfirmation()" style="display: none;">
                                                 <i class="fas fa-trash-alt me-1"></i>
                                                 删除图谱
@@ -433,8 +437,9 @@
                 document.getElementById('project-description').textContent = 
                     `当前查看模式: ${currentViewMode === 'global' ? '全局视图（带项目标签）' : '项目视图（独立数据）'}`;
                 
-                // 显示删除按钮
+                // 显示删除按钮和表结构图谱按钮
                 document.getElementById('delete-project-btn').style.display = 'block';
+                document.getElementById('table-schema-btn').style.display = 'block';
                 
             } catch (error) {
                 console.error('加载项目数据失败:', error);
@@ -448,20 +453,22 @@
         async function loadProjectData(projectName) {
             console.log(`开始加载项目数据: ${projectName}`);
             
-            // 并行加载统计信息和实体数据
-            const [statsResponse, entitiesResponse] = await Promise.all([
+            // 并行加载统计信息、实体数据和关系数据
+            const [statsResponse, entitiesResponse, relationsResponse] = await Promise.all([
                 fetch(`/api/kg/projects/${projectName}/stats?global=${currentViewMode === 'global'}`),
-                fetch(`/api/kg/projects/${projectName}/entities?limit=100&global=${currentViewMode === 'global'}`)
+                fetch(`/api/kg/projects/${projectName}/entities?limit=100&global=${currentViewMode === 'global'}`),
+                fetch(`/api/kg/projects/${projectName}/relations?limit=100&global=${currentViewMode === 'global'}`)
             ]);
 
-            if (!statsResponse.ok || !entitiesResponse.ok) {
-                throw new Error(`API请求失败: stats=${statsResponse.status}, entities=${entitiesResponse.status}`);
+            if (!statsResponse.ok || !entitiesResponse.ok || !relationsResponse.ok) {
+                throw new Error(`API请求失败: stats=${statsResponse.status}, entities=${entitiesResponse.status}, relations=${relationsResponse.status}`);
             }
 
             const stats = await statsResponse.json();
             const entities = await entitiesResponse.json();
+            const relations = await relationsResponse.json();
 
-            console.log('项目数据加载成功:', { stats, entities });
+            console.log('项目数据加载成功:', { stats, entities, relations });
 
             // 更新统计信息
             document.getElementById('project-entities-count').textContent = stats.total_entities || 0;
@@ -472,14 +479,9 @@
             renderEntitiesList(entities.entities || []);
             document.getElementById('entities-count').textContent = `${entities.entities?.length || 0} 个实体`;
 
-            // 暂时显示关系为空（后续可以添加关系API）
-            document.getElementById('relations-list').innerHTML = `
-                <div class="text-center py-4 text-muted">
-                    <i class="fas fa-project-diagram fa-2x mb-2"></i>
-                    <div>关系数据开发中</div>
-                </div>
-            `;
-            document.getElementById('relations-count').textContent = '0 个关系';
+            // 更新关系列表
+            renderRelationsList(relations.relations || []);
+            document.getElementById('relations-count').textContent = `${relations.relations?.length || 0} 个关系`;
         }
 
         // 渲染实体列表
@@ -546,6 +548,77 @@
                     </div>
                 `;
             }
+        }
+
+        // 渲染关系列表
+        function renderRelationsList(relations) {
+            const container = document.getElementById('relations-list');
+            
+            console.log('开始渲染关系列表:', relations);
+            
+            if (relations.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-4 text-muted">
+                        <i class="fas fa-project-diagram fa-2x mb-2"></i>
+                        <div>暂无关系数据</div>
+                    </div>
+                `;
+                return;
+            }
+            
+            try {
+                const html = relations.map((relation, index) => {
+                    // 安全处理关系类型
+                    let relationType = 'UNKNOWN';
+                    try {
+                        relationType = relation.type || relation.predicate || 'UNKNOWN';
+                    } catch (typeError) {
+                        console.warn(`处理关系类型失败 (${index}):`, typeError, relation);
+                        relationType = 'ERROR';
+                    }
+
+                    return `
+                        <div class="relation-item p-3 mb-2 rounded" onclick="selectRelation('${index}')">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div class="flex-grow-1">
+                                    <div class="relation-display">
+                                        <span class="subject text-primary">${relation.subject_label || 'Unknown'}</span>
+                                        <i class="fas fa-arrow-right mx-2 text-muted"></i>
+                                        <span class="predicate badge bg-primary">${relationType}</span>
+                                        <i class="fas fa-arrow-right mx-2 text-muted"></i>
+                                        <span class="object text-success">${relation.object_label || 'Unknown'}</span>
+                                    </div>
+                                    <div class="mt-1">
+                                        <small class="text-muted">
+                                            ${relation.graph_name ? `<span class="badge bg-info me-1">${relation.graph_name}</span>` : ''}
+                                            置信度: ${relation.confidence ? (relation.confidence * 100).toFixed(1) + '%' : 'N/A'}
+                                        </small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+                
+                container.innerHTML = html;
+                console.log('关系列表渲染完成');
+                
+            } catch (error) {
+                console.error('渲染关系列表时出错:', error);
+                container.innerHTML = `
+                    <div class="text-center py-4 text-danger">
+                        <i class="fas fa-exclamation-triangle fa-2x mb-2"></i>
+                        <div>渲染关系列表失败</div>
+                        <small>${error.message}</small>
+                    </div>
+                `;
+            }
+        }
+
+        // 选择关系
+        function selectRelation(relationIndex) {
+            console.log('选择关系:', relationIndex);
+            // 这里可以添加关系详情显示逻辑
         }
 
         // 切换视图模式
@@ -634,6 +707,17 @@
                 document.getElementById('confirmDeleteBtn').disabled = !this.checked;
             });
         });
+
+        // 查看表结构图谱
+        function viewTableSchema() {
+            if (!currentProject) {
+                alert('请先选择一个项目');
+                return;
+            }
+            
+            // 跳转到表结构图谱可视化页面
+            window.open(`/kg_table_schema_visualization?project=${encodeURIComponent(currentProject)}`, '_blank');
+        }
 
         // 显示删除确认对话框
         async function showDeleteConfirmation() {

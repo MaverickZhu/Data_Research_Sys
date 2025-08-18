@@ -3,7 +3,7 @@ Flask Web应用主程序
 提供数据匹配进度管理的Web界面
 """
 
-from flask import Flask, render_template, jsonify, request, send_file
+from flask import Flask, render_template, jsonify, request, send_file, current_app
 from flask_cors import CORS
 import logging
 import yaml
@@ -164,6 +164,9 @@ def create_app():
                 'quality_threshold': 0.8
             }
         )
+        
+        # 设置Flask配置，包括MongoDB客户端
+        app.config['MONGO_CLIENT'] = db_manager.mongo_client
         
         logger.info("Flask应用初始化成功（包含知识图谱组件）")
         return app
@@ -1481,6 +1484,16 @@ def kg_viewer_page():
         return render_template('kg_viewer.html')
     except Exception as e:
         logger.error(f"知识图谱浏览页面加载失败: {str(e)}")
+        return render_template('error.html', error=str(e))
+
+
+@app.route('/kg_visualization')
+def kg_visualization_page():
+    """知识图谱可视化页面"""
+    try:
+        return render_template('kg_visualization.html')
+    except Exception as e:
+        logger.error(f"知识图谱可视化页面渲染失败: {str(e)}")
         return render_template('error.html', error=str(e))
 
 
@@ -5882,6 +5895,362 @@ def delete_entities_by_type(entity_type):
         logger.error(f"按类型删除实体失败: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/api/kg/projects/<project_name>/relations', methods=['GET'])
+def get_project_relations(project_name):
+    """获取特定项目关系API"""
+    try:
+        logger.info(f"获取项目 {project_name} 的关系数据")
+        
+        # 获取查询参数
+        limit = int(request.args.get('limit', 100))
+        offset = int(request.args.get('offset', 0))
+        is_global = request.args.get('global', 'false').lower() == 'true'
+        
+        # 根据是否全局模式选择数据源
+        if is_global:
+            # 全局模式：从所有图谱获取关系
+            try:
+                # 直接调用全局关系查询逻辑
+                import falkordb
+                client = falkordb.FalkorDB(host='localhost', port=16379)
+                
+                # 获取所有图谱名称
+                graph_names = client.execute_command('GRAPH.LIST')
+                logger.info(f"找到 {len(graph_names)} 个图谱")
+                
+                project_relations = []
+                
+                for graph_name in graph_names:
+                    if project_name in graph_name:
+                        try:
+                            graph = client.select_graph(graph_name)
+                            query = """
+                            MATCH (s)-[r]->(o)
+                            RETURN s.entity_id AS subject_id, s.label AS subject_label,
+                                   type(r) AS predicate, r.confidence AS confidence,
+                                   o.entity_id AS object_id, o.label AS object_label
+                            LIMIT $limit
+                            """
+                            result = graph.query(query, {'limit': limit})
+                            
+                            for record in result.result_set:
+                                project_relations.append({
+                                    'subject_id': record[0],
+                                    'subject_label': record[1],
+                                    'predicate': record[2],
+                                    'type': record[2],
+                                    'confidence': record[3] if record[3] is not None else 0.9,
+                                    'object_id': record[4],
+                                    'object_label': record[5],
+                                    'graph_name': graph_name
+                                })
+                                
+                        except Exception as graph_error:
+                            logger.warning(f"查询图谱 {graph_name} 失败: {str(graph_error)}")
+                            continue
+                            
+                logger.info(f"全局模式找到 {len(project_relations)} 个项目关系")
+                
+            except Exception as global_error:
+                logger.error(f"全局模式查询失败: {str(global_error)}")
+                project_relations = []
+        else:
+            # 项目模式：从特定项目图谱获取关系
+            try:
+                # 直接使用FalkorDB查询项目特定图谱
+                import falkordb
+                client = falkordb.FalkorDB(host='localhost', port=16379)
+                
+                # 构建项目图谱名称
+                project_graph_name = f"knowledge_graph_project_{project_name}"
+                
+                try:
+                    graph = client.select_graph(project_graph_name)
+                    query = """
+                    MATCH (s)-[r]->(o)
+                    RETURN s.entity_id AS subject_id, s.label AS subject_label,
+                           type(r) AS predicate, r.confidence AS confidence,
+                           o.entity_id AS object_id, o.label AS object_label
+                    SKIP $offset LIMIT $limit
+                    """
+                    result = graph.query(query, {'offset': offset, 'limit': limit})
+                    
+                    project_relations = []
+                    for record in result.result_set:
+                        project_relations.append({
+                            'subject_id': record[0],
+                            'subject_label': record[1],
+                            'predicate': record[2],
+                            'type': record[2],
+                            'confidence': record[3] if record[3] is not None else 0.9,
+                            'object_id': record[4],
+                            'object_label': record[5],
+                            'graph_name': project_graph_name
+                        })
+                        
+                    logger.info(f"项目 {project_name} 查询到 {len(project_relations)} 个关系")
+                    
+                except Exception as graph_error:
+                    logger.warning(f"查询项目图谱 {project_graph_name} 失败: {str(graph_error)}")
+                    project_relations = []
+                
+            except Exception as store_error:
+                logger.error(f"项目 {project_name} FalkorDB查询失败: {str(store_error)}")
+                project_relations = []
+        
+        # 应用分页
+        total_relations = len(project_relations)
+        paginated_relations = project_relations[offset:offset + limit]
+        
+        logger.info(f"项目 {project_name} 关系API返回: {len(paginated_relations)}/{total_relations} 个关系")
+        
+        return jsonify({
+            'relations': paginated_relations,
+            'total': total_relations,
+            'limit': limit,
+            'offset': offset,
+            'project_name': project_name,
+            'global_mode': is_global,
+            'status': 'success'
+        })
+        
+    except Exception as e:
+        logger.error(f"获取项目 {project_name} 关系失败: {str(e)}")
+        return jsonify({
+            'error': str(e),
+            'relations': [],
+            'total': 0,
+            'project_name': project_name,
+            'status': 'failed'
+        }), 500
+
+
+@app.route('/api/kg/projects/<project_name>/table_schema', methods=['GET'])
+def get_project_table_schema(project_name):
+    """获取项目表结构信息API"""
+    try:
+        logger.info(f"获取项目 {project_name} 的表结构信息")
+        
+        # 直接使用FalkorDB查询项目图谱中的表结构信息
+        import falkordb
+        client = falkordb.FalkorDB(host='localhost', port=16379)
+        
+        # 构建项目图谱名称
+        project_graph_name = f"knowledge_graph_project_{project_name}"
+        
+        try:
+            graph = client.select_graph(project_graph_name)
+            
+            # 查询所有实体的source_table信息，获取表结构
+            query = """
+            MATCH (e)
+            WHERE e.source_table IS NOT NULL
+            RETURN DISTINCT e.source_table AS table_name, 
+                   COUNT(e) AS entity_count,
+                   COLLECT(DISTINCT e.type) AS entity_types
+            ORDER BY table_name
+            """
+            result = graph.query(query)
+            
+            tables = []
+            for record in result.result_set:
+                table_name = record[0]
+                entity_count = record[1]
+                entity_types = record[2] if record[2] else []
+                
+                # 查询该表的字段信息（通过实体属性推断）
+                field_query = f"""
+                MATCH (e)
+                WHERE e.source_table = '{table_name}'
+                RETURN KEYS(e) AS field_names
+                LIMIT 10
+                """
+                field_result = graph.query(field_query)
+                
+                # 收集所有字段名
+                all_fields = set()
+                for field_record in field_result.result_set:
+                    if field_record[0]:
+                        all_fields.update(field_record[0])
+                
+                # 过滤掉系统字段
+                system_fields = {'entity_id', 'label', 'type', 'confidence', 'source_table', 'graph_name'}
+                business_fields = [f for f in all_fields if f not in system_fields]
+                
+                tables.append({
+                    'table_name': table_name,
+                    'entity_count': entity_count,
+                    'entity_types': entity_types,
+                    'fields': sorted(business_fields),
+                    'field_count': len(business_fields)
+                })
+            
+            # 首先检查用户匹配结果，构建基于匹配的表间关系
+            user_table_relations = []
+            
+            # 检查MongoDB中的用户匹配结果
+            try:
+                # 使用全局数据库管理器
+                if not db_manager or not db_manager.mongo_client:
+                    logger.warning("数据库连接未初始化")
+                    user_table_relations = []
+                else:
+                    mongo_db = db_manager.mongo_client.get_database()
+                    
+                    # 查找项目相关的匹配结果表
+                    collection_names = mongo_db.list_collection_names()
+                    
+                    # 更精确的匹配逻辑 - 查找包含xp_jxjzdwxx的用户匹配结果表
+                    match_collections = []
+                    for name in collection_names:
+                        if 'user_match_results' in name and 'xp_jxjzdwxx' in name:
+                            match_collections.append(name)
+                    
+                    logger.info(f"找到 {len(match_collections)} 个匹配结果表: {match_collections}")
+                    
+                    # 调试信息：显示所有集合名称
+                    all_user_match_collections = [name for name in collection_names if 'user_match_results' in name]
+                    logger.info(f"所有用户匹配结果表: {all_user_match_collections}")
+                    
+                    for collection_name in match_collections:
+                        collection = mongo_db[collection_name]
+                        
+                        # 获取匹配结果样本来分析表间关系
+                        sample = collection.find_one()
+                        if sample and 'matched_fields' in sample:
+                            # 分析字段映射来确定源表和目标表
+                            matched_fields = sample['matched_fields']
+                            
+                            # 从字段映射推断表关系
+                            if len(matched_fields) > 0:
+                                # 从集合名称或数据中推断表名
+                                source_table = None
+                                target_table = None
+                                
+                                # 尝试从任务ID或集合名称推断表名
+                                if 'task_id' in sample:
+                                    task_id = sample['task_id']
+                                    # 从任务ID中提取表名信息
+                                    if 'xp_jxjzdwxx' in task_id:
+                                        source_table = 'xp_jxjzdwxx'
+                                        
+                                        # 根据集合名称或任务ID推断目标表
+                                        if '122051' in collection_name or '122109' in collection_name:
+                                            # 第一个匹配任务：xp_jxjzdwxx -> dwd_yljgxx
+                                            target_table = 'dwd_yljgxx'
+                                        elif '153502' in collection_name or '153515' in collection_name:
+                                            # 第二个匹配任务：xp_jxjzdwxx -> dwd_zzzhzj
+                                            target_table = 'dwd_zzzhzj'
+                                
+                                # 如果无法从任务ID推断，尝试其他方法
+                                if not source_table or not target_table:
+                                    # 从匹配字段推断（左边是源表字段，右边是目标表字段）
+                                    first_mapping = matched_fields[0].split('->')
+                                    if len(first_mapping) == 2:
+                                        source_field = first_mapping[0]
+                                        target_field = first_mapping[1]
+                                        
+                                        # 根据字段名称模式推断表名
+                                        if source_field in ['COMPANY_NAME', 'COMPANY_ADDRESS', 'COMPANY_LEGAL']:
+                                            source_table = 'xp_jxjzdwxx'
+                                        
+                                        if target_field in ['JGMC', 'ZCDZ', 'FDDBR']:
+                                            target_table = 'dwd_yljgxx'
+                                        elif target_field in ['YY_FRXM']:
+                                            target_table = 'dwd_zzzhzj'
+                                
+                                if source_table and target_table:
+                                    match_count = collection.count_documents({})
+                                    
+                                    # 分析字段映射关系
+                                    field_mappings = []
+                                    for mapping in matched_fields:
+                                        if '->' in mapping:
+                                            source_field, target_field = mapping.split('->')
+                                            field_mappings.append({
+                                                'source_field': source_field,
+                                                'target_field': target_field
+                                            })
+                                    
+                                    user_table_relations.append({
+                                        'source_table': source_table,
+                                        'target_table': target_table,
+                                        'relation_type': 'USER_MATCHED',
+                                        'relation_count': match_count,
+                                        'field_mappings': field_mappings,
+                                        'collection_name': collection_name
+                                    })
+                                    
+                                    logger.info(f"发现用户匹配关系: {source_table} -> {target_table} ({match_count} 条匹配)")
+                
+            except Exception as e:
+                logger.warning(f"查询用户匹配结果失败: {str(e)}")
+            
+            # 查询知识图谱中的表间关系（作为补充）
+            kg_table_relations = []
+            relations_query = """
+            MATCH (s)-[r]->(o)
+            WHERE s.source_table IS NOT NULL AND o.source_table IS NOT NULL
+              AND s.source_table <> o.source_table
+            RETURN s.source_table AS source_table, 
+                   o.source_table AS target_table,
+                   type(r) AS relation_type,
+                   COUNT(r) AS relation_count
+            ORDER BY relation_count DESC
+            """
+            relations_result = graph.query(relations_query)
+            
+            for rel_record in relations_result.result_set:
+                source_table = rel_record[0]
+                target_table = rel_record[1]
+                relation_type = rel_record[2]
+                relation_count = rel_record[3]
+                
+                kg_table_relations.append({
+                    'source_table': source_table,
+                    'target_table': target_table,
+                    'relation_type': relation_type,
+                    'relation_count': relation_count
+                })
+            
+            # 合并用户匹配关系和知识图谱关系
+            table_relations = user_table_relations + kg_table_relations
+            
+            logger.info(f"表间关系统计: 用户匹配关系 {len(user_table_relations)} 个, 知识图谱关系 {len(kg_table_relations)} 个")
+            
+            logger.info(f"项目 {project_name} 表结构查询完成: {len(tables)} 个表, {len(table_relations)} 个表间关系")
+            
+            return jsonify({
+                'tables': tables,
+                'table_relations': table_relations,
+                'project_name': project_name,
+                'total_tables': len(tables),
+                'total_table_relations': len(table_relations),
+                'status': 'success'
+            })
+            
+        except Exception as graph_error:
+            logger.warning(f"查询项目图谱 {project_graph_name} 失败: {str(graph_error)}")
+            return jsonify({
+                'error': f'项目图谱查询失败: {str(graph_error)}',
+                'tables': [],
+                'table_relations': [],
+                'project_name': project_name,
+                'status': 'failed'
+            }), 500
+        
+    except Exception as e:
+        logger.error(f"获取项目 {project_name} 表结构失败: {str(e)}")
+        return jsonify({
+            'error': str(e),
+            'tables': [],
+            'table_relations': [],
+            'project_name': project_name,
+            'status': 'failed'
+        }), 500
+
+
 @app.route('/kg_viewer_projects')
 def kg_viewer_projects_page():
     """按项目浏览知识图谱页面"""
@@ -5889,6 +6258,648 @@ def kg_viewer_projects_page():
         return render_template('kg_viewer_projects.html')
     except Exception as e:
         logger.error(f"项目图谱浏览页面加载失败: {str(e)}")
+        return render_template('error.html', error=str(e))
+
+
+@app.route('/api/kg/projects/<project_name>/column_relations', methods=['GET'])
+def get_project_column_relations(project_name):
+    """获取项目列间关系详细信息API"""
+    try:
+        logger.info(f"获取项目 {project_name} 的列间关系信息")
+        
+        # 直接使用FalkorDB查询项目图谱中的列间关系
+        import falkordb
+        client = falkordb.FalkorDB(host='localhost', port=16379)
+        
+        # 构建项目图谱名称
+        project_graph_name = f"knowledge_graph_project_{project_name}"
+        
+        try:
+            graph = client.select_graph(project_graph_name)
+            
+            # 查询列间关系 - 通过实体的source_column属性分析
+            column_relations_query = """
+            MATCH (s)-[r]->(o)
+            WHERE s.source_table IS NOT NULL AND o.source_table IS NOT NULL
+              AND s.source_column IS NOT NULL AND o.source_column IS NOT NULL
+            RETURN s.source_table AS source_table,
+                   s.source_column AS source_column,
+                   o.source_table AS target_table, 
+                   o.source_column AS target_column,
+                   type(r) AS relation_type,
+                   COUNT(r) AS relation_count,
+                   AVG(r.confidence) AS avg_confidence
+            ORDER BY relation_count DESC
+            LIMIT 100
+            """
+            
+            result = graph.query(column_relations_query)
+            
+            column_relations = []
+            for record in result.result_set:
+                source_table = record[0]
+                source_column = record[1] 
+                target_table = record[2]
+                target_column = record[3]
+                relation_type = record[4]
+                relation_count = record[5]
+                avg_confidence = record[6] if record[6] is not None else 0.9
+                
+                column_relations.append({
+                    'source_table': source_table,
+                    'source_column': source_column,
+                    'target_table': target_table,
+                    'target_column': target_column,
+                    'relation_type': relation_type,
+                    'relation_count': relation_count,
+                    'avg_confidence': round(avg_confidence, 3),
+                    'relation_id': f"{source_table}.{source_column}-{target_table}.{target_column}"
+                })
+            
+            # 查询匹配统计信息 - 从MongoDB获取已完成的匹配结果
+            match_statistics = {}
+            try:
+                # 查询用户匹配结果统计
+                match_results_collection = db_manager.get_collection('user_matching_results')
+                if match_results_collection:
+                    # 统计不同表间的匹配数量
+                    pipeline = [
+                        {'$match': {'status': 'completed'}},
+                        {'$group': {
+                            '_id': {
+                                'source_table': '$source_table',
+                                'target_table': '$target_table'
+                            },
+                            'match_count': {'$sum': 1},
+                            'avg_similarity': {'$avg': '$similarity_score'}
+                        }}
+                    ]
+                    
+                    match_stats = list(match_results_collection.aggregate(pipeline))
+                    
+                    for stat in match_stats:
+                        table_pair = f"{stat['_id']['source_table']}-{stat['_id']['target_table']}"
+                        match_statistics[table_pair] = {
+                            'match_count': stat['match_count'],
+                            'avg_similarity': round(stat.get('avg_similarity', 0), 3)
+                        }
+                        
+            except Exception as match_error:
+                logger.warning(f"查询匹配统计失败: {str(match_error)}")
+            
+            # 聚合表级别的关系统计
+            table_relations_summary = {}
+            for relation in column_relations:
+                table_pair = f"{relation['source_table']}-{relation['target_table']}"
+                
+                if table_pair not in table_relations_summary:
+                    table_relations_summary[table_pair] = {
+                        'source_table': relation['source_table'],
+                        'target_table': relation['target_table'],
+                        'total_column_relations': 0,
+                        'total_relation_count': 0,
+                        'relation_types': set(),
+                        'avg_confidence': 0,
+                        'match_statistics': match_statistics.get(table_pair, {})
+                    }
+                
+                summary = table_relations_summary[table_pair]
+                summary['total_column_relations'] += 1
+                summary['total_relation_count'] += relation['relation_count']
+                summary['relation_types'].add(relation['relation_type'])
+                summary['avg_confidence'] += relation['avg_confidence']
+            
+            # 计算平均置信度并转换set为list
+            for table_pair, summary in table_relations_summary.items():
+                if summary['total_column_relations'] > 0:
+                    summary['avg_confidence'] = round(
+                        summary['avg_confidence'] / summary['total_column_relations'], 3
+                    )
+                summary['relation_types'] = list(summary['relation_types'])
+            
+            logger.info(f"项目 {project_name} 列关系查询完成: {len(column_relations)} 个列关系, {len(table_relations_summary)} 个表关系")
+            
+            return jsonify({
+                'column_relations': column_relations,
+                'table_relations_summary': list(table_relations_summary.values()),
+                'match_statistics': match_statistics,
+                'project_name': project_name,
+                'total_column_relations': len(column_relations),
+                'total_table_pairs': len(table_relations_summary),
+                'status': 'success'
+            })
+            
+        except Exception as graph_error:
+            logger.warning(f"查询项目图谱 {project_graph_name} 失败: {str(graph_error)}")
+            return jsonify({
+                'error': f'项目图谱查询失败: {str(graph_error)}',
+                'column_relations': [],
+                'table_relations_summary': [],
+                'match_statistics': {},
+                'project_name': project_name,
+                'status': 'failed'
+            }), 500
+        
+    except Exception as e:
+        logger.error(f"获取项目 {project_name} 列关系失败: {str(e)}")
+        return jsonify({
+            'error': str(e),
+            'column_relations': [],
+            'table_relations_summary': [],
+            'match_statistics': {},
+            'project_name': project_name,
+            'status': 'failed'
+        }), 500
+
+
+@app.route('/api/kg/projects/<project_name>/relation_entities', methods=['GET'])
+def get_relation_entities(project_name):
+    """获取关系边的具体实体数据API"""
+    try:
+        # 获取请求参数
+        source_table = request.args.get('source_table')
+        source_column = request.args.get('source_column')
+        target_table = request.args.get('target_table')
+        target_column = request.args.get('target_column')
+        relation_type = request.args.get('relation_type')
+        page = int(request.args.get('page', 1))  # 页码，默认第1页
+        page_size = int(request.args.get('page_size', 20))  # 每页数量，默认20条
+        limit = page_size  # 保持向后兼容
+        offset = (page - 1) * page_size  # 计算偏移量
+        
+        if not all([source_table, source_column, target_table, target_column]):
+            return jsonify({
+                'error': '缺少必要参数',
+                'entities': [],
+                'status': 'failed'
+            }), 400
+        
+        logger.info(f"获取项目 {project_name} 的关系实体数据: {source_table}.{source_column} -> {target_table}.{target_column}")
+        
+        # 直接使用FalkorDB查询项目图谱中的关系实体
+        import falkordb
+        client = falkordb.FalkorDB(host='localhost', port=16379)
+        
+        # 构建项目图谱名称
+        project_graph_name = f"knowledge_graph_project_{project_name}"
+        
+        try:
+            graph = client.select_graph(project_graph_name)
+            
+            # 查询具体的关系实体数据
+            relation_entities_query = f"""
+            MATCH (s)-[r]->(o)
+            WHERE s.source_table = '{source_table}' 
+              AND s.source_column = '{source_column}'
+              AND o.source_table = '{target_table}'
+              AND o.source_column = '{target_column}'
+            """
+            
+            # 如果指定了关系类型，添加过滤条件
+            if relation_type:
+                relation_entities_query += f" AND type(r) = '{relation_type}'"
+            
+            relation_entities_query += f"""
+            RETURN s.entity_id AS source_entity_id,
+                   s.label AS source_label,
+                   s.{source_column} AS source_value,
+                   r.confidence AS confidence,
+                   type(r) AS relation_type,
+                   o.entity_id AS target_entity_id,
+                   o.label AS target_label,
+                   o.{target_column} AS target_value
+            ORDER BY r.confidence DESC
+            SKIP {offset}
+            LIMIT {limit}
+            """
+            
+            # 同时查询总数用于分页
+            count_query = f"""
+            MATCH (s)-[r]->(o)
+            WHERE s.source_table = '{source_table}' 
+              AND s.source_column = '{source_column}'
+              AND o.source_table = '{target_table}'
+              AND o.source_column = '{target_column}'
+            """
+            if relation_type:
+                count_query += f" AND type(r) = '{relation_type}'"
+            count_query += " RETURN count(*) AS total"
+            
+            # 执行查询
+            result = graph.query(relation_entities_query)
+            count_result = graph.query(count_query)
+            
+            # 获取总数
+            total_count = 0
+            if count_result.result_set:
+                total_count = count_result.result_set[0][0]
+            
+            entities = []
+            for record in result.result_set:
+                source_entity_id = record[0]
+                source_label = record[1]
+                source_value = record[2]
+                confidence = record[3] if record[3] is not None else 0.9
+                rel_type = record[4]
+                target_entity_id = record[5]
+                target_label = record[6]
+                target_value = record[7]
+                
+                entities.append({
+                    'source_entity': {
+                        'entity_id': source_entity_id,
+                        'label': source_label,
+                        'column_value': source_value,
+                        'table': source_table,
+                        'column': source_column
+                    },
+                    'target_entity': {
+                        'entity_id': target_entity_id,
+                        'label': target_label,
+                        'column_value': target_value,
+                        'table': target_table,
+                        'column': target_column
+                    },
+                    'relation': {
+                        'type': rel_type,
+                        'confidence': round(confidence, 3)
+                    }
+                })
+            
+            logger.info(f"项目 {project_name} 关系实体查询完成: 返回 {len(entities)} 条实体关系")
+            
+            # 计算分页信息
+            total_pages = (total_count + page_size - 1) // page_size
+            has_next = page < total_pages
+            has_prev = page > 1
+            
+            return jsonify({
+                'entities': entities,
+                'relation_info': {
+                    'source_table': source_table,
+                    'source_column': source_column,
+                    'target_table': target_table,
+                    'target_column': target_column,
+                    'relation_type': relation_type
+                },
+                'pagination': {
+                    'page': page,
+                    'page_size': page_size,
+                    'total_count': total_count,
+                    'total_pages': total_pages,
+                    'has_next': has_next,
+                    'has_prev': has_prev,
+                    'current_count': len(entities)
+                },
+                'project_name': project_name,
+                'total_entities': total_count,  # 修改为实际总数
+                'status': 'success'
+            })
+            
+        except Exception as graph_error:
+            logger.warning(f"查询项目图谱 {project_graph_name} 关系实体失败: {str(graph_error)}")
+            return jsonify({
+                'error': f'项目图谱查询失败: {str(graph_error)}',
+                'entities': [],
+                'status': 'failed'
+            }), 500
+        
+    except Exception as e:
+        logger.error(f"获取项目 {project_name} 关系实体失败: {str(e)}")
+        return jsonify({
+            'error': str(e),
+            'entities': [],
+            'status': 'failed'
+        }), 500
+
+
+@app.route('/api/kg/projects/<project_name>/table_relation_entities', methods=['GET'])
+def get_table_relation_entities(project_name):
+    """获取表间关系的实体数据"""
+    try:
+        # 获取查询参数
+        source_table = request.args.get('source_table')
+        target_table = request.args.get('target_table')
+        relation_type = request.args.get('relation_type', 'USER_MATCHED')
+        page = int(request.args.get('page', 1))
+        page_size = int(request.args.get('page_size', 20))
+        offset = (page - 1) * page_size
+        
+        if not all([source_table, target_table]):
+            return jsonify({
+                'error': '缺少必要参数',
+                'entities': [],
+                'status': 'failed'
+            }), 400
+        
+        logger.info(f"获取项目 {project_name} 的表间关系实体数据: {source_table} -> {target_table}")
+        
+        # 如果是用户匹配关系，从MongoDB获取数据
+        if relation_type == 'USER_MATCHED':
+            try:
+                # 使用Flask配置中的MongoDB客户端
+                mongo_client = current_app.config['MONGO_CLIENT']
+                mongo_db = mongo_client['Unit_Info']
+                
+                # 查找相关的用户匹配结果表
+                collection_names = mongo_db.list_collection_names()
+                match_collections = []
+                
+                logger.info(f"查找匹配集合: source_table={source_table}, target_table={target_table}")
+                logger.info(f"所有集合数量: {len(collection_names)}")
+                
+                # 先找到所有包含source_table的用户匹配结果集合
+                candidate_collections = [name for name in collection_names 
+                                       if 'user_match_results' in name and source_table in name]
+                logger.info(f"候选集合: {candidate_collections}")
+                
+                # 对每个候选集合检查是否包含target_table信息
+                for name in candidate_collections:
+                    try:
+                        collection = mongo_db[name]
+                        sample_doc = collection.find_one({})
+                        if sample_doc:
+                            task_id = sample_doc.get('task_id', '')
+                            logger.info(f"集合 {name} 的task_id: {task_id}")
+                            
+                            # 检查task_id或集合名是否包含target_table信息
+                            if target_table in task_id or target_table in name:
+                                match_collections.append(name)
+                                logger.info(f"匹配成功: {name}")
+                            else:
+                                # 如果task_id中没有target_table，检查matched_fields
+                                matched_fields = sample_doc.get('matched_fields', {})
+                                logger.info(f"检查matched_fields: type={type(matched_fields)}")
+                                
+                                # 解析matched_fields
+                                if isinstance(matched_fields, str):
+                                    try:
+                                        import json
+                                        matched_fields = json.loads(matched_fields)
+                                        logger.info(f"解析matched_fields成功: {type(matched_fields)}")
+                                    except:
+                                        logger.info(f"解析matched_fields失败")
+                                        matched_fields = {}
+                                
+                                # 处理不同类型的matched_fields
+                                found_match = False
+                                if isinstance(matched_fields, dict):
+                                    logger.info(f"matched_fields keys: {list(matched_fields.keys())}")
+                                    
+                                    # 检查matched_fields的键是否包含target_table相关信息
+                                    target_keywords = [
+                                        target_table,  # 完整表名
+                                        target_table.replace('dwd_', ''),  # 去掉前缀
+                                        target_table.replace('xp_', ''),   # 去掉前缀
+                                        'yljgxx',  # 养老机构信息
+                                        'zzzhzj',  # 组织证照
+                                        'COMPANY_NAME',  # 公司名称字段
+                                        'COMPANY_ADDRESS'  # 公司地址字段
+                                    ]
+                                    
+                                    for key in matched_fields.keys():
+                                        for keyword in target_keywords:
+                                            if keyword.lower() in key.lower():
+                                                match_collections.append(name)
+                                                logger.info(f"通过matched_fields匹配成功: {name} (关键字: {keyword} 在 {key})")
+                                                found_match = True
+                                                break
+                                        if found_match:
+                                            break
+                                            
+                                elif isinstance(matched_fields, list):
+                                    logger.info(f"matched_fields是列表，长度: {len(matched_fields)}")
+                                    # 对于列表类型，直接根据时间戳推断
+                                    found_match = False
+                                
+                                # 如果还是没找到，根据集合名称推断
+                                if not found_match:
+                                    # 根据时间戳推断：122051对应dwd_yljgxx，153502对应dwd_zzzhzj
+                                    if target_table == 'dwd_yljgxx' and '122051' in name:
+                                        match_collections.append(name)
+                                        logger.info(f"通过时间戳推断匹配成功: {name} -> {target_table}")
+                                    elif target_table == 'dwd_zzzhzj' and '153502' in name:
+                                        match_collections.append(name)
+                                        logger.info(f"通过时间戳推断匹配成功: {name} -> {target_table}")
+                                    else:
+                                        logger.info(f"未找到匹配: {name} -> {target_table}")
+                    except Exception as e:
+                        logger.warning(f"检查集合 {name} 失败: {e}")
+                        continue
+                
+                logger.info(f"最终匹配的集合: {match_collections}")
+                
+                entities = []
+                total_count = 0
+                
+                for collection_name in match_collections:
+                    collection = mongo_db[collection_name]
+                    
+                    # 获取总数
+                    collection_total = collection.count_documents({})
+                    
+                    # 获取分页数据
+                    cursor = collection.find({}).skip(offset).limit(page_size)
+                    
+                    for doc in cursor:
+                        # 解析匹配字段
+                        matched_fields = doc.get('matched_fields', {})
+                        
+                        # 如果matched_fields是字符串，尝试解析为JSON
+                        if isinstance(matched_fields, str):
+                            try:
+                                import json
+                                matched_fields = json.loads(matched_fields)
+                            except:
+                                matched_fields = {}
+                        
+                        # 提取源实体数据（排除系统字段）
+                        source_data = {}
+                        for k, v in doc.items():
+                            if not k.startswith('_') and k not in ['matched_fields', 'task_id', 'match_algorithm', 'match_version', 'optimization_enabled']:
+                                # 如果值是对象，转换为字符串显示
+                                if isinstance(v, (dict, list)):
+                                    source_data[k] = str(v)
+                                else:
+                                    source_data[k] = v
+                        
+                        # 提取目标实体数据
+                        target_data = {}
+                        if isinstance(matched_fields, dict):
+                            for k, v in matched_fields.items():
+                                if isinstance(v, (dict, list)):
+                                    target_data[k] = str(v)
+                                else:
+                                    target_data[k] = v
+                        
+                        entity_data = {
+                            'match_id': str(doc.get('_id', '')),
+                            'source_entity': {
+                                'table': source_table,
+                                'data': source_data
+                            },
+                            'target_entity': {
+                                'table': target_table,
+                                'data': target_data
+                            },
+                            'match_info': {
+                                'confidence': doc.get('confidence', 0.8),
+                                'match_type': 'USER_MATCHED',
+                                'timestamp': doc.get('created_at', doc.get('timestamp', '')),
+                                'algorithm': doc.get('match_algorithm', ''),
+                                'similarity_score': doc.get('similarity_score', 0)
+                            }
+                        }
+                        entities.append(entity_data)
+                    
+                    total_count += collection_total
+                    
+                    # 如果已经获取足够的数据，跳出循环
+                    if len(entities) >= page_size:
+                        break
+                
+                # 计算分页信息
+                total_pages = (total_count + page_size - 1) // page_size
+                has_next = page < total_pages
+                has_prev = page > 1
+                
+                return jsonify({
+                    'entities': entities[:page_size],  # 确保不超过页面大小
+                    'relation_info': {
+                        'source_table': source_table,
+                        'target_table': target_table,
+                        'relation_type': relation_type
+                    },
+                    'pagination': {
+                        'page': page,
+                        'page_size': page_size,
+                        'total_count': total_count,
+                        'total_pages': total_pages,
+                        'has_next': has_next,
+                        'has_prev': has_prev,
+                        'current_count': len(entities[:page_size])
+                    },
+                    'project_name': project_name,
+                    'status': 'success'
+                })
+                
+            except Exception as mongo_error:
+                logger.warning(f"查询MongoDB用户匹配结果失败: {str(mongo_error)}")
+                return jsonify({
+                    'error': f'MongoDB查询失败: {str(mongo_error)}',
+                    'entities': [],
+                    'status': 'failed'
+                }), 500
+        
+        else:
+            # 对于知识图谱关系，使用FalkorDB查询
+            import falkordb
+            client = falkordb.FalkorDB(host='localhost', port=16379)
+            project_graph_name = f"knowledge_graph_project_{project_name}"
+            
+            try:
+                graph = client.select_graph(project_graph_name)
+                
+                # 查询表间关系的实体数据
+                entities_query = f"""
+                MATCH (s)-[r]->(o)
+                WHERE s.source_table = '{source_table}' 
+                  AND o.source_table = '{target_table}'
+                RETURN s, r, o
+                SKIP {offset}
+                LIMIT {page_size}
+                """
+                
+                count_query = f"""
+                MATCH (s)-[r]->(o)
+                WHERE s.source_table = '{source_table}' 
+                  AND o.source_table = '{target_table}'
+                RETURN count(*) AS total
+                """
+                
+                result = graph.query(entities_query)
+                count_result = graph.query(count_query)
+                
+                total_count = 0
+                if count_result.result_set:
+                    total_count = count_result.result_set[0][0]
+                
+                entities = []
+                for record in result.result_set:
+                    source_node = record[0]
+                    relation = record[1]
+                    target_node = record[2]
+                    
+                    entity_data = {
+                        'source_entity': {
+                            'table': source_table,
+                            'entity_id': source_node.properties.get('entity_id', ''),
+                            'label': source_node.properties.get('label', ''),
+                            'data': source_node.properties
+                        },
+                        'target_entity': {
+                            'table': target_table,
+                            'entity_id': target_node.properties.get('entity_id', ''),
+                            'label': target_node.properties.get('label', ''),
+                            'data': target_node.properties
+                        },
+                        'relation': {
+                            'type': relation.relation,
+                            'confidence': relation.properties.get('confidence', 0.9),
+                            'properties': relation.properties
+                        }
+                    }
+                    entities.append(entity_data)
+                
+                # 计算分页信息
+                total_pages = (total_count + page_size - 1) // page_size
+                has_next = page < total_pages
+                has_prev = page > 1
+                
+                return jsonify({
+                    'entities': entities,
+                    'relation_info': {
+                        'source_table': source_table,
+                        'target_table': target_table,
+                        'relation_type': relation_type
+                    },
+                    'pagination': {
+                        'page': page,
+                        'page_size': page_size,
+                        'total_count': total_count,
+                        'total_pages': total_pages,
+                        'has_next': has_next,
+                        'has_prev': has_prev,
+                        'current_count': len(entities)
+                    },
+                    'project_name': project_name,
+                    'status': 'success'
+                })
+                
+            except Exception as graph_error:
+                logger.warning(f"查询项目图谱 {project_graph_name} 表间关系失败: {str(graph_error)}")
+                return jsonify({
+                    'error': f'项目图谱查询失败: {str(graph_error)}',
+                    'entities': [],
+                    'status': 'failed'
+                }), 500
+        
+    except Exception as e:
+        logger.error(f"获取表间关系实体数据失败: {str(e)}")
+        return jsonify({
+            'error': f'服务器内部错误: {str(e)}',
+            'entities': [],
+            'status': 'failed'
+        }), 500
+
+
+@app.route('/kg_table_schema_visualization')
+def kg_table_schema_visualization_page():
+    """表结构图谱可视化页面"""
+    try:
+        return render_template('kg_table_schema_visualization.html')
+    except Exception as e:
+        logger.error(f"表结构图谱可视化页面加载失败: {str(e)}")
         return render_template('error.html', error=str(e))
 
 if __name__ == '__main__':

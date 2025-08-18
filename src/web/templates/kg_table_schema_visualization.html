@@ -1,0 +1,1903 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>表结构图谱可视化 - 智能关联匹配系统</title>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-family: 'Microsoft YaHei', sans-serif;
+        }
+        
+        .main-container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            margin: 20px;
+            min-height: calc(100vh - 40px);
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            padding: 25px 30px;
+            border-radius: 20px 20px 0 0;
+            margin-bottom: 0;
+        }
+        
+        .content-area {
+            padding: 30px;
+        }
+        
+        .control-panel {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 25px;
+            border: 1px solid #e9ecef;
+        }
+        
+        .visualization-container {
+            background: white;
+            border-radius: 15px;
+            border: 2px solid #e9ecef;
+            position: relative;
+            min-height: 600px;
+        }
+        
+        #table-schema-graph {
+            width: 100%;
+            height: 600px;
+            border-radius: 15px;
+        }
+        
+        .info-panel {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            border: 1px solid #e9ecef;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+        
+        .table-node {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 10px 0;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        .table-node .field-list {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .table-node .field-item {
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+            border-left: 3px solid #4facfe;
+        }
+        
+        .field-list {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 10px;
+            margin-top: 10px;
+        }
+        
+        .field-item {
+            background: white;
+            border-radius: 5px;
+            padding: 5px 10px;
+            margin: 3px 0;
+            border-left: 3px solid #007bff;
+            font-size: 0.9em;
+            color: #333;
+        }
+        
+        .relation-info {
+            background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%);
+            border-radius: 10px;
+            padding: 15px;
+            margin: 10px 0;
+            border: 1px solid #f0ad4e;
+        }
+        
+        .stats-card {
+            background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
+            border-radius: 10px;
+            padding: 15px;
+            text-align: center;
+            margin: 10px 0;
+        }
+        
+        .loading-spinner {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 1000;
+        }
+        
+        .btn-custom {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            color: white;
+            border-radius: 25px;
+            padding: 10px 25px;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-custom:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 15px rgba(0, 0, 0, 0.2);
+            color: white;
+        }
+        
+        .project-selector {
+            background: white;
+            border-radius: 10px;
+            border: 2px solid #e9ecef;
+            padding: 10px 15px;
+        }
+        
+        .legend {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 15px;
+            margin-top: 20px;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 8px 0;
+        }
+        
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="main-container">
+        <!-- 页面头部 -->
+        <div class="header">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h2 class="mb-1">
+                        <i class="fas fa-project-diagram me-3"></i>
+                        表结构图谱可视化
+                    </h2>
+                    <p class="mb-0 opacity-75">数据表关系架构图 - 业务逻辑层面的数据关联分析</p>
+                </div>
+                <div>
+                    <button class="btn btn-light btn-sm" onclick="window.history.back()">
+                        <i class="fas fa-arrow-left me-2"></i>返回
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="content-area">
+            <div class="row">
+                <!-- 控制面板 -->
+                <div class="col-12">
+                    <div class="control-panel">
+                        <div class="row align-items-center">
+                            <div class="col-md-4">
+                                <label class="form-label fw-bold">
+                                    <i class="fas fa-database me-2"></i>选择项目
+                                </label>
+                                <select id="project-selector" class="form-select project-selector">
+                                    <option value="">请选择项目...</option>
+                                    <option value="消排和养老机构">消排和养老机构</option>
+                                    <option value="test_debug3">测试项目3</option>
+                                    <option value="debug_cypher">调试项目</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label fw-bold">
+                                    <i class="fas fa-filter me-2"></i>显示模式
+                                </label>
+                                <select id="display-mode" class="form-select">
+                                    <option value="table_relations">表间关系</option>
+                                    <option value="column_relations">列间关系</option>
+                                    <option value="match_statistics">匹配统计</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label fw-bold">
+                                    <i class="fas fa-cogs me-2"></i>操作
+                                </label>
+                                <div class="d-flex gap-2">
+                                    <button id="load-schema-btn" class="btn btn-custom flex-fill">
+                                        <i class="fas fa-sync me-2"></i>加载图谱
+                                    </button>
+                                    <button id="reset-view-btn" class="btn btn-outline-secondary">
+                                        <i class="fas fa-undo me-2"></i>重置
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <!-- 图谱可视化区域 -->
+                <div class="col-lg-8">
+                    <div class="visualization-container">
+                        <div id="loading-indicator" class="loading-spinner" style="display: none;">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">加载中...</span>
+                            </div>
+                            <div class="mt-2 text-muted">正在加载表结构数据...</div>
+                        </div>
+                        <div id="table-schema-graph"></div>
+                    </div>
+                    
+                    <!-- 图例 -->
+                    <div class="legend">
+                        <h6 class="fw-bold mb-3">
+                            <i class="fas fa-info-circle me-2"></i>图例说明
+                        </h6>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="legend-item">
+                                    <div class="legend-color" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);"></div>
+                                    <span>数据表节点</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="legend-color" style="background: #28a745;"></div>
+                                    <span>高关联度关系 (>1000)</span>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="legend-item">
+                                    <div class="legend-color" style="background: #ffc107;"></div>
+                                    <span>中关联度关系 (100-1000)</span>
+                                </div>
+                                <div class="legend-item">
+                                    <div class="legend-color" style="background: #dc3545;"></div>
+                                    <span>低关联度关系 (<100)</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 信息面板 -->
+                <div class="col-lg-4">
+                    <div class="info-panel">
+                        <h5 class="fw-bold mb-3">
+                            <i class="fas fa-chart-bar me-2"></i>项目统计信息
+                        </h5>
+                        
+                        <div id="project-stats">
+                            <div class="stats-card">
+                                <i class="fas fa-table fa-2x mb-2"></i>
+                                <div class="fw-bold">数据表数量</div>
+                                <div id="table-count" class="h4 mb-0">-</div>
+                            </div>
+                            <div class="stats-card">
+                                <i class="fas fa-link fa-2x mb-2"></i>
+                                <div class="fw-bold">表间关系</div>
+                                <div id="relation-count" class="h4 mb-0">-</div>
+                            </div>
+                        </div>
+
+                        <hr class="my-4">
+
+                        <h6 class="fw-bold mb-3">
+                            <i class="fas fa-list me-2"></i>表结构详情
+                        </h6>
+                        <div id="table-details">
+                            <div class="text-muted text-center py-4">
+                                <i class="fas fa-info-circle fa-2x mb-2"></i>
+                                <div>请选择项目并加载图谱数据</div>
+                            </div>
+                        </div>
+
+                        <hr class="my-4">
+
+                        <h6 class="fw-bold mb-3">
+                            <i class="fas fa-mouse-pointer me-2"></i>选中信息
+                        </h6>
+                        <div id="selection-info">
+                            <div class="text-muted text-center py-3">
+                                <i class="fas fa-hand-pointer fa-2x mb-2"></i>
+                                <div>点击节点或边查看详细信息</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 关联实体数据预览模态框 -->
+    <div class="modal fade" id="entityDataModal" tabindex="-1" aria-labelledby="entityDataModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="entityDataModalLabel">
+                        <i class="fas fa-link me-2"></i>关联实体数据预览
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="entity-data-loading" class="text-center py-4" style="display: none;">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">加载中...</span>
+                        </div>
+                        <p class="mt-2 text-muted">正在加载关联实体数据...</p>
+                    </div>
+                    
+                    <div id="entity-data-content">
+                        <div class="row mb-3">
+                            <div class="col-md-12">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h6 class="mb-0">
+                                            <i class="fas fa-info-circle me-2"></i>关系信息
+                                        </h6>
+                                    </div>
+                                    <div class="card-body">
+                                        <div id="relation-info-content">
+                                            <!-- 关系信息将在这里显示 -->
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-12">
+                                <div class="card">
+                                    <div class="card-header d-flex justify-content-between align-items-center">
+                                        <h6 class="mb-0">
+                                            <i class="fas fa-database me-2"></i>关联实体数据
+                                        </h6>
+                                        <div class="d-flex align-items-center">
+                                            <span id="entity-count-badge" class="badge bg-primary me-2">0 条记录</span>
+                                            <div class="btn-group" role="group" id="page-size-selector">
+                                                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="changePageSize(10)">10</button>
+                                                <button type="button" class="btn btn-outline-secondary btn-sm active" onclick="changePageSize(20)">20</button>
+                                                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="changePageSize(50)">50</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="card-body">
+                                        <div id="entity-data-table" class="table-responsive">
+                                            <!-- 实体数据表格将在这里显示 -->
+                                        </div>
+                                        
+                                        <!-- 分页控件 -->
+                                        <nav aria-label="实体数据分页" id="pagination-nav" style="display: none;">
+                                            <div class="d-flex justify-content-between align-items-center mt-3">
+                                                <div class="pagination-info">
+                                                    <small class="text-muted" id="pagination-info-text">
+                                                        显示第 1-20 条，共 0 条记录
+                                                    </small>
+                                                </div>
+                                                <ul class="pagination pagination-sm mb-0" id="pagination-controls">
+                                                    <!-- 分页按钮将在这里动态生成 -->
+                                                </ul>
+                                            </div>
+                                        </nav>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div id="entity-data-error" class="alert alert-danger" style="display: none;">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        <span id="entity-data-error-message">加载实体数据失败</span>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cytoscape.js 和相关库 -->
+    <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.26.0/dist/cytoscape.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/cytoscape-dagre@2.5.0/cytoscape-dagre.min.js"></script>
+    
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+        let cy = null;
+        let currentProject = null;
+        let tableSchemaData = null;
+        let columnRelationsData = null;
+        let currentDisplayMode = 'table_relations';
+        
+        // 分页相关变量
+        let currentPage = 1;
+        let currentPageSize = 20;
+        let currentRelationData = null;  // 当前查看的关系数据
+        let currentApiEndpoint = null;   // 当前使用的API端点
+
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            initializePage();
+            bindEvents();
+            
+            // 从URL参数获取项目名称
+            const urlParams = new URLSearchParams(window.location.search);
+            const projectParam = urlParams.get('project');
+            if (projectParam) {
+                document.getElementById('project-selector').value = projectParam;
+                currentProject = projectParam;
+                document.getElementById('load-schema-btn').disabled = false;
+                // 自动加载项目数据
+                loadTableSchema();
+            }
+        });
+
+        function initializePage() {
+            console.log('表结构图谱可视化页面初始化');
+            
+            // 检查Cytoscape.js是否加载成功
+            if (typeof cytoscape === 'undefined') {
+                console.error('Cytoscape.js 未加载成功');
+                showError('图形库加载失败，请刷新页面重试');
+                return;
+            }
+
+            // 初始化Cytoscape实例
+            initializeCytoscape();
+        }
+
+        function initializeCytoscape() {
+            try {
+                cy = cytoscape({
+                    container: document.getElementById('table-schema-graph'),
+                    
+                    style: [
+                        // 表节点样式
+                        {
+                            selector: 'node[type="table"]',
+                            style: {
+                                'background-color': '#667eea',
+                                'background-gradient-direction': 'to-bottom-right',
+                                'background-gradient-stop-colors': '#667eea #764ba2',
+                                'label': 'data(label)',
+                                'text-valign': 'center',
+                                'text-halign': 'center',
+                                'color': 'white',
+                                'font-size': '14px',
+                                'font-weight': 'bold',
+                                'width': 'mapData(entity_count, 0, 15000, 60, 120)',
+                                'height': 'mapData(entity_count, 0, 15000, 60, 120)',
+                                'border-width': 3,
+                                'border-color': '#4a5568',
+                                'text-wrap': 'wrap',
+                                'text-max-width': '100px'
+                            }
+                        },
+                        
+                        // 关系边样式 - 根据关系数量调整
+                        {
+                            selector: 'edge[relation_count >= 1000]',
+                            style: {
+                                'width': 'mapData(relation_count, 1000, 10000, 4, 12)',
+                                'line-color': '#28a745',
+                                'target-arrow-color': '#28a745',
+                                'target-arrow-shape': 'triangle',
+                                'curve-style': 'bezier',
+                                'label': 'data(relation_type)',
+                                'font-size': '10px',
+                                'text-rotation': 'autorotate',
+                                'text-margin-y': -10,
+                                'color': '#28a745',
+                                'font-weight': 'bold'
+                            }
+                        },
+                        
+                        {
+                            selector: 'edge[relation_count >= 100][relation_count < 1000]',
+                            style: {
+                                'width': 'mapData(relation_count, 100, 1000, 2, 4)',
+                                'line-color': '#ffc107',
+                                'target-arrow-color': '#ffc107',
+                                'target-arrow-shape': 'triangle',
+                                'curve-style': 'bezier',
+                                'label': 'data(relation_type)',
+                                'font-size': '9px',
+                                'text-rotation': 'autorotate',
+                                'text-margin-y': -8,
+                                'color': '#ffc107',
+                                'font-weight': 'bold'
+                            }
+                        },
+                        
+                        {
+                            selector: 'edge[relation_count < 100]',
+                            style: {
+                                'width': 'mapData(relation_count, 1, 100, 1, 2)',
+                                'line-color': '#dc3545',
+                                'target-arrow-color': '#dc3545',
+                                'target-arrow-shape': 'triangle',
+                                'curve-style': 'bezier',
+                                'label': 'data(relation_type)',
+                                'font-size': '8px',
+                                'text-rotation': 'autorotate',
+                                'text-margin-y': -6,
+                                'color': '#dc3545'
+                            }
+                        },
+                        
+                        // 选中状态样式
+                        {
+                            selector: ':selected',
+                            style: {
+                                'border-width': 4,
+                                'border-color': '#ff6b6b',
+                                'background-color': '#ff6b6b'
+                            }
+                        }
+                    ],
+                    
+                    layout: {
+                        name: 'dagre',
+                        directed: true,
+                        padding: 50,
+                        spacingFactor: 1.5,
+                        rankDir: 'TB',
+                        ranker: 'longest-path'
+                    },
+                    
+                    // 启用交互
+                    userZoomingEnabled: true,
+                    userPanningEnabled: true,
+                    boxSelectionEnabled: false,
+                    selectionType: 'single'
+                });
+
+                // 绑定点击事件
+                cy.on('tap', 'node', function(evt) {
+                    const node = evt.target;
+                    showNodeInfo(node.data());
+                });
+
+                cy.on('tap', 'edge', function(evt) {
+                    const edge = evt.target;
+                    const edgeData = edge.data();
+                    showEdgeInfo(edgeData);
+                    
+                    // 根据不同模式显示关联实体数据
+                    if (currentDisplayMode === 'column_relations' && columnRelationsData) {
+                        showRelationEntities(edgeData);
+                    } else if (currentDisplayMode === 'table_relations') {
+                        showTableRelationEntities(edgeData);
+                    }
+                });
+
+                console.log('Cytoscape 初始化成功');
+                
+            } catch (error) {
+                console.error('Cytoscape 初始化失败:', error);
+                showError('图形组件初始化失败: ' + error.message);
+            }
+        }
+
+        function bindEvents() {
+            // 加载图谱按钮
+            document.getElementById('load-schema-btn').addEventListener('click', loadTableSchema);
+            
+            // 重置视图按钮
+            document.getElementById('reset-view-btn').addEventListener('click', resetView);
+            
+            // 项目选择器
+            document.getElementById('project-selector').addEventListener('change', function() {
+                currentProject = this.value;
+                if (currentProject) {
+                    document.getElementById('load-schema-btn').disabled = false;
+                } else {
+                    document.getElementById('load-schema-btn').disabled = true;
+                }
+            });
+            
+            // 显示模式选择器
+            document.getElementById('display-mode').addEventListener('change', function() {
+                currentDisplayMode = this.value;
+                if (tableSchemaData) {
+                    renderCurrentMode();
+                }
+            });
+        }
+
+        async function loadTableSchema() {
+            if (!currentProject) {
+                showError('请先选择一个项目');
+                return;
+            }
+
+            showLoading(true);
+            
+            try {
+                console.log(`开始加载项目 ${currentProject} 的表结构数据`);
+                
+                // 并行加载表结构和列关系数据
+                const [schemaResponse, columnResponse] = await Promise.all([
+                    fetch(`/api/kg/projects/${currentProject}/table_schema`),
+                    fetch(`/api/kg/projects/${currentProject}/column_relations`)
+                ]);
+                
+                if (!schemaResponse.ok) {
+                    throw new Error(`表结构API请求失败: ${schemaResponse.status}`);
+                }
+                
+                tableSchemaData = await schemaResponse.json();
+                console.log('表结构数据加载成功:', tableSchemaData);
+                
+                if (columnResponse.ok) {
+                    columnRelationsData = await columnResponse.json();
+                    console.log('列关系数据加载成功:', columnRelationsData);
+                } else {
+                    console.warn('列关系数据加载失败，使用默认数据');
+                    columnRelationsData = {
+                        column_relations: [],
+                        table_relations_summary: [],
+                        match_statistics: {},
+                        status: 'partial'
+                    };
+                }
+                
+                if (tableSchemaData.status === 'success') {
+                    renderCurrentMode();
+                    updateProjectStats(tableSchemaData, columnRelationsData);
+                    updateTableDetails(tableSchemaData.tables);
+                } else {
+                    throw new Error(tableSchemaData.error || '数据加载失败');
+                }
+                
+            } catch (error) {
+                console.error('加载表结构数据失败:', error);
+                showError('加载失败: ' + error.message);
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        function renderCurrentMode() {
+            switch (currentDisplayMode) {
+                case 'table_relations':
+                    renderTableSchemaGraph(tableSchemaData);
+                    break;
+                case 'column_relations':
+                    renderColumnRelationsGraph(columnRelationsData);
+                    break;
+                case 'match_statistics':
+                    renderMatchStatisticsGraph(columnRelationsData);
+                    break;
+                default:
+                    renderTableSchemaGraph(tableSchemaData);
+            }
+        }
+
+        function renderTableSchemaGraph(data) {
+            if (!cy) {
+                console.error('Cytoscape 实例未初始化');
+                return;
+            }
+
+            try {
+                // 清空现有数据
+                cy.elements().remove();
+                
+                // 重新设置表间关系模式的样式
+                cy.style([
+                    {
+                        selector: 'node[type="table"]',
+                        style: {
+                            'background-color': '#667eea',
+                            'background-gradient-direction': 'to-bottom-right',
+                            'background-gradient-stop-colors': '#667eea #764ba2',
+                            'label': 'data(label)',
+                            'text-valign': 'center',
+                            'text-halign': 'center',
+                            'color': 'white',
+                            'text-outline-width': 2,
+                            'text-outline-color': '#667eea',
+                            'width': 200,
+                            'height': 100,
+                            'shape': 'round-rectangle',
+                            'font-size': '14px',
+                            'font-weight': 'bold',
+                            'text-wrap': 'wrap',
+                            'text-max-width': 180
+                        }
+                    },
+                    {
+                        selector: 'edge',
+                        style: {
+                            'width': 3,
+                            'line-color': '#666',
+                            'target-arrow-color': '#666',
+                            'target-arrow-shape': 'triangle',
+                            'curve-style': 'bezier',
+                            'label': 'data(label)',
+                            'font-size': '10px',
+                            'text-background-color': 'white',
+                            'text-background-opacity': 0.8,
+                            'text-background-padding': '2px',
+                            'text-rotation': 'autorotate',
+                            'text-margin-y': -10
+                        }
+                    },
+                    {
+                        selector: 'edge[relation_level="high"]',
+                        style: {
+                            'width': 'mapData(relation_count, 1000, 10000, 8, 15)',
+                            'line-color': '#28a745',
+                            'target-arrow-color': '#28a745',
+                            'target-arrow-shape': 'triangle',
+                            'curve-style': 'bezier',
+                            'label': 'data(label)',
+                            'font-size': '12px',
+                            'text-background-color': 'rgba(255, 255, 255, 0.95)',
+                            'text-background-opacity': 1,
+                            'text-background-padding': '4px',
+                            'color': '#28a745',
+                            'font-weight': 'bold',
+                            'text-rotation': 'none',
+                            'text-margin-y': -15,
+                            'text-wrap': 'wrap',
+                            'text-max-width': '80px'
+                        }
+                    },
+                    {
+                        selector: 'edge[relation_level="medium"]',
+                        style: {
+                            'width': 'mapData(relation_count, 100, 1000, 4, 8)',
+                            'line-color': '#ffc107',
+                            'target-arrow-color': '#ffc107',
+                            'target-arrow-shape': 'triangle',
+                            'curve-style': 'bezier',
+                            'label': 'data(label)',
+                            'font-size': '11px',
+                            'text-background-color': 'rgba(255, 255, 255, 0.95)',
+                            'text-background-opacity': 1,
+                            'text-background-padding': '3px',
+                            'color': '#856404',
+                            'font-weight': 'bold',
+                            'text-rotation': 'none',
+                            'text-margin-y': -15,
+                            'text-wrap': 'wrap',
+                            'text-max-width': '80px'
+                        }
+                    },
+                    {
+                        selector: 'edge[relation_level="low"]',
+                        style: {
+                            'width': 'mapData(relation_count, 0, 100, 2, 4)',
+                            'line-color': '#dc3545',
+                            'target-arrow-color': '#dc3545',
+                            'target-arrow-shape': 'triangle',
+                            'curve-style': 'bezier',
+                            'label': 'data(label)',
+                            'font-size': '10px',
+                            'text-background-color': 'rgba(255, 255, 255, 0.9)',
+                            'text-background-opacity': 1,
+                            'text-background-padding': '2px',
+                            'color': '#721c24',
+                            'text-rotation': 'none',
+                            'text-margin-y': -10
+                        }
+                    },
+                    {
+                        selector: 'node:selected',
+                        style: {
+                            'border-width': 4,
+                            'border-color': '#ff6b6b',
+                            'background-color': '#ff6b6b'
+                        }
+                    }
+                ]);
+                
+                // 创建表节点
+                const nodes = data.tables.map(table => ({
+                    data: {
+                        id: table.table_name,
+                        label: `${table.table_name}\n(${table.entity_count}个实体)`,
+                        type: 'table',
+                        table_name: table.table_name,
+                        entity_count: table.entity_count,
+                        entity_types: table.entity_types,
+                        fields: table.fields,
+                        field_count: table.field_count
+                    }
+                }));
+
+                // 创建关系边
+                const edges = data.table_relations.map((relation, index) => {
+                    const count = relation.relation_count || 0;
+                    let labelText = '';
+                    let relationLevel = 'low'; // 默认低关联度
+                    
+                    // 根据关联数量确定关联度级别
+                    if (count > 1000) {
+                        relationLevel = 'high';
+                    } else if (count >= 100) {
+                        relationLevel = 'medium';
+                    } else {
+                        relationLevel = 'low';
+                    }
+                    
+                    if (relation.relation_type === 'USER_MATCHED') {
+                        labelText = `匹配(${count})`;
+                    } else {
+                        labelText = `关系(${count})`;
+                    }
+                    
+                    return {
+                        data: {
+                            id: `edge_${index}`,
+                            source: relation.source_table,
+                            target: relation.target_table,
+                            relation_type: relation.relation_type,
+                            relation_count: count,
+                            relation_level: relationLevel,
+                            label: labelText,
+                            // 添加类型标识用于样式选择
+                            type: relation.relation_type
+                        }
+                    };
+                });
+
+                // 添加到图中
+                cy.add(nodes);
+                cy.add(edges);
+                
+                // 应用布局
+                cy.layout({
+                    name: 'dagre',
+                    directed: true,
+                    padding: 50,
+                    spacingFactor: 1.5,
+                    rankDir: 'TB'
+                }).run();
+                
+                // 适应视图
+                cy.fit();
+                
+                console.log(`图谱渲染完成: ${nodes.length} 个表节点, ${edges.length} 个关系边`);
+                
+            } catch (error) {
+                console.error('图谱渲染失败:', error);
+                showError('图谱渲染失败: ' + error.message);
+            }
+        }
+
+        function renderColumnRelationsGraph(data) {
+            if (!cy || !data || data.status === 'failed') {
+                console.error('无法渲染列关系图谱:', data);
+                return;
+            }
+
+            try {
+                // 清空现有数据
+                cy.elements().remove();
+                
+                // 重新设置列关系模式的样式
+                cy.style([
+                    {
+                        selector: 'node[type="column"]',
+                        style: {
+                            'background-color': '#4facfe',
+                            'label': 'data(label)',
+                            'text-valign': 'center',
+                            'text-halign': 'center',
+                            'color': 'white',
+                            'text-outline-width': 2,
+                            'text-outline-color': '#4facfe',
+                            'width': 120,
+                            'height': 60,
+                            'shape': 'round-rectangle',
+                            'font-size': '12px',
+                            'text-wrap': 'wrap',
+                            'text-max-width': 100
+                        }
+                    },
+                    {
+                        selector: 'edge',
+                        style: {
+                            'width': 3,
+                            'line-color': '#666',
+                            'target-arrow-color': '#666',
+                            'target-arrow-shape': 'triangle',
+                            'curve-style': 'bezier',
+                            'label': 'data(label)',
+                            'font-size': '10px',
+                            'text-background-color': 'white',
+                            'text-background-opacity': 0.8,
+                            'text-background-padding': '2px'
+                        }
+                    },
+                    {
+                        selector: 'node:selected',
+                        style: {
+                            'border-width': 4,
+                            'border-color': '#ff6b6b',
+                            'background-color': '#ff6b6b'
+                        }
+                    }
+                ]);
+                
+                // 创建列节点 - 每个表.列组合作为一个节点
+                const columnNodes = new Map();
+                const edges = [];
+                
+                data.column_relations.forEach((relation, index) => {
+                    const sourceNodeId = `${relation.source_table}.${relation.source_column}`;
+                    const targetNodeId = `${relation.target_table}.${relation.target_column}`;
+                    
+                    // 添加源列节点
+                    if (!columnNodes.has(sourceNodeId)) {
+                        columnNodes.set(sourceNodeId, {
+                            data: {
+                                id: sourceNodeId,
+                                label: `${relation.source_table}\n${relation.source_column}`,
+                                type: 'column',
+                                table_name: relation.source_table,
+                                column_name: relation.source_column,
+                                relation_count: 0
+                            }
+                        });
+                    }
+                    
+                    // 添加目标列节点
+                    if (!columnNodes.has(targetNodeId)) {
+                        columnNodes.set(targetNodeId, {
+                            data: {
+                                id: targetNodeId,
+                                label: `${relation.target_table}\n${relation.target_column}`,
+                                type: 'column',
+                                table_name: relation.target_table,
+                                column_name: relation.target_column,
+                                relation_count: 0
+                            }
+                        });
+                    }
+                    
+                    // 更新节点的关系计数
+                    columnNodes.get(sourceNodeId).data.relation_count += relation.relation_count;
+                    columnNodes.get(targetNodeId).data.relation_count += relation.relation_count;
+                    
+                    // 创建关系边
+                    edges.push({
+                        data: {
+                            id: `edge_${index}`,
+                            source: sourceNodeId,
+                            target: targetNodeId,
+                            relation_type: relation.relation_type,
+                            relation_count: relation.relation_count,
+                            avg_confidence: relation.avg_confidence,
+                            label: `${relation.relation_type}\n(${relation.relation_count})`
+                        }
+                    });
+                });
+
+                // 添加节点和边到图中
+                cy.add(Array.from(columnNodes.values()));
+                cy.add(edges);
+                
+                // 应用列关系专用样式
+                cy.style([
+                    // 列节点样式
+                    {
+                        selector: 'node[type="column"]',
+                        style: {
+                            'background-color': '#4facfe',
+                            'label': 'data(label)',
+                            'text-valign': 'center',
+                            'text-halign': 'center',
+                            'color': 'white',
+                            'font-size': '10px',
+                            'font-weight': 'bold',
+                            'width': 'mapData(relation_count, 0, 1000, 40, 80)',
+                            'height': 'mapData(relation_count, 0, 1000, 40, 80)',
+                            'border-width': 2,
+                            'border-color': '#0066cc',
+                            'text-wrap': 'wrap',
+                            'text-max-width': '80px'
+                        }
+                    },
+                    
+                    // 列关系边样式
+                    {
+                        selector: 'edge',
+                        style: {
+                            'width': 'mapData(relation_count, 1, 100, 1, 6)',
+                            'line-color': '#ff6b6b',
+                            'target-arrow-color': '#ff6b6b',
+                            'target-arrow-shape': 'triangle',
+                            'curve-style': 'bezier',
+                            'label': 'data(label)',
+                            'font-size': '8px',
+                            'text-rotation': 'autorotate',
+                            'text-margin-y': -8,
+                            'color': '#ff6b6b',
+                            'font-weight': 'bold'
+                        }
+                    }
+                ]);
+                
+                // 应用布局
+                cy.layout({
+                    name: 'dagre',
+                    directed: true,
+                    padding: 30,
+                    spacingFactor: 2,
+                    rankDir: 'LR'
+                }).run();
+                
+                // 适应视图
+                cy.fit();
+                
+                console.log(`列关系图谱渲染完成: ${columnNodes.size} 个列节点, ${edges.length} 个关系边`);
+                
+            } catch (error) {
+                console.error('列关系图谱渲染失败:', error);
+                showError('列关系图谱渲染失败: ' + error.message);
+            }
+        }
+
+        function updateProjectStats(schemaData, columnData) {
+            document.getElementById('table-count').textContent = schemaData.total_tables || 0;
+            
+            if (columnData && columnData.status === 'success') {
+                document.getElementById('relation-count').textContent = 
+                    `${schemaData.total_table_relations || 0} 表关系 / ${columnData.total_column_relations || 0} 列关系`;
+            } else {
+                document.getElementById('relation-count').textContent = schemaData.total_table_relations || 0;
+            }
+        }
+
+        function renderMatchStatisticsGraph(data) {
+            if (!cy || !data || data.status === 'failed') {
+                console.error('无法渲染匹配统计图谱:', data);
+                return;
+            }
+
+            try {
+                // 清空现有数据
+                cy.elements().remove();
+                
+                // 重新设置匹配统计模式的样式
+                cy.style([
+                    {
+                        selector: 'node[type="table_with_stats"]',
+                        style: {
+                            'background-color': '#28a745',
+                            'label': 'data(label)',
+                            'text-valign': 'center',
+                            'text-halign': 'center',
+                            'color': 'white',
+                            'text-outline-width': 2,
+                            'text-outline-color': '#28a745',
+                            'width': 150,
+                            'height': 80,
+                            'shape': 'round-rectangle',
+                            'font-size': '12px',
+                            'text-wrap': 'wrap',
+                            'text-max-width': 130
+                        }
+                    },
+                    {
+                        selector: 'edge[type="match_relation"]',
+                        style: {
+                            'width': 'mapData(match_count, 0, 1000, 2, 10)',
+                            'line-color': '#17a2b8',
+                            'target-arrow-color': '#17a2b8',
+                            'target-arrow-shape': 'triangle',
+                            'curve-style': 'bezier',
+                            'label': 'data(label)',
+                            'font-size': '11px',
+                            'text-background-color': 'white',
+                            'text-background-opacity': 0.9,
+                            'text-background-padding': '3px',
+                            'color': '#17a2b8',
+                            'font-weight': 'bold'
+                        }
+                    },
+                    {
+                        selector: 'node:selected',
+                        style: {
+                            'border-width': 4,
+                            'border-color': '#ff6b6b',
+                            'background-color': '#ff6b6b'
+                        }
+                    }
+                ]);
+                
+                // 基于表关系摘要创建节点和边
+                const tableNodes = new Map();
+                const edges = [];
+                
+                data.table_relations_summary.forEach((summary, index) => {
+                    const sourceTableId = summary.source_table;
+                    const targetTableId = summary.target_table;
+                    
+                    // 添加源表节点
+                    if (!tableNodes.has(sourceTableId)) {
+                        tableNodes.set(sourceTableId, {
+                            data: {
+                                id: sourceTableId,
+                                label: sourceTableId,
+                                type: 'table_with_stats',
+                                match_count: 0,
+                                total_relations: 0
+                            }
+                        });
+                    }
+                    
+                    // 添加目标表节点
+                    if (!tableNodes.has(targetTableId)) {
+                        tableNodes.set(targetTableId, {
+                            data: {
+                                id: targetTableId,
+                                label: targetTableId,
+                                type: 'table_with_stats',
+                                match_count: 0,
+                                total_relations: 0
+                            }
+                        });
+                    }
+                    
+                    // 更新匹配统计
+                    const matchStats = summary.match_statistics || {};
+                    const matchCount = matchStats.match_count || 0;
+                    
+                    tableNodes.get(sourceTableId).data.match_count += matchCount;
+                    tableNodes.get(targetTableId).data.match_count += matchCount;
+                    tableNodes.get(sourceTableId).data.total_relations += summary.total_relation_count;
+                    tableNodes.get(targetTableId).data.total_relations += summary.total_relation_count;
+                    
+                    // 创建带匹配统计的边
+                    edges.push({
+                        data: {
+                            id: `edge_${index}`,
+                            source: sourceTableId,
+                            target: targetTableId,
+                            column_relations: summary.total_column_relations,
+                            total_relation_count: summary.total_relation_count,
+                            match_count: matchCount,
+                            avg_similarity: matchStats.avg_similarity || 0,
+                            avg_confidence: summary.avg_confidence,
+                            label: `${summary.total_column_relations}列关系\n${matchCount}匹配`
+                        }
+                    });
+                });
+
+                // 添加节点和边到图中
+                cy.add(Array.from(tableNodes.values()));
+                cy.add(edges);
+                
+                // 应用匹配统计专用样式
+                cy.style([
+                    // 表节点样式（带匹配统计）
+                    {
+                        selector: 'node[type="table_with_stats"]',
+                        style: {
+                            'background-color': '#28a745',
+                            'label': 'data(label)',
+                            'text-valign': 'center',
+                            'text-halign': 'center',
+                            'color': 'white',
+                            'font-size': '12px',
+                            'font-weight': 'bold',
+                            'width': 'mapData(match_count, 0, 1000, 60, 120)',
+                            'height': 'mapData(match_count, 0, 1000, 60, 120)',
+                            'border-width': 3,
+                            'border-color': '#1e7e34',
+                            'text-wrap': 'wrap',
+                            'text-max-width': '100px'
+                        }
+                    },
+                    
+                    // 匹配统计边样式
+                    {
+                        selector: 'edge[match_count > 0]',
+                        style: {
+                            'width': 'mapData(match_count, 1, 100, 3, 10)',
+                            'line-color': '#28a745',
+                            'target-arrow-color': '#28a745',
+                            'target-arrow-shape': 'triangle',
+                            'curve-style': 'bezier',
+                            'label': 'data(label)',
+                            'font-size': '9px',
+                            'text-rotation': 'autorotate',
+                            'text-margin-y': -10,
+                            'color': '#28a745',
+                            'font-weight': 'bold'
+                        }
+                    },
+                    
+                    {
+                        selector: 'edge[match_count = 0]',
+                        style: {
+                            'width': 2,
+                            'line-color': '#6c757d',
+                            'target-arrow-color': '#6c757d',
+                            'target-arrow-shape': 'triangle',
+                            'curve-style': 'bezier',
+                            'label': 'data(label)',
+                            'font-size': '8px',
+                            'text-rotation': 'autorotate',
+                            'text-margin-y': -8,
+                            'color': '#6c757d'
+                        }
+                    }
+                ]);
+                
+                // 应用布局
+                cy.layout({
+                    name: 'dagre',
+                    directed: true,
+                    padding: 50,
+                    spacingFactor: 1.8,
+                    rankDir: 'TB'
+                }).run();
+                
+                // 适应视图
+                cy.fit();
+                
+                console.log(`匹配统计图谱渲染完成: ${tableNodes.size} 个表节点, ${edges.length} 个关系边`);
+                
+            } catch (error) {
+                console.error('匹配统计图谱渲染失败:', error);
+                showError('匹配统计图谱渲染失败: ' + error.message);
+            }
+        }
+
+        function updateTableDetails(tables) {
+            const container = document.getElementById('table-details');
+            
+            if (!tables || tables.length === 0) {
+                container.innerHTML = `
+                    <div class="text-muted text-center py-4">
+                        <i class="fas fa-exclamation-triangle fa-2x mb-2"></i>
+                        <div>暂无表结构数据</div>
+                    </div>
+                `;
+                return;
+            }
+
+            const html = tables.map(table => `
+                <div class="table-node">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="mb-0 fw-bold">${table.table_name}</h6>
+                        <span class="badge bg-light text-dark">${table.entity_count} 实体</span>
+                    </div>
+                    <div class="small mb-2">
+                        <strong>实体类型:</strong> ${table.entity_types.join(', ')}
+                    </div>
+                    <div class="field-list">
+                        <div class="small fw-bold mb-2">字段列表 (${table.field_count}个):</div>
+                        ${table.fields.map(field => `
+                            <div class="field-item">${field}</div>
+                        `).join('')}
+                    </div>
+                </div>
+            `).join('');
+
+            container.innerHTML = html;
+        }
+
+        function showNodeInfo(nodeData) {
+            const container = document.getElementById('selection-info');
+            
+            const html = `
+                <div class="table-node">
+                    <h6 class="fw-bold mb-3">
+                        <i class="fas fa-table me-2"></i>${nodeData.table_name}
+                    </h6>
+                    <div class="row mb-3">
+                        <div class="col-6">
+                            <div class="stats-card">
+                                <div class="fw-bold">实体数量</div>
+                                <div class="h5 mb-0">${nodeData.entity_count}</div>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="stats-card">
+                                <div class="fw-bold">字段数量</div>
+                                <div class="h5 mb-0">${nodeData.field_count}</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <strong>实体类型:</strong>
+                        <div class="mt-1">
+                            ${nodeData.entity_types.map(type => `
+                                <span class="badge bg-primary me-1">${type}</span>
+                            `).join('')}
+                        </div>
+                    </div>
+                    <div class="field-list">
+                        <div class="fw-bold mb-2">字段列表:</div>
+                        ${nodeData.fields.map(field => `
+                            <div class="field-item">${field}</div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+            
+            container.innerHTML = html;
+        }
+
+        function showEdgeInfo(edgeData) {
+            const container = document.getElementById('selection-info');
+            
+            const html = `
+                <div class="relation-info">
+                    <h6 class="fw-bold mb-3">
+                        <i class="fas fa-link me-2"></i>关系详情
+                    </h6>
+                    <div class="mb-2">
+                        <strong>关系类型:</strong>
+                        <span class="badge bg-warning text-dark ms-2">${edgeData.relation_type}</span>
+                    </div>
+                    <div class="mb-2">
+                        <strong>源表:</strong> ${edgeData.source}
+                    </div>
+                    <div class="mb-2">
+                        <strong>目标表:</strong> ${edgeData.target}
+                    </div>
+                    <div class="mb-3">
+                        <strong>关系数量:</strong>
+                        <span class="h5 text-primary">${edgeData.relation_count}</span>
+                    </div>
+                    <div class="small text-muted">
+                        <i class="fas fa-info-circle me-1"></i>
+                        点击可查看具体的关联实体数据
+                    </div>
+                </div>
+            `;
+            
+            container.innerHTML = html;
+        }
+
+        function resetView() {
+            if (cy) {
+                cy.fit();
+                cy.elements().unselect();
+            }
+            
+            // 清空选中信息
+            document.getElementById('selection-info').innerHTML = `
+                <div class="text-muted text-center py-3">
+                    <i class="fas fa-hand-pointer fa-2x mb-2"></i>
+                    <div>点击节点或边查看详细信息</div>
+                </div>
+            `;
+        }
+
+        function showLoading(show) {
+            const indicator = document.getElementById('loading-indicator');
+            indicator.style.display = show ? 'block' : 'none';
+        }
+
+        async function showRelationEntities(edgeData) {
+            try {
+                // 解析边数据获取表和列信息
+                const sourceId = edgeData.source;
+                const targetId = edgeData.target;
+                
+                // 从ID中提取表名和列名 (格式: table.column)
+                const [sourceTable, sourceColumn] = sourceId.split('.');
+                const [targetTable, targetColumn] = targetId.split('.');
+                
+                if (!sourceTable || !sourceColumn || !targetTable || !targetColumn) {
+                    console.warn('无法解析边数据中的表和列信息:', edgeData);
+                    return;
+                }
+                
+                // 显示模态框
+                const modal = new bootstrap.Modal(document.getElementById('entityDataModal'));
+                modal.show();
+                
+                // 显示加载状态
+                document.getElementById('entity-data-loading').style.display = 'block';
+                document.getElementById('entity-data-content').style.display = 'none';
+                document.getElementById('entity-data-error').style.display = 'none';
+                
+                // 构建API请求参数
+                const params = new URLSearchParams({
+                    source_table: sourceTable,
+                    source_column: sourceColumn,
+                    target_table: targetTable,
+                    target_column: targetColumn,
+                    relation_type: edgeData.relation_type,
+                    limit: 20
+                });
+                
+                console.log(`加载关联实体数据: ${sourceTable}.${sourceColumn} -> ${targetTable}.${targetColumn}`);
+                
+                // 调用API获取关联实体数据
+                const response = await fetch(`/api/kg/projects/${currentProject}/relation_entities?${params}`);
+                
+                if (!response.ok) {
+                    throw new Error(`API请求失败: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    displayRelationEntities(data, edgeData);
+                } else {
+                    throw new Error(data.error || '数据加载失败');
+                }
+                
+            } catch (error) {
+                console.error('加载关联实体数据失败:', error);
+                showEntityDataError('加载失败: ' + error.message);
+            } finally {
+                document.getElementById('entity-data-loading').style.display = 'none';
+            }
+        }
+
+
+
+        // 显示表间关系实体数据
+        async function showTableRelationEntities(edgeData) {
+            try {
+                const sourceTable = edgeData.source;
+                const targetTable = edgeData.target;
+                const relationType = edgeData.relation_type || 'USER_MATCHED';
+                
+                // 设置当前关系数据
+                currentRelationData = {
+                    source_table: sourceTable,
+                    target_table: targetTable,
+                    relation_type: relationType
+                };
+                currentApiEndpoint = 'table_relation_entities';
+                currentPage = 1; // 重置页码
+                
+                // 显示模态框
+                const modal = new bootstrap.Modal(document.getElementById('entityDataModal'));
+                modal.show();
+                
+                // 加载数据
+                await loadEntityData();
+                
+            } catch (error) {
+                console.error('显示表间关系实体数据失败:', error);
+                showEntityDataError('显示失败: ' + error.message);
+            }
+        }
+
+        // 通用的实体数据加载函数
+        async function loadEntityData() {
+            try {
+                // 显示加载状态
+                document.getElementById('entity-data-loading').style.display = 'block';
+                document.getElementById('entity-data-content').style.display = 'none';
+                document.getElementById('entity-data-error').style.display = 'none';
+                
+                // 构建API请求参数
+                const params = new URLSearchParams({
+                    page: currentPage,
+                    page_size: currentPageSize
+                });
+                
+                // 根据API端点添加不同的参数
+                if (currentApiEndpoint === 'table_relation_entities') {
+                    params.append('source_table', currentRelationData.source_table);
+                    params.append('target_table', currentRelationData.target_table);
+                    params.append('relation_type', currentRelationData.relation_type);
+                } else {
+                    // 列关系API参数
+                    params.append('source_table', currentRelationData.source_table);
+                    params.append('source_column', currentRelationData.source_column);
+                    params.append('target_table', currentRelationData.target_table);
+                    params.append('target_column', currentRelationData.target_column);
+                    if (currentRelationData.relation_type) {
+                        params.append('relation_type', currentRelationData.relation_type);
+                    }
+                }
+                
+                console.log(`加载实体数据 (第${currentPage}页): ${currentApiEndpoint}`, currentRelationData);
+                
+                // 调用API
+                const response = await fetch(`/api/kg/projects/${currentProject}/${currentApiEndpoint}?${params}`);
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    displayEntityData(data);
+                } else {
+                    throw new Error(data.error || '数据加载失败');
+                }
+                
+            } catch (error) {
+                console.error('加载实体数据失败:', error);
+                showEntityDataError('加载失败: ' + error.message);
+            } finally {
+                document.getElementById('entity-data-loading').style.display = 'none';
+            }
+        }
+
+        // 显示实体数据（支持分页）
+        function displayEntityData(data) {
+            // 显示关系信息
+            const relationInfoHtml = generateRelationInfoHtml(data.relation_info);
+            document.getElementById('relation-info-content').innerHTML = relationInfoHtml;
+            
+            // 显示实体数据表格
+            const tableHtml = generateEntityTableHtml(data.entities, data.relation_info);
+            document.getElementById('entity-data-table').innerHTML = tableHtml;
+            
+            // 更新计数徽章
+            const totalCount = data.pagination ? data.pagination.total_count : data.entities.length;
+            document.getElementById('entity-count-badge').textContent = `${totalCount} 条记录`;
+            
+            // 显示分页控件
+            if (data.pagination && data.pagination.total_pages > 1) {
+                displayPagination(data.pagination);
+                document.getElementById('pagination-nav').style.display = 'block';
+            } else {
+                document.getElementById('pagination-nav').style.display = 'none';
+            }
+            
+            // 显示内容
+            document.getElementById('entity-data-content').style.display = 'block';
+        }
+
+        // 生成关系信息HTML
+        function generateRelationInfoHtml(relationInfo) {
+            if (relationInfo.source_column && relationInfo.target_column) {
+                // 列关系
+                return `
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-2">
+                                <strong>源表.列:</strong>
+                                <span class="badge bg-primary ms-2">${relationInfo.source_table}.${relationInfo.source_column}</span>
+                            </div>
+                            <div class="mb-2">
+                                <strong>目标表.列:</strong>
+                                <span class="badge bg-success ms-2">${relationInfo.target_table}.${relationInfo.target_column}</span>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-2">
+                                <strong>关系类型:</strong>
+                                <span class="badge bg-info ms-2">${relationInfo.relation_type || 'UNKNOWN'}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                // 表关系
+                return `
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-2">
+                                <strong>源表:</strong>
+                                <span class="badge bg-primary ms-2">${relationInfo.source_table}</span>
+                            </div>
+                            <div class="mb-2">
+                                <strong>目标表:</strong>
+                                <span class="badge bg-success ms-2">${relationInfo.target_table}</span>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-2">
+                                <strong>关系类型:</strong>
+                                <span class="badge bg-info ms-2">${relationInfo.relation_type || 'USER_MATCHED'}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        // 生成实体表格HTML
+        function generateEntityTableHtml(entities, relationInfo) {
+            if (!entities || entities.length === 0) {
+                return '<div class="text-center py-4 text-muted">暂无关联实体数据</div>';
+            }
+
+            // 根据数据结构判断是表关系还是列关系
+            const isTableRelation = !relationInfo.source_column;
+            
+            if (isTableRelation) {
+                return generateTableRelationTableHtml(entities);
+            } else {
+                return generateColumnRelationTableHtml(entities);
+            }
+        }
+
+        // 生成表关系的表格HTML
+        function generateTableRelationTableHtml(entities) {
+            let html = `
+                <table class="table table-striped table-hover">
+                    <thead class="table-dark">
+                        <tr>
+                            <th style="width: 5%">#</th>
+                            <th style="width: 42.5%">源实体数据</th>
+                            <th style="width: 42.5%">目标实体数据</th>
+                            <th style="width: 10%">匹配信息</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            entities.forEach((entity, index) => {
+                const sourceData = entity.source_entity?.data || {};
+                const targetData = entity.target_entity?.data || {};
+                const matchInfo = entity.match_info || entity.relation || {};
+
+                html += `
+                    <tr>
+                        <td>${(currentPage - 1) * currentPageSize + index + 1}</td>
+                        <td>
+                            <div class="entity-data">
+                                ${Object.entries(sourceData).map(([key, value]) => 
+                                    `<div><strong>${key}:</strong> ${value || 'N/A'}</div>`
+                                ).join('')}
+                            </div>
+                        </td>
+                        <td>
+                            <div class="entity-data">
+                                ${Object.entries(targetData).map(([key, value]) => 
+                                    `<div><strong>${key}:</strong> ${value || 'N/A'}</div>`
+                                ).join('')}
+                            </div>
+                        </td>
+                        <td>
+                            <div class="match-info">
+                                <div><strong>置信度:</strong> ${(matchInfo.confidence || 0.8).toFixed(2)}</div>
+                                <div><strong>类型:</strong> ${matchInfo.match_type || matchInfo.type || 'USER_MATCHED'}</div>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                    </tbody>
+                </table>
+            `;
+
+            return html;
+        }
+
+        // 生成列关系的表格HTML（保持原有逻辑）
+        function generateColumnRelationTableHtml(entities) {
+            let html = `
+                <table class="table table-striped table-hover">
+                    <thead class="table-dark">
+                        <tr>
+                            <th style="width: 5%">#</th>
+                            <th style="width: 20%">源实体</th>
+                            <th style="width: 25%">源值</th>
+                            <th style="width: 20%">目标实体</th>
+                            <th style="width: 25%">目标值</th>
+                            <th style="width: 5%">置信度</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            entities.forEach((entity, index) => {
+                html += `
+                    <tr>
+                        <td>${(currentPage - 1) * currentPageSize + index + 1}</td>
+                        <td>
+                            <div class="entity-info">
+                                <div class="entity-id">${entity.source_entity.entity_id || 'N/A'}</div>
+                                <small class="text-muted">${entity.source_entity.label || ''}</small>
+                            </div>
+                        </td>
+                        <td>
+                            <span class="column-value">${entity.source_entity.column_value || 'N/A'}</span>
+                        </td>
+                        <td>
+                            <div class="entity-info">
+                                <div class="entity-id">${entity.target_entity.entity_id || 'N/A'}</div>
+                                <small class="text-muted">${entity.target_entity.label || ''}</small>
+                            </div>
+                        </td>
+                        <td>
+                            <span class="column-value">${entity.target_entity.column_value || 'N/A'}</span>
+                        </td>
+                        <td>
+                            <span class="badge ${entity.relation.confidence >= 0.8 ? 'bg-success' : entity.relation.confidence >= 0.6 ? 'bg-warning' : 'bg-danger'}">
+                                ${entity.relation.confidence}
+                            </span>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                    </tbody>
+                </table>
+            `;
+
+            return html;
+        }
+
+        // 显示分页控件
+        function displayPagination(pagination) {
+            const { page, total_pages, has_prev, has_next, total_count, page_size } = pagination;
+            
+            // 更新分页信息文本
+            const startIndex = (page - 1) * page_size + 1;
+            const endIndex = Math.min(page * page_size, total_count);
+            document.getElementById('pagination-info-text').textContent = 
+                `显示第 ${startIndex}-${endIndex} 条，共 ${total_count} 条记录`;
+            
+            // 生成分页按钮
+            let paginationHtml = '';
+            
+            // 上一页按钮
+            paginationHtml += `
+                <li class="page-item ${!has_prev ? 'disabled' : ''}">
+                    <a class="page-link" href="#" onclick="${has_prev ? 'changePage(' + (page - 1) + ')' : 'return false;'}">
+                        <i class="fas fa-chevron-left"></i>
+                    </a>
+                </li>
+            `;
+            
+            // 页码按钮
+            const maxVisiblePages = 5;
+            let startPage = Math.max(1, page - Math.floor(maxVisiblePages / 2));
+            let endPage = Math.min(total_pages, startPage + maxVisiblePages - 1);
+            
+            if (endPage - startPage < maxVisiblePages - 1) {
+                startPage = Math.max(1, endPage - maxVisiblePages + 1);
+            }
+            
+            if (startPage > 1) {
+                paginationHtml += `
+                    <li class="page-item">
+                        <a class="page-link" href="#" onclick="changePage(1)">1</a>
+                    </li>
+                `;
+                if (startPage > 2) {
+                    paginationHtml += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+                }
+            }
+            
+            for (let i = startPage; i <= endPage; i++) {
+                paginationHtml += `
+                    <li class="page-item ${i === page ? 'active' : ''}">
+                        <a class="page-link" href="#" onclick="changePage(${i})">${i}</a>
+                    </li>
+                `;
+            }
+            
+            if (endPage < total_pages) {
+                if (endPage < total_pages - 1) {
+                    paginationHtml += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+                }
+                paginationHtml += `
+                    <li class="page-item">
+                        <a class="page-link" href="#" onclick="changePage(${total_pages})">${total_pages}</a>
+                    </li>
+                `;
+            }
+            
+            // 下一页按钮
+            paginationHtml += `
+                <li class="page-item ${!has_next ? 'disabled' : ''}">
+                    <a class="page-link" href="#" onclick="${has_next ? 'changePage(' + (page + 1) + ')' : 'return false;'}">
+                        <i class="fas fa-chevron-right"></i>
+                    </a>
+                </li>
+            `;
+            
+            document.getElementById('pagination-controls').innerHTML = paginationHtml;
+        }
+
+        // 切换页码
+        function changePage(page) {
+            if (page !== currentPage) {
+                currentPage = page;
+                loadEntityData();
+            }
+        }
+
+        // 切换每页显示数量
+        function changePageSize(pageSize) {
+            if (pageSize !== currentPageSize) {
+                currentPageSize = pageSize;
+                currentPage = 1; // 重置到第一页
+                
+                // 更新按钮状态
+                document.querySelectorAll('#page-size-selector button').forEach(btn => {
+                    btn.classList.remove('active');
+                });
+                event.target.classList.add('active');
+                
+                loadEntityData();
+            }
+        }
+
+        // 修改原有的showRelationEntities函数以使用新的通用函数
+        async function showRelationEntities(edgeData) {
+            try {
+                // 解析边数据获取表和列信息
+                const sourceId = edgeData.source;
+                const targetId = edgeData.target;
+                
+                // 从ID中提取表名和列名 (格式: table.column)
+                const [sourceTable, sourceColumn] = sourceId.split('.');
+                const [targetTable, targetColumn] = targetId.split('.');
+                
+                if (!sourceTable || !sourceColumn || !targetTable || !targetColumn) {
+                    console.warn('无法解析边数据中的表和列信息:', edgeData);
+                    return;
+                }
+                
+                // 设置当前关系数据
+                currentRelationData = {
+                    source_table: sourceTable,
+                    source_column: sourceColumn,
+                    target_table: targetTable,
+                    target_column: targetColumn,
+                    relation_type: edgeData.relation_type
+                };
+                currentApiEndpoint = 'relation_entities';
+                currentPage = 1; // 重置页码
+                
+                // 显示模态框
+                const modal = new bootstrap.Modal(document.getElementById('entityDataModal'));
+                modal.show();
+                
+                // 加载数据
+                await loadEntityData();
+                
+            } catch (error) {
+                console.error('显示列关系实体数据失败:', error);
+                showEntityDataError('显示失败: ' + error.message);
+            }
+        }
+
+        function showEntityDataError(message) {
+            document.getElementById('entity-data-error-message').textContent = message;
+            document.getElementById('entity-data-error').style.display = 'block';
+            document.getElementById('entity-data-content').style.display = 'none';
+        }
+
+        function showError(message) {
+            console.error('错误:', message);
+            
+            // 可以在这里添加更友好的错误显示
+            const container = document.getElementById('table-details');
+            container.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    ${message}
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html>

@@ -185,7 +185,7 @@
                     <p class="mb-0 opacity-75">数据表关系架构图 - 业务逻辑层面的数据关联分析</p>
                 </div>
                 <div>
-                    <button class="btn btn-light btn-sm" onclick="window.history.back()">
+                    <button class="btn btn-light btn-sm" onclick="goBack()">
                         <i class="fas fa-arrow-left me-2"></i>返回
                     </button>
                 </div>
@@ -454,6 +454,20 @@
                 loadTableSchema();
             }
         });
+
+        // 返回按钮功能
+        function goBack() {
+            // 优先尝试返回到项目浏览页面
+            if (document.referrer && document.referrer.includes('kg_viewer_projects')) {
+                window.location.href = '/kg_viewer_projects';
+            } else if (window.history.length > 1) {
+                // 如果有历史记录，使用浏览器返回
+                window.history.back();
+            } else {
+                // 否则返回到项目浏览页面
+                window.location.href = '/kg_viewer_projects';
+            }
+        }
 
         function initializePage() {
             console.log('表结构图谱可视化页面初始化');

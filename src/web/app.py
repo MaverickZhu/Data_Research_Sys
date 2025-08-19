@@ -6597,9 +6597,21 @@ def get_table_relation_entities(project_name):
         # 如果是用户匹配关系，从MongoDB获取数据
         if relation_type == 'USER_MATCHED':
             try:
-                # 使用Flask配置中的MongoDB客户端
+                # 使用Flask配置中的MongoDB客户端，并检查连接状态
                 mongo_client = current_app.config['MONGO_CLIENT']
-                mongo_db = mongo_client['Unit_Info']
+                
+                # 检查连接是否有效，如果无效则重新连接
+                try:
+                    # 测试连接
+                    mongo_client.admin.command('ping')
+                    mongo_db = mongo_client['Unit_Info']
+                except Exception as conn_error:
+                    logger.warning(f"MongoDB连接失效，尝试重新连接: {str(conn_error)}")
+                    # 重新创建连接
+                    from pymongo import MongoClient
+                    mongo_client = MongoClient('mongodb://localhost:27017/')
+                    current_app.config['MONGO_CLIENT'] = mongo_client
+                    mongo_db = mongo_client['Unit_Info']
                 
                 # 查找相关的用户匹配结果表
                 collection_names = mongo_db.list_collection_names()

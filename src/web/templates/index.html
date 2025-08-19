@@ -2,6 +2,50 @@
 
 {% block title %}系统概览 - {{ super() }}{% endblock %}
 
+{% block extra_css %}
+<style>
+    .feature-btn {
+        transition: all 0.3s ease;
+        transform: translateY(0);
+    }
+    
+    .feature-btn:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 8px 16px rgba(0,0,0,0.2) !important;
+    }
+    
+    .stats-card {
+        transition: all 0.3s ease;
+        transform: translateY(0);
+    }
+    
+    .stats-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 12px 24px rgba(0,0,0,0.15) !important;
+    }
+    
+    .gradient-header {
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .gradient-header::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+        transition: left 0.5s;
+    }
+    
+    .gradient-header:hover::before {
+        left: 100%;
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="container-fluid">
     <!-- Header -->
@@ -11,53 +55,56 @@
     </div>
 
     <!-- V2.0 功能入口 -->
-    <div class="card shadow-sm mb-4" style="border-left: 5px solid #007bff;">
-        <div class="card-header bg-gradient-primary text-white">
-            <h4><i class="fas fa-rocket"></i> V2.0 智能知识图谱系统 <span class="badge bg-warning text-dark">NEW!</span></h4>
+    <div class="card shadow-lg mb-4" style="border-left: 5px solid #007bff; border-radius: 15px; overflow: hidden;">
+        <div class="card-header gradient-header" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px;">
+            <h4 class="mb-0" style="font-weight: 600; text-shadow: 0 2px 4px rgba(0,0,0,0.3);">
+                <i class="fas fa-rocket me-2"></i> V2.0 智能知识图谱系统 
+                <span class="badge bg-warning text-dark ms-2" style="font-size: 0.7em; padding: 6px 12px; border-radius: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">NEW!</span>
+            </h4>
         </div>
         <div class="card-body">
             <p class="card-text">
                 全新的V2.0版本支持CSV数据上传、智能字段映射、知识图谱构建等高级功能，
                 将您的数据转化为可视化的知识网络，发现隐藏的关联和洞察。
             </p>
-            <div class="row">
-                <div class="col-md-3 mb-3">
+            <div class="row g-3">
+                <div class="col-lg-2 col-md-4 col-sm-6">
                     <div class="d-grid">
-                        <a href="/csv_upload" class="btn btn-primary btn-lg">
-                            <i class="fas fa-upload"></i><br>
-                            <small>CSV上传</small>
+                        <a href="/csv_upload" class="btn btn-primary btn-lg h-100 d-flex flex-column justify-content-center align-items-center feature-btn" style="border-radius: 15px; padding: 20px; min-height: 120px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+                            <i class="fas fa-upload fa-2x mb-2" style="color: #fff;"></i>
+                            <span style="font-weight: 500;">CSV上传</span>
                         </a>
                     </div>
                 </div>
-                <div class="col-md-3 mb-3">
+                <div class="col-lg-2 col-md-4 col-sm-6">
                     <div class="d-grid">
-                        <a href="/data_analysis" class="btn btn-info btn-lg" onclick="checkFileId(event, '/data_analysis')">
-                            <i class="fas fa-chart-bar"></i><br>
-                            <small>数据分析</small>
+                        <a href="/data_analysis" class="btn btn-info btn-lg h-100 d-flex flex-column justify-content-center align-items-center feature-btn" onclick="checkFileId(event, '/data_analysis')" style="border-radius: 15px; padding: 20px; min-height: 120px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+                            <i class="fas fa-chart-bar fa-2x mb-2" style="color: #fff;"></i>
+                            <span style="font-weight: 500;">数据分析</span>
                         </a>
                     </div>
                 </div>
-                <div class="col-md-3 mb-3">
+                <div class="col-lg-2 col-md-4 col-sm-6">
                     <div class="d-grid">
-                        <a href="/field_mapping" class="btn btn-success btn-lg" onclick="checkFileId(event, '/field_mapping')">
-                            <i class="fas fa-exchange-alt"></i><br>
-                            <small>字段映射</small>
+                        <a href="/field_mapping" class="btn btn-success btn-lg h-100 d-flex flex-column justify-content-center align-items-center feature-btn" onclick="checkFileId(event, '/field_mapping')" style="border-radius: 15px; padding: 20px; min-height: 120px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+                            <i class="fas fa-exchange-alt fa-2x mb-2" style="color: #fff;"></i>
+                            <span style="font-weight: 500;">字段映射</span>
                         </a>
                     </div>
                 </div>
-                <div class="col-md-3 mb-3">
+                <div class="col-lg-2 col-md-4 col-sm-6">
                     <div class="d-grid">
-                        <a href="/kg_builder" class="btn btn-warning btn-lg" onclick="checkFileId(event, '/kg_builder')">
-                            <i class="fas fa-network-wired"></i><br>
-                            <small>图谱构建</small>
+                        <a href="/kg_builder" class="btn btn-warning btn-lg h-100 d-flex flex-column justify-content-center align-items-center feature-btn" onclick="checkFileId(event, '/kg_builder')" style="border-radius: 15px; padding: 20px; min-height: 120px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+                            <i class="fas fa-network-wired fa-2x mb-2" style="color: #fff;"></i>
+                            <span style="font-weight: 500;">图谱构建</span>
                         </a>
                     </div>
                 </div>
-                <div class="col-md-3 mb-3">
+                <div class="col-lg-2 col-md-4 col-sm-6">
                     <div class="d-grid">
-                        <a href="/kg_viewer" class="btn btn-info btn-lg">
-                            <i class="fas fa-project-diagram"></i><br>
-                            <small>图谱浏览</small>
+                        <a href="/kg_viewer" class="btn btn-info btn-lg h-100 d-flex flex-column justify-content-center align-items-center feature-btn" style="border-radius: 15px; padding: 20px; min-height: 120px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+                            <i class="fas fa-project-diagram fa-2x mb-2" style="color: #fff;"></i>
+                            <span style="font-weight: 500;">图谱浏览</span>
                         </a>
                     </div>
                 </div>
@@ -70,34 +117,34 @@
     </div>
 
     <!-- Stats Cards -->
-    <div class="row">
+    <div class="row g-4">
         <div class="col-lg-4 mb-4">
-            <div class="card h-100 shadow-sm">
-                <div class="card-body d-flex flex-column align-items-center justify-content-center text-center">
-                    <i class="fas fa-database fa-3x text-primary mb-3"></i>
-                    <h5 class="card-title">消防监督管理系统</h5>
-                    <p class="card-text fs-1 fw-bold" id="supervision-count">...</p>
-                    <p class="text-muted">条记录</p>
+            <div class="card h-100 shadow-lg border-0 stats-card" style="border-radius: 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                <div class="card-body d-flex flex-column align-items-center justify-content-center text-center text-white" style="padding: 30px;">
+                    <i class="fas fa-database fa-3x mb-3" style="opacity: 0.9;"></i>
+                    <h5 class="card-title mb-3" style="font-weight: 600;">消防监督管理系统</h5>
+                    <p class="card-text fs-1 fw-bold mb-2" id="supervision-count" style="text-shadow: 0 2px 4px rgba(0,0,0,0.3);">...</p>
+                    <p class="mb-0" style="opacity: 0.8;">条记录</p>
                 </div>
             </div>
         </div>
         <div class="col-lg-4 mb-4">
-            <div class="card h-100 shadow-sm">
-                <div class="card-body d-flex flex-column align-items-center justify-content-center text-center">
-                    <i class="fas fa-tasks fa-3x text-info mb-3"></i>
-                    <h5 class="card-title">隐患安全排查系统</h5>
-                    <p class="card-text fs-1 fw-bold" id="inspection-count">...</p>
-                    <p class="text-muted">条记录</p>
+            <div class="card h-100 shadow-lg border-0 stats-card" style="border-radius: 15px; background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
+                <div class="card-body d-flex flex-column align-items-center justify-content-center text-center text-white" style="padding: 30px;">
+                    <i class="fas fa-tasks fa-3x mb-3" style="opacity: 0.9;"></i>
+                    <h5 class="card-title mb-3" style="font-weight: 600;">隐患安全排查系统</h5>
+                    <p class="card-text fs-1 fw-bold mb-2" id="inspection-count" style="text-shadow: 0 2px 4px rgba(0,0,0,0.3);">...</p>
+                    <p class="mb-0" style="opacity: 0.8;">条记录</p>
                 </div>
-                        </div>
-                    </div>
+            </div>
+        </div>
         <div class="col-lg-4 mb-4">
-            <div class="card h-100 shadow-sm">
-                 <div class="card-body d-flex flex-column align-items-center justify-content-center text-center">
-                    <i class="fas fa-check-circle fa-3x text-success mb-3"></i>
-                    <h5 class="card-title">已生成匹配结果</h5>
-                    <p class="card-text fs-1 fw-bold" id="match-results-count">...</p>
-                    <p class="text-muted">条记录</p>
+            <div class="card h-100 shadow-lg border-0 stats-card" style="border-radius: 15px; background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);">
+                <div class="card-body d-flex flex-column align-items-center justify-content-center text-center" style="padding: 30px; color: #2c3e50;">
+                    <i class="fas fa-check-circle fa-3x mb-3 text-success" style="opacity: 0.9;"></i>
+                    <h5 class="card-title mb-3" style="font-weight: 600;">已生成匹配结果</h5>
+                    <p class="card-text fs-1 fw-bold mb-2" id="match-results-count" style="text-shadow: 0 2px 4px rgba(0,0,0,0.1);">...</p>
+                    <p class="mb-0" style="opacity: 0.8;">条记录</p>
                 </div>
             </div>
         </div>

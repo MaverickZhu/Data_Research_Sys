@@ -407,24 +407,36 @@ async function loadMappingConfig() {
 async function loadDataStatistics(config) {
     try {
         const tables = [config.source_table, ...config.target_tables];
-        const tableParams = tables.map(t => `table_names=${t}`).join('&');
+        const tableParams = tables.join(',');
         
-        const response = await fetch(`/api/database_tables?${tableParams}`);
+        // 使用轻量级模式和指定表名来优化加载速度
+        const response = await fetch(`/api/database_tables?lightweight=true&tables=${encodeURIComponent(tableParams)}`);
         const data = await response.json();
         
         if (data.success) {
             const statsDiv = document.getElementById('data-stats');
-            let totalRecords = 0;
             let statsHtml = '';
             
-            data.tables.forEach(table => {
-                totalRecords += table.count;
-                const isSource = table.name === config.source_table;
-                const badgeClass = isSource ? 'bg-primary' : 'bg-secondary';
-                statsHtml += `<span class="badge ${badgeClass} me-1">${table.name}: ${table.count.toLocaleString()}</span><br>`;
-            });
+            if (data.lightweight_mode) {
+                // 轻量级模式：显示表名和字段数
+                data.tables.forEach(table => {
+                    const isSource = table.name === config.source_table;
+                    const badgeClass = isSource ? 'bg-primary' : 'bg-secondary';
+                    statsHtml += `<span class="badge ${badgeClass} me-1">${table.name}: ${table.fields}字段</span><br>`;
+                });
+                statsHtml += `<small class="text-info mt-1 d-block">快速加载模式 - 已优化页面加载速度</small>`;
+            } else {
+                // 完整模式：显示记录数统计
+                let totalRecords = 0;
+                data.tables.forEach(table => {
+                    totalRecords += table.count;
+                    const isSource = table.name === config.source_table;
+                    const badgeClass = isSource ? 'bg-primary' : 'bg-secondary';
+                    statsHtml += `<span class="badge ${badgeClass} me-1">${table.name}: ${table.count.toLocaleString()}</span><br>`;
+                });
+                statsHtml += `<small class="text-success mt-1 d-block">总计: ${totalRecords.toLocaleString()} 条记录</small>`;
+            }
             
-            statsHtml += `<small class="text-success mt-1 d-block">总计: ${totalRecords.toLocaleString()} 条记录</small>`;
             statsDiv.innerHTML = statsHtml;
         }
     } catch (error) {

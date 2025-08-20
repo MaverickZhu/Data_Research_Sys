@@ -2097,8 +2097,17 @@ def api_get_database_tables():
         
         db = db_manager.mongo_client.get_database()
         
+        # 检查是否为轻量级模式（用于字段映射页面优化）
+        lightweight = request.args.get('lightweight', 'false').lower() == 'true'
+        tables_param = request.args.get('tables', '')  # 指定特定表名，逗号分隔
+        
         # 获取所有集合名称
         collection_names = db.list_collection_names()
+        
+        # 如果指定了特定表名，只处理这些表
+        if tables_param:
+            specified_tables = [t.strip() for t in tables_param.split(',') if t.strip()]
+            collection_names = [name for name in collection_names if name in specified_tables]
         
         # 过滤掉系统集合和临时集合
         excluded_prefixes = ['system.', 'tmp_', 'temp_']
@@ -2115,24 +2124,41 @@ def api_get_database_tables():
             try:
                 # 获取集合基本信息
                 collection = db[name]
-                doc_count = collection.count_documents({})
                 
-                # 获取样本文档来分析字段
-                sample_doc = collection.find_one()
-                field_count = len(sample_doc.keys()) if sample_doc else 0
-                
-                # 获取集合创建信息（如果有的话）
-                collection_info = {
-                    'name': name,
-                    'display_name': name.replace('_', ' ').title(),
-                    'count': doc_count,  # 前端期望的字段名
-                    'fields': field_count,  # 前端期望的字段名
-                    'document_count': doc_count,  # 保留原字段名兼容性
-                    'field_count': field_count,  # 保留原字段名兼容性
-                    'sample_fields': list(sample_doc.keys())[:10] if sample_doc else [],
-                    'has_data': doc_count > 0,
-                    'type': 'user_data'  # 用户数据表
-                }
+                if lightweight:
+                    # 轻量级模式：只获取基本信息，跳过耗时的统计操作
+                    sample_doc = collection.find_one()
+                    field_count = len(sample_doc.keys()) if sample_doc else 0
+                    
+                    collection_info = {
+                        'name': name,
+                        'display_name': name.replace('_', ' ').title(),
+                        'count': '未统计',  # 轻量级模式不统计
+                        'fields': field_count,
+                        'document_count': '未统计',
+                        'field_count': field_count,
+                        'sample_fields': list(sample_doc.keys())[:10] if sample_doc else [],
+                        'has_data': sample_doc is not None,
+                        'type': 'user_data',
+                        'lightweight_mode': True
+                    }
+                else:
+                    # 完整模式：获取详细统计信息
+                    doc_count = collection.count_documents({})
+                    sample_doc = collection.find_one()
+                    field_count = len(sample_doc.keys()) if sample_doc else 0
+                    
+                    collection_info = {
+                        'name': name,
+                        'display_name': name.replace('_', ' ').title(),
+                        'count': doc_count,
+                        'fields': field_count,
+                        'document_count': doc_count,
+                        'field_count': field_count,
+                        'sample_fields': list(sample_doc.keys())[:10] if sample_doc else [],
+                        'has_data': doc_count > 0,
+                        'type': 'user_data'
+                    }
                 
                 # 尝试从csv_files集合获取更详细的信息
                 try:
@@ -2155,17 +2181,78 @@ def api_get_database_tables():
                 logger.warning(f"获取集合 {name} 信息失败: {str(e)}")
                 continue
         
-        # 按文档数量排序
-        filtered_collections.sort(key=lambda x: x['count'], reverse=True)
+        # 按文档数量排序（轻量级模式下按名称排序）
+        if lightweight:
+            filtered_collections.sort(key=lambda x: x['name'])
+        else:
+            filtered_collections.sort(key=lambda x: x['count'], reverse=True)
         
         return jsonify({
             'success': True,
             'tables': filtered_collections,
-            'total_count': len(filtered_collections)
+            'total_count': len(filtered_collections),
+            'lightweight_mode': lightweight
         })
         
     except Exception as e:
         logger.error(f"获取数据表列表失败: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/table_details/<table_name>')
+def api_get_table_details(table_name):
+    """API: 获取特定表的详细信息"""
+    try:
+        if not db_manager or not db_manager.mongo_client:
+            return jsonify({'success': False, 'error': '数据库连接未初始化'}), 500
+        
+        db = db_manager.mongo_client.get_database()
+        
+        # 检查表是否存在
+        if table_name not in db.list_collection_names():
+            return jsonify({'success': False, 'error': f'数据表 {table_name} 不存在'}), 404
+        
+        collection = db[table_name]
+        
+        # 获取详细统计信息
+        doc_count = collection.count_documents({})
+        sample_doc = collection.find_one()
+        field_count = len(sample_doc.keys()) if sample_doc else 0
+        
+        table_info = {
+            'name': table_name,
+            'display_name': table_name.replace('_', ' ').title(),
+            'count': doc_count,
+            'fields': field_count,
+            'document_count': doc_count,
+            'field_count': field_count,
+            'sample_fields': list(sample_doc.keys())[:10] if sample_doc else [],
+            'has_data': doc_count > 0,
+            'type': 'user_data'
+        }
+        
+        # 尝试从csv_files集合获取更详细的信息
+        try:
+            csv_file_info = db.csv_files.find_one({'file_info.collection_name': table_name})
+            if csv_file_info and 'file_info' in csv_file_info:
+                file_info = csv_file_info['file_info']
+                table_info.update({
+                    'source_filename': file_info.get('filename', table_name),
+                    'upload_time': file_info.get('upload_time'),
+                    'file_size': file_info.get('file_size'),
+                    'encoding': file_info.get('encoding'),
+                    'type': 'imported_csv'
+                })
+        except:
+            pass
+        
+        return jsonify({
+            'success': True,
+            'table': table_info
+        })
+        
+    except Exception as e:
+        logger.error(f"获取表 {table_name} 详细信息失败: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -6321,7 +6408,7 @@ def get_project_column_relations(project_name):
             try:
                 # 查询用户匹配结果统计
                 match_results_collection = db_manager.get_collection('user_matching_results')
-                if match_results_collection:
+                if match_results_collection is not None:
                     # 统计不同表间的匹配数量
                     pipeline = [
                         {'$match': {'status': 'completed'}},

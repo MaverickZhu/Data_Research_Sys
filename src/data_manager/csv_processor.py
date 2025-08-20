@@ -333,8 +333,10 @@ class CSVProcessor:
             Dict: 样本数据信息
         """
         try:
+            # 处理NaN值以避免JSON序列化错误
+            safe_sample_df = df.head(sample_size).where(pd.notna(df.head(sample_size)), None)
             sample_data = {
-                'head': df.head(sample_size).to_dict('records'),
+                'head': safe_sample_df.to_dict('records'),
                 'columns': df.columns.tolist(),
                 'dtypes': df.dtypes.to_dict(),
                 'shape': df.shape,

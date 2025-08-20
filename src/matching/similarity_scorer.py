@@ -203,7 +203,36 @@ class SimilarityCalculator:
     
     def calculate_address_similarity(self, addr1: str, addr2: str) -> float:
         """
-        计算地址相似度
+        计算地址相似度（增强版 - 支持模糊地址与标准地址匹配）
+        
+        Args:
+            addr1: 地址1（可能是模糊描述地址）
+            addr2: 地址2（可能是标准地址）
+            
+        Returns:
+            float: 相似度分数 (0-1)
+        """
+        if not addr1 or not addr2:
+            return 0.0
+        
+        # 地址标准化预处理
+        from .address_normalizer import normalize_address_for_matching
+        normalized_addr1 = normalize_address_for_matching(addr1)
+        normalized_addr2 = normalize_address_for_matching(addr2)
+        
+        logger.debug(f"地址标准化: '{addr1}' -> '{normalized_addr1}'")
+        logger.debug(f"地址标准化: '{addr2}' -> '{normalized_addr2}'")
+        
+        if normalized_addr1 == normalized_addr2:
+            return 1.0
+        
+        # 使用标准化后的地址进行语义分析
+        return self._enhanced_address_semantic_similarity(normalized_addr1, normalized_addr2)
+    
+    def _enhanced_address_semantic_similarity(self, addr1: str, addr2: str) -> float:
+        """
+        增强的地址语义相似度分析
+        专门处理模糊地址描述与标准地址的匹配
         
         Args:
             addr1: 地址1
@@ -212,22 +241,176 @@ class SimilarityCalculator:
         Returns:
             float: 相似度分数 (0-1)
         """
-        if not addr1 or not addr2:
+        try:
+            # 1. 提取地址核心组件
+            components1 = self._extract_enhanced_address_components(addr1)
+            components2 = self._extract_enhanced_address_components(addr2)
+            
+            # 2. 计算组件权重化相似度
+            return self._calculate_weighted_address_similarity(components1, components2)
+            
+        except Exception as e:
+            logger.debug(f"增强地址语义分析失败，回退到基础方法: {str(e)}")
+            # 回退到原有的分段匹配
+            if self.address_config.get('enable_segmentation', True):
+                return self._segmented_address_similarity(addr1, addr2)
+            else:
+                return self.calculate_string_similarity(addr1, addr2)
+    
+    def _extract_enhanced_address_components(self, address: str) -> Dict[str, str]:
+        """
+        提取增强的地址组件
+        支持更复杂的地址解析，包括建筑物名称、门牌号等
+        """
+        components = {
+            'province': '',      # 省份
+            'city': '',         # 城市
+            'district': '',     # 区县
+            'street': '',       # 街道/路
+            'number': '',       # 门牌号
+            'building': '',     # 建筑物名称
+            'detail': ''        # 其他详细信息
+        }
+        
+        # 地址解析正则表达式（优化版）
+        patterns = {
+            'province': r'([^省市区县]{2,8}(?:省|市|自治区))',
+            'city': r'([^省市区县]{2,8}(?:市|州|县))',
+            'district': r'([^省市区县]{2,8}(?:区|县|镇|开发区|高新区|经济区))',
+            'street': r'([^路街道巷弄里]{1,20}(?:路|街|道|巷|弄|里|大街|大道|街道))',
+            'number': r'(\d+(?:号|栋|幢|座|楼|室|层))',
+            'building': r'([^路街道巷弄里号栋幢座楼室层]{2,20}(?:大厦|大楼|广场|中心|院|园|村|小区|公司|厂|店|馆|所|站|场|生态园|科技园|工业园|产业园))'
+        }
+        
+        # 预处理：移除行政层级词汇
+        remaining_address = address
+        remaining_address = re.sub(r'市辖区', '', remaining_address)  # 移除"市辖区"
+        remaining_address = re.sub(r'县辖区', '', remaining_address)  # 移除"县辖区"
+        
+        # 按顺序提取各组件
+        for component, pattern in patterns.items():
+            matches = re.findall(pattern, remaining_address)
+            if matches:
+                # 取最长的匹配（通常更准确）
+                components[component] = max(matches, key=len)
+                # 从剩余地址中移除已匹配的部分
+                remaining_address = remaining_address.replace(components[component], '', 1)
+        
+        # 剩余部分作为详细信息
+        components['detail'] = remaining_address.strip()
+        
+        return components
+    
+    def _calculate_weighted_address_similarity(self, comp1: Dict[str, str], comp2: Dict[str, str]) -> float:
+        """
+        计算权重化的地址组件相似度
+        根据地址组件的重要性分配不同权重
+        """
+        # 地址组件权重配置（优化版 - 基于地址精确度重要性）
+        weights = {
+            'number': 0.50,      # 门牌号最重要（881号是精确定位）
+            'street': 0.40,      # 街道次重要（天宝路是具体路名）
+            'district': 0.15,    # 区县（虹口区是大概念）
+            'city': 0.10,        # 城市（上海市是大概念）
+            'province': 0.05,    # 省份（最大概念）
+            'building': 0.05,    # 建筑物名称（天宝养老院是附加信息，权重最低）
+            'detail': 0.02       # 其他详细信息
+        }
+        
+        total_score = 0.0
+        total_weight = 0.0
+        
+        for component, weight in weights.items():
+            val1 = comp1.get(component, '').strip()
+            val2 = comp2.get(component, '').strip()
+            
+            # 只有当至少一个组件有值时才计算
+            if val1 or val2:
+                if val1 and val2:
+                    # 两个都有值，计算相似度
+                    similarity = self._calculate_component_similarity(val1, val2, component)
+                elif val1 == val2:  # 都为空
+                    similarity = 1.0
+                else:
+                    # 一个有值一个没有，相似度为0
+                    similarity = 0.0
+                
+                total_score += similarity * weight
+                total_weight += weight
+        
+        # 计算最终得分
+        if total_weight == 0:
             return 0.0
         
-        # 标准化地址
-        addr1 = normalize_string(addr1)
-        addr2 = normalize_string(addr2)
+        final_score = total_score / total_weight
         
-        if addr1 == addr2:
+        # 应用组件匹配奖励机制
+        final_score = self._apply_address_matching_bonus(final_score, comp1, comp2)
+        
+        return min(1.0, final_score)  # 确保不超过1.0
+    
+    def _calculate_component_similarity(self, val1: str, val2: str, component_type: str) -> float:
+        """
+        计算特定组件的相似度
+        根据组件类型使用不同的匹配策略
+        """
+        if val1 == val2:
             return 1.0
         
-        # 地址分段匹配
-        if self.address_config.get('enable_segmentation', True):
-            return self._segmented_address_similarity(addr1, addr2)
+        if component_type == 'number':
+            # 门牌号：数字部分完全匹配得分更高
+            num1 = re.findall(r'\d+', val1)
+            num2 = re.findall(r'\d+', val2)
+            if num1 and num2 and num1[0] == num2[0]:
+                return 0.95  # 数字相同，但可能单位不同
+            else:
+                return fuzz.ratio(val1, val2) / 100.0 * 0.6
+        
+        elif component_type in ['street', 'building']:
+            # 街道和建筑物：使用多种算法综合评估
+            scores = [
+                fuzz.ratio(val1, val2) / 100.0,
+                fuzz.partial_ratio(val1, val2) / 100.0,
+                fuzz.token_set_ratio(val1, val2) / 100.0
+            ]
+            return max(scores)  # 取最高分
+        
         else:
-            # 简单字符串匹配
-            return self.calculate_string_similarity(addr1, addr2)
+            # 其他组件：使用标准字符串相似度
+            return self.calculate_string_similarity(val1, val2)
+    
+    def _apply_address_matching_bonus(self, base_score: float, comp1: Dict[str, str], comp2: Dict[str, str]) -> float:
+        """
+        应用地址匹配奖励机制
+        当多个关键组件匹配时给予额外奖励
+        """
+        bonus = 0.0
+        
+        # 关键组件完全匹配奖励
+        key_components = ['number', 'street', 'district']
+        matched_key_components = 0
+        
+        for component in key_components:
+            val1 = comp1.get(component, '').strip()
+            val2 = comp2.get(component, '').strip()
+            if val1 and val2 and val1 == val2:
+                matched_key_components += 1
+        
+        # 根据匹配的关键组件数量给予奖励
+        if matched_key_components >= 2:
+            bonus += 0.1  # 两个或以上关键组件匹配
+        elif matched_key_components == 1:
+            bonus += 0.05  # 一个关键组件匹配
+        
+        # 建筑物名称匹配奖励
+        building1 = comp1.get('building', '').strip()
+        building2 = comp2.get('building', '').strip()
+        if building1 and building2:
+            building_sim = self.calculate_string_similarity(building1, building2)
+            if building_sim > 0.8:
+                bonus += 0.05
+        
+        return base_score + bonus
     
     def _segmented_address_similarity(self, addr1: str, addr2: str) -> float:
         """分段地址相似度"""
@@ -268,33 +451,36 @@ class SimilarityCalculator:
             'province': '',
             'city': '',
             'district': '',
+            'street': '',
+            'number': '',
+            'building': '',
             'detail': ''
         }
         
-        # 简单的地址分解（可以根据实际情况优化）
-        # 匹配省份
-        province_pattern = r'(.*?省|.*?市|.*?区|.*?自治区)'
-        province_match = re.search(province_pattern, address)
-        if province_match:
-            components['province'] = province_match.group(1)
-            address = address.replace(components['province'], '', 1)
+        # 预处理：移除行政层级词汇
+        remaining_address = address
+        remaining_address = re.sub(r'市辖区', '', remaining_address)  # 移除"市辖区"
+        remaining_address = re.sub(r'县辖区', '', remaining_address)  # 移除"县辖区"
         
-        # 匹配城市
-        city_pattern = r'(.*?市|.*?州|.*?县)'
-        city_match = re.search(city_pattern, address)
-        if city_match:
-            components['city'] = city_match.group(1)
-            address = address.replace(components['city'], '', 1)
+        # 地址解析正则表达式（优化版）
+        patterns = {
+            'province': r'([^省市区县]{2,8}(?:省|市|自治区))',
+            'city': r'([^省市区县]{2,8}(?:市|州|县))',
+            'district': r'([^省市区县]{2,8}(?:区|县|镇|开发区|高新区|经济区))',
+            'street': r'([^路街道巷弄里]{1,20}(?:路|街|道|巷|弄|里|大街|大道|街道))',
+            'number': r'(\d+(?:号|栋|幢|座|楼|室|层))',
+            'building': r'([^路街道巷弄里号栋幢座楼室层]{2,20}(?:大厦|大楼|广场|中心|院|园|村|小区|公司|厂|店|馆|所|站|场|生态园|科技园|工业园|产业园))'
+        }
         
-        # 匹配区县
-        district_pattern = r'(.*?区|.*?县|.*?镇)'
-        district_match = re.search(district_pattern, address)
-        if district_match:
-            components['district'] = district_match.group(1)
-            address = address.replace(components['district'], '', 1)
+        # 按顺序提取各组件
+        for component, pattern in patterns.items():
+            matches = re.findall(pattern, remaining_address)
+            if matches:
+                components[component] = matches[0]
+                remaining_address = remaining_address.replace(matches[0], '', 1)
         
         # 剩余部分作为详细地址
-        components['detail'] = address.strip()
+        components['detail'] = remaining_address.strip()
         
         return components
     

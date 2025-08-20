@@ -53,6 +53,86 @@ class SmartIndexManager:
         
         logger.info("智能索引管理器初始化完成")
     
+    def _create_smart_text_index(self, collection, target_fields, existing_indexes, result, target_table):
+        """
+        智能文本索引管理 - 解决MongoDB每个集合只能有一个文本索引的限制
+        """
+        try:
+            # 检查是否已存在文本索引
+            existing_text_indexes = []
+            # 获取详细的索引信息
+            index_info_dict = collection.index_information()
+            for index_name, index_info in index_info_dict.items():
+                # 处理不同格式的索引信息
+                if isinstance(index_info, dict):
+                    key_info = index_info.get('key', {})
+                    if isinstance(key_info, dict) and key_info.get('_fts') == 'text':
+                        existing_text_indexes.append(index_name)
+                elif isinstance(index_info, list):
+                    # 某些情况下索引信息可能是列表格式
+                    for item in index_info:
+                        if isinstance(item, dict) and item.get('_fts') == 'text':
+                            existing_text_indexes.append(index_name)
+                            break
+            
+            if existing_text_indexes:
+                # 已存在文本索引，检查是否需要更新
+                existing_index_name = existing_text_indexes[0]
+                existing_index_info = index_info_dict[existing_index_name]
+                # 安全获取权重信息
+                if isinstance(existing_index_info, dict):
+                    existing_weights = existing_index_info.get('weights', {})
+                else:
+                    existing_weights = {}
+                
+                # 检查当前字段是否都在现有文本索引中
+                missing_fields = [field for field in target_fields if field not in existing_weights]
+                
+                if missing_fields:
+                    logger.info(f"📝 文本索引需要更新，缺少字段: {missing_fields}")
+                    
+                    # 删除旧的文本索引
+                    try:
+                        collection.drop_index(existing_index_name)
+                        logger.info(f"🗑️ 删除旧文本索引: {existing_index_name}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ 删除旧文本索引失败: {e}")
+                    
+                    # 创建包含所有字段的新文本索引
+                    self._create_compound_text_index(collection, target_fields, result, target_table)
+                else:
+                    logger.info(f"✅ 文本索引已包含所有必需字段: {existing_index_name}")
+                    result['skipped_count'] += 1
+            else:
+                # 不存在文本索引，创建新的复合文本索引
+                self._create_compound_text_index(collection, target_fields, result, target_table)
+                
+        except Exception as e:
+            result['error_count'] += 1
+            logger.warning(f"⚠️ 智能文本索引管理失败: {e}")
+    
+    def _create_compound_text_index(self, collection, target_fields, result, target_table):
+        """创建复合文本索引（简化版，调用前已检查冲突）"""
+        try:
+            # 直接创建复合文本索引
+            text_fields = [(field, TEXT) for field in target_fields]
+            text_weights = {field: 1 for field in target_fields}
+            
+            collection.create_index(
+                text_fields,
+                name="idx_compound_text",
+                weights=text_weights,
+                **self.index_config['text_search']
+            )
+            
+            result['created_count'] += 1
+            result['indexes'].append("idx_compound_text")
+            logger.info(f"✅ 复合文本索引创建成功: {target_table}.idx_compound_text (字段: {', '.join(target_fields)})")
+            
+        except Exception as e:
+            result['error_count'] += 1
+            logger.info(f"📋 复合文本索引跳过（索引冲突）: {target_table}.idx_compound_text - {e}")
+    
     def create_mapping_optimized_indexes(self, mappings: List[Dict], source_table: str, 
                                        target_tables: List[str]) -> Dict[str, Any]:
         """
@@ -241,24 +321,17 @@ class SmartIndexManager:
             if not target_fields:
                 return result
             
-            # 1. 单字段索引
+            # 1. 单字段索引（不包含文本索引）
             for field in target_fields:
                 indexes_to_create = [
                     (f"idx_{field}_asc", [(field, ASCENDING)]),
-                    (f"idx_{field}_text", [(field, TEXT)]),
                     (f"idx_{field}_hash", [(field, HASHED)]),  # 用于分片和快速等值查询
                 ]
                 
                 for index_name, index_spec in indexes_to_create:
                     if index_name not in existing_indexes:
                         try:
-                            if index_spec[0][1] == TEXT:
-                                collection.create_index(
-                                    index_spec, 
-                                    name=index_name,
-                                    **self.index_config['text_search']
-                                )
-                            elif index_spec[0][1] == HASHED:
+                            if index_spec[0][1] == HASHED:
                                 collection.create_index(
                                     index_spec, 
                                     name=index_name,
@@ -278,6 +351,11 @@ class SmartIndexManager:
                             logger.warning(f"⚠️ 目标表索引创建失败: {index_name} - {str(e)}")
                     else:
                         result['skipped_count'] += 1
+            
+            # 2. 智能文本索引管理（解决MongoDB文本索引冲突）
+            # 注意：地址匹配功能不依赖文本索引，使用地址关键词索引实现高效匹配
+            # 文本索引冲突警告可以忽略，不影响地址匹配功能
+            self._create_smart_text_index(collection, target_fields, existing_indexes, result, target_table)
             
             # 2. 复合索引
             if len(target_fields) > 1:
@@ -338,7 +416,21 @@ class SmartIndexManager:
                 for index_name, index_spec in perf_indexes:
                     full_index_name = f"{table_name}_{index_name}"
                     
-                    if index_name not in existing_indexes:
+                    # 检查是否存在相同字段的索引（避免冲突）
+                    index_exists = False
+                    target_fields = [field[0] for field in index_spec]
+                    
+                    for existing_name, existing_info in collection.index_information().items():
+                        if isinstance(existing_info, dict):
+                            existing_key = existing_info.get('key', {})
+                            if isinstance(existing_key, dict):
+                                existing_fields = list(existing_key.keys())
+                                if existing_fields == target_fields:
+                                    index_exists = True
+                                    logger.info(f"📋 跳过性能索引创建（已存在相同字段索引）: {table_name}.{existing_name} -> {target_fields}")
+                                    break
+                    
+                    if not index_exists and index_name not in existing_indexes:
                         try:
                             collection.create_index(
                                 index_spec,
@@ -349,8 +441,9 @@ class SmartIndexManager:
                             result['indexes'].append(full_index_name)
                             logger.info(f"✅ 性能索引创建: {table_name}.{index_name}")
                         except Exception as e:
+                            # 如果仍然冲突，记录警告但不影响系统运行
                             result['error_count'] += 1
-                            logger.warning(f"⚠️ 性能索引创建失败: {full_index_name} - {str(e)}")
+                            logger.info(f"📋 性能索引跳过（索引冲突）: {full_index_name} - {str(e)}")
                     else:
                         result['skipped_count'] += 1
                         

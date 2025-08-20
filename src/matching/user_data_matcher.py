@@ -24,6 +24,7 @@ from .smart_index_manager import SmartIndexManager
 from .optimized_prefilter import OptimizedPrefilter, CandidateRanker
 from .graph_matcher import GraphMatcher
 from .slice_enhanced_matcher import SliceEnhancedMatcher
+from .universal_query_engine import UniversalQueryEngine
 from .hierarchical_matcher import HierarchicalMatcher
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,9 @@ class UserDataMatcher:
         self.hierarchical_matcher = None  # 分层匹配器
         self.use_high_performance = True  # 启用高性能模式
         self.use_hierarchical_matching = True  # 启用分层匹配
+        
+        # 初始化通用查询引擎（替换58秒瓶颈）
+        self.universal_query_engine = UniversalQueryEngine(db_manager)
         
         # 匹配任务缓存
         self.running_tasks = {}
@@ -518,142 +522,276 @@ class UserDataMatcher:
     
     def _batch_prefilter_candidates(self, batch_records: List[Dict], mappings: List[Dict], 
                                    source_table: str) -> Dict[str, List[Dict]]:
-        """批量预过滤候选记录（核心性能优化）"""
-        batch_candidates_map = {}
-        
+        """批量预过滤候选记录（通用查询引擎优化版）"""
         try:
-            # 构建批量查询条件
-            batch_queries = []
-            record_id_map = {}
+            logger.info(f"🚀 使用通用查询引擎进行批量预过滤: {len(batch_records)} 条记录")
             
-            for source_record in batch_records:
-                source_id = str(source_record.get('_id', ''))
-                record_id_map[source_id] = source_record
-                
-                # 为每个映射字段构建查询条件
-                for mapping in mappings:
-                    source_field = mapping.get('source_field')
-                    target_field = mapping.get('target_field') 
-                    
-                    if source_field in source_record and source_record[source_field]:
-                        source_value = str(source_record[source_field]).strip()
-                        if len(source_value) >= 2:  # 最小长度过滤
-                            # 构建模糊查询条件
-                            query_conditions = []
-                            
-                            # 精确匹配
-                            query_conditions.append({target_field: source_value})
-                            
-                            # 包含匹配
-                            query_conditions.append({target_field: {"$regex": re.escape(source_value), "$options": "i"}})
-                            
-                            # 被包含匹配
-                            if len(source_value) >= 4:
-                                query_conditions.append({target_field: {"$regex": f".*{re.escape(source_value)}.*", "$options": "i"}})
-                            
-                            batch_queries.append({
-                                'source_id': source_id,
-                                'conditions': {"$or": query_conditions},
-                                'field_info': {'source_field': source_field, 'target_field': target_field}
-                            })
+            # 使用通用查询引擎执行批量查询
+            query_results = self.universal_query_engine.query_batch_records(batch_records, mappings)
             
-            # 批量执行查询（按目标表分组）
-            target_tables = set(mapping.get('target_table') for mapping in mappings)
+            # 转换查询结果格式
+            batch_candidates_map = {}
             
-            for target_table in target_tables:
-                if not target_table:
-                    continue
-                    
-                # 为该目标表构建批量查询
-                table_queries = [q for q in batch_queries 
-                               if any(m.get('target_table') == target_table and 
-                                     m.get('target_field') == q['field_info']['target_field'] 
-                                     for m in mappings)]
-                
-                if table_queries:
-                    # 合并所有查询条件
-                    all_conditions = []
-                    for query in table_queries:
-                        all_conditions.extend(query['conditions']['$or'])
-                    
-                    # 去重查询条件
-                    unique_conditions = []
-                    seen_conditions = set()
-                    for condition in all_conditions:
-                        condition_str = str(condition)
-                        if condition_str not in seen_conditions:
-                            unique_conditions.append(condition)
-                            seen_conditions.add(condition_str)
-                    
-                    if unique_conditions:
-                        # 执行批量查询
-                        collection = self.db_manager.get_db()[target_table]
-                        bulk_query = {"$or": unique_conditions}
-                        
-                        cursor = collection.find(bulk_query).limit(10000)  # 限制结果数量
-                        target_records = list(cursor)
-                        
-                        # 将结果分配给对应的源记录
-                        for target_record in target_records:
-                            for query in table_queries:
-                                source_id = query['source_id']
-                                source_record = record_id_map[source_id]
-                                
-                                # 检查是否匹配
-                                if self._is_candidate_match(source_record, target_record, query['field_info']):
-                                    if source_id not in batch_candidates_map:
-                                        batch_candidates_map[source_id] = []
-                                    batch_candidates_map[source_id].append(target_record)
+            for record_id, query_result in query_results.items():
+                if query_result.candidates:
+                    batch_candidates_map[record_id] = query_result.candidates
+                    logger.debug(f"记录 {record_id} 获得 {len(query_result.candidates)} 个候选")
             
-            # 限制每个源记录的候选数量并去重
-            for source_id in batch_candidates_map:
-                candidates = batch_candidates_map[source_id]
-                # 去重（基于_id）
-                seen_ids = set()
-                unique_candidates = []
-                for candidate in candidates:
-                    candidate_id = str(candidate.get('_id', ''))
-                    if candidate_id not in seen_ids:
-                        unique_candidates.append(candidate)
-                        seen_ids.add(candidate_id)
-                
-                # 限制数量
-                batch_candidates_map[source_id] = unique_candidates[:60]  # 每个源记录最多60个候选
-            
-            logger.info(f"✅ 批量预过滤完成: 处理 {len(batch_records)} 条源记录, "
-                       f"生成 {len(batch_candidates_map)} 个候选映射")
+            logger.info(f"✅ 通用查询引擎批量预过滤完成: {len(batch_candidates_map)} 条记录有候选")
             
             return batch_candidates_map
             
         except Exception as e:
-            logger.error(f"批量预过滤失败: {str(e)}")
+            logger.error(f"通用查询引擎批量预过滤失败: {str(e)}")
+            # 降级到原有方法（保持系统稳定性）
+            logger.warning("降级到原有预过滤方法")
+            return self._batch_prefilter_candidates_fallback(batch_records, mappings, source_table)
+    
+    def _batch_prefilter_candidates_fallback(self, batch_records: List[Dict], mappings: List[Dict], 
+                                           source_table: str) -> Dict[str, List[Dict]]:
+        """批量预过滤候选记录（降级方法）"""
+        batch_candidates_map = {}
+        
+        try:
+            logger.info("使用降级预过滤方法")
+            
+            # 简化的预过滤逻辑
+            for source_record in batch_records:
+                source_id = str(source_record.get('_id', ''))
+                candidates = []
+                
+                for mapping in mappings:
+                    source_field = mapping.get('source_field')
+                    target_field = mapping.get('target_field')
+                    target_table = mapping.get('target_table')
+                    
+                    if not all([source_field, target_field, target_table]):
+                        continue
+                    
+                    source_value = source_record.get(source_field)
+                    if not source_value:
+                        continue
+                    
+                    try:
+                        # 简单的精确匹配查询
+                        collection = self.db_manager.get_db()[target_table]
+                        query_candidates = list(collection.find(
+                            {target_field: str(source_value)}, 
+                            limit=20
+                        ))
+                        candidates.extend(query_candidates)
+                        
+                    except Exception as e:
+                        logger.warning(f"降级查询失败: {source_id}.{source_field} - {str(e)}")
+                        continue
+                
+                if candidates:
+                    # 去重
+                    seen_ids = set()
+                    unique_candidates = []
+                    for candidate in candidates:
+                        candidate_id = str(candidate.get('_id', ''))
+                        if candidate_id not in seen_ids:
+                            seen_ids.add(candidate_id)
+                            unique_candidates.append(candidate)
+                    
+                    batch_candidates_map[source_id] = unique_candidates[:30]
+            
+            logger.info(f"降级预过滤完成: {len(batch_candidates_map)} 条记录有候选")
+            return batch_candidates_map
+            
+        except Exception as e:
+            logger.error(f"降级预过滤失败: {str(e)}")
             return {}
     
     def _is_candidate_match(self, source_record: Dict, target_record: Dict, field_info: Dict) -> bool:
-        """检查候选记录是否匹配"""
+        """检查候选记录是否匹配（支持地址语义匹配）"""
         source_field = field_info['source_field']
         target_field = field_info['target_field']
         
-        source_value = str(source_record.get(source_field, '')).strip().lower()
-        target_value = str(target_record.get(target_field, '')).strip().lower()
+        source_value = str(source_record.get(source_field, '')).strip()
+        target_value = str(target_record.get(target_field, '')).strip()
         
         if not source_value or not target_value:
             return False
         
-        # 快速相似度检查
-        if source_value == target_value:
+        # 快速精确匹配检查
+        if source_value.lower() == target_value.lower():
             return True
         
-        if source_value in target_value or target_value in source_value:
+        if source_value.lower() in target_value.lower() or target_value.lower() in source_value.lower():
             return True
         
-        # 简单的字符相似度检查
+        # 检查是否为地址字段，使用地址语义匹配
+        if self._is_address_field_simple(source_field, target_field):
+            try:
+                # 使用地址语义相似度计算
+                similarity = self.similarity_calculator.calculate_address_similarity(source_value, target_value)
+                logger.debug(f"地址语义相似度: {source_value} <-> {target_value} = {similarity:.3f}")
+                return similarity >= 0.3  # 地址匹配使用更低阈值
+            except Exception as e:
+                logger.debug(f"地址语义匹配失败，回退到基础方法: {e}")
+        
+        # 简单的字符相似度检查（回退方案）
         if len(source_value) >= 3 and len(target_value) >= 3:
-            common_chars = set(source_value) & set(target_value)
-            similarity = len(common_chars) / max(len(set(source_value)), len(set(target_value)))
+            common_chars = set(source_value.lower()) & set(target_value.lower())
+            similarity = len(common_chars) / max(len(set(source_value.lower())), len(set(target_value.lower())))
             return similarity >= 0.3
         
         return False
+    
+    def _is_address_field_simple(self, source_field: str, target_field: str) -> bool:
+        """简单检查是否为地址字段（用于预过滤阶段）"""
+        address_keywords = ['地址', '地点', 'address', 'addr', 'dz', 'zcdz', '起火地点', '注册地址']
+        
+        source_field_lower = source_field.lower()
+        target_field_lower = target_field.lower()
+        
+        # 检查字段名是否包含地址关键词
+        for keyword in address_keywords:
+            if keyword in source_field_lower or keyword in target_field_lower:
+                return True
+        
+        return False
+    
+    def _extract_address_keywords_simple(self, address: str) -> List[str]:
+        """
+        提取地址关键词（精简高效版）
+        只提取最重要的地址组件用于预过滤查询
+        """
+        if not address:
+            return []
+        
+        keywords = []
+        
+        # 1. 提取门牌号（最重要）
+        number_pattern = r'(\d+号|\d+栋|\d+幢|\d+座|\d+楼)'
+        numbers = re.findall(number_pattern, address)
+        keywords.extend(numbers)
+        
+        # 2. 提取街道名（重要）
+        street_pattern = r'([^省市区县]{2,8}(?:路|街|道|巷|弄|里|大街|大道))'
+        streets = re.findall(street_pattern, address)
+        keywords.extend(streets)
+        
+        # 3. 提取区县名（重要）
+        district_pattern = r'([^省市区县]{2,6}(?:区|县))'
+        districts = re.findall(district_pattern, address)
+        keywords.extend(districts)
+        
+        # 4. 提取建筑物名（辅助）
+        building_pattern = r'([^路街道巷弄里号栋幢座楼]{3,15}(?:大厦|大楼|广场|中心|院|园|村|小区|公司|厂|店|馆|所|站|场|养老院))'
+        buildings = re.findall(building_pattern, address)
+        keywords.extend(buildings)
+        
+        # 去重并过滤短词
+        unique_keywords = []
+        seen = set()
+        for keyword in keywords:
+            if keyword and len(keyword) >= 3 and keyword not in seen:
+                unique_keywords.append(keyword)
+                seen.add(keyword)
+        
+        # 限制关键词数量（避免查询过于复杂）
+        return unique_keywords[:5]
+    
+    def _get_address_candidates_from_index(self, source_address: str, target_table: str, target_field: str) -> List[Dict]:
+        """
+        从地址关键词索引中获取候选记录
+        这是高效地址匹配的核心方法，类似于单位名称的切片索引查询
+        """
+        try:
+            # 提取源地址的关键词
+            source_keywords = self._extract_address_keywords_simple(source_address)
+            if not source_keywords:
+                return []
+            
+            # 构建索引表名（基于目标表名）
+            keyword_collection_name = f"{target_table}_address_keywords"
+            
+            # 检查索引表是否存在
+            db = self.db_manager.get_db()
+            if keyword_collection_name not in db.list_collection_names():
+                return []  # 索引表不存在，回退到传统查询
+            
+            keyword_collection = db[keyword_collection_name]
+            
+            # 使用批量查询优化性能，避免多次单独查询
+            candidate_docs = set()
+            keyword_scores = {}
+            
+            # 批量查询所有关键词，减少数据库交互次数
+            if source_keywords:
+                matches = list(keyword_collection.find({
+                    "keyword": {"$in": source_keywords},
+                    "field_name": target_field
+                }).limit(200))  # 总体限制候选数量
+                
+                for match in matches:
+                    doc_id = match['doc_id']
+                    keyword = match['keyword']
+                    candidate_docs.add(doc_id)
+                    
+                    # 计算关键词匹配得分
+                    if doc_id not in keyword_scores:
+                        keyword_scores[doc_id] = 0
+                    keyword_scores[doc_id] += 1
+            
+            # 按匹配得分排序，优先返回匹配更多关键词的记录
+            sorted_candidates = sorted(candidate_docs, key=lambda x: keyword_scores.get(x, 0), reverse=True)
+            
+            # 限制候选数量，避免性能问题
+            top_candidates = sorted_candidates[:50]
+            
+            # 返回候选记录信息
+            candidates = []
+            for doc_id in top_candidates:
+                candidates.append({
+                    'doc_id': doc_id,
+                    'score': keyword_scores.get(doc_id, 0)
+                })
+            
+            return candidates
+            
+        except Exception as e:
+            # 如果索引查询失败，静默回退到传统查询
+            return []
+    
+    def _extract_address_keywords(self, address: str) -> List[str]:
+        """提取地址关键词用于宽松匹配"""
+        import re
+        
+        keywords = []
+        
+        # 提取省市区
+        province_match = re.search(r'([^省市区县]{2,8}(?:省|市|自治区))', address)
+        if province_match:
+            keywords.append(province_match.group(1))
+        
+        city_match = re.search(r'([^省市区县]{2,8}(?:市|州|县))', address)
+        if city_match:
+            keywords.append(city_match.group(1))
+        
+        district_match = re.search(r'([^省市区县]{2,8}(?:区|县|镇|开发区|高新区|经济区))', address)
+        if district_match:
+            keywords.append(district_match.group(1))
+        
+        # 提取街道路名
+        street_matches = re.findall(r'([^路街道巷弄里]{1,20}(?:路|街|道|巷|弄|里|大街|大道|街道))', address)
+        keywords.extend(street_matches)
+        
+        # 提取门牌号
+        number_matches = re.findall(r'(\d+(?:号|栋|幢|座|楼|室|层))', address)
+        keywords.extend(number_matches)
+        
+        # 提取建筑物名称
+        building_matches = re.findall(r'([^路街道巷弄里号栋幢座楼室层]{2,20}(?:大厦|大楼|广场|中心|院|园|村|小区|公司|厂|店|馆|所|站|场|生态园|科技园|工业园|产业园|养老院|敬老院))', address)
+        keywords.extend(building_matches)
+        
+        # 去重并过滤短词
+        unique_keywords = list(set([kw for kw in keywords if len(kw) >= 2]))
+        
+        return unique_keywords
     
     def _process_single_record_with_candidates(self, source_record: Dict, candidates: List[Dict],
                                              mappings: List[Dict], source_table: str, task_id: str) -> Optional[Dict]:
@@ -1536,6 +1674,9 @@ class UserDataMatcher:
                     'matched_fields': matched_fields,
                     'details': details
                 })
+                logger.debug(f"✅ 匹配成功: 相似度 {similarity:.3f} >= 阈值 {similarity_threshold}, 匹配字段: {matched_fields}")
+            else:
+                logger.debug(f"❌ 匹配失败: 相似度 {similarity:.3f} < 阈值 {similarity_threshold}, 字段得分: {details.get('field_scores', {})}")
         
         # 按相似度排序，返回前N个结果
         matches.sort(key=lambda x: x['similarity'], reverse=True)
@@ -1572,7 +1713,7 @@ class UserDataMatcher:
             
             # 计算字段相似度
             field_similarity = self._calculate_field_similarity(
-                str(source_value), str(target_value), matcher
+                str(source_value), str(target_value), matcher, source_field, target_field
             )
             
             field_scores[f"{source_field}->{target_field}"] = field_similarity
@@ -1592,19 +1733,27 @@ class UserDataMatcher:
         
         return avg_similarity, matched_fields, details
     
-    def _calculate_field_similarity(self, value1: str, value2: str, matcher) -> float:
+    def _calculate_field_similarity(self, value1: str, value2: str, matcher, source_field: str = '', target_field: str = '') -> float:
         """
-        计算两个字段值的相似度
+        计算两个字段值的相似度（支持地址语义匹配）
         
         Args:
             value1: 值1
             value2: 值2
             matcher: 匹配器
+            source_field: 源字段名（用于判断是否为地址字段）
+            target_field: 目标字段名（用于判断是否为地址字段）
             
         Returns:
             float: 相似度 (0-1)
         """
         try:
+            # 【关键修复】优先检查是否为地址字段，使用地址语义匹配
+            if self._is_address_field_simple(source_field, target_field):
+                similarity = self.similarity_calculator.calculate_address_similarity(value1, value2)
+                logger.debug(f"地址语义匹配: {source_field}->{target_field}, {value1[:20]}... <-> {value2[:20]}... = {similarity:.3f}")
+                return similarity
+            
             # 使用不同的匹配器计算相似度
             if hasattr(matcher, 'calculate_similarity'):
                 return matcher.calculate_similarity(value1, value2)

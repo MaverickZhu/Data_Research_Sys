@@ -1,0 +1,151 @@
+{
+  "field_type_detection_test": {
+    "status": "success",
+    "accuracy": 1.0,
+    "total_time": 0.002225637435913086,
+    "avg_time_per_detection": 0.0004451274871826172,
+    "results": [
+      {
+        "field_name": "起火地点",
+        "expected_type": "address",
+        "detected_type": "address",
+        "is_correct": true,
+        "detection_time": 0.0010790824890136719
+      },
+      {
+        "field_name": "单位名称",
+        "expected_type": "unit_name",
+        "detected_type": "unit_name",
+        "is_correct": true,
+        "detection_time": 0.0005409717559814453
+      },
+      {
+        "field_name": "联系人",
+        "expected_type": "person_name",
+        "detected_type": "person_name",
+        "is_correct": true,
+        "detection_time": 0.0
+      },
+      {
+        "field_name": "电话",
+        "expected_type": "phone",
+        "detected_type": "phone",
+        "is_correct": true,
+        "detection_time": 0.0
+      },
+      {
+        "field_name": "邮箱",
+        "expected_type": "email",
+        "detected_type": "email",
+        "is_correct": true,
+        "detection_time": 0.0006055831909179688
+      }
+    ]
+  },
+  "index_building_test": {
+    "status": "success",
+    "build_time": 0.06282377243041992,
+    "records_processed": 718,
+    "keywords_created": 3057,
+    "processing_rate": 11428.79474159589
+  },
+  "single_query_test": {
+    "status": "success",
+    "total_queries": 20,
+    "total_time": 0.044161319732666016,
+    "avg_query_time": 0.0022080659866333006,
+    "queries_per_second": 452.8850161424422,
+    "avg_candidates_per_query": 4.95,
+    "results": [
+      {
+        "source_value": "S4杭州往上海方向刚过海湾出口2-3公里",
+        "candidate_count": 0,
+        "query_time": 0.0020804405212402344
+      },
+      {
+        "source_value": "上奉贤区梅园村2组256号叶家石桥",
+        "candidate_count": 0,
+        "query_time": 0.002126932144165039
+      },
+      {
+        "source_value": "上海市奉贤区南华亭大道130号",
+        "candidate_count": 0,
+        "query_time": 0.0015969276428222656
+      },
+      {
+        "source_value": "上海市奉贤区南桥镇宁富路768弄3号302室（一般居民）",
+        "candidate_count": 0,
+        "query_time": 0.0021245479583740234
+      },
+      {
+        "source_value": "上海市奉贤区南桥镇育秀路29号",
+        "candidate_count": 0,
+        "query_time": 0.001569986343383789
+      }
+    ]
+  },
+  "batch_query_test": {
+    "status": "success",
+    "batch_results": [
+      {
+        "batch_size": 10,
+        "batch_time": 0.0047647953033447266,
+        "processing_rate": 2098.7260445334,
+        "records_with_candidates": 3,
+        "total_candidates": 34,
+        "avg_candidates_per_record": 3.4
+      },
+      {
+        "batch_size": 50,
+        "batch_time": 0.008578777313232422,
+        "processing_rate": 5828.336390417431,
+        "records_with_candidates": 15,
+        "total_candidates": 208,
+        "avg_candidates_per_record": 4.16
+      },
+      {
+        "batch_size": 100,
+        "batch_time": 0.010400056838989258,
+        "processing_rate": 9615.33206483116,
+        "records_with_candidates": 17,
+        "total_candidates": 189,
+        "avg_candidates_per_record": 1.89
+      },
+      {
+        "batch_size": 200,
+        "batch_time": 0.015180110931396484,
+        "processing_rate": 13175.134286163027,
+        "records_with_candidates": 18,
+        "total_candidates": 199,
+        "avg_candidates_per_record": 0.995
+      }
+    ],
+    "avg_processing_rate": 7679.3821964862545,
+    "max_processing_rate": 13175.134286163027,
+    "performance_target_met": true
+  },
+  "performance_comparison_test": {
+    "status": "success",
+    "universal_framework": {
+      "processing_rate": 10330.034726498043,
+      "total_time": 0.009680509567260742,
+      "results_count": 100
+    },
+    "traditional_method": {
+      "processing_rate": 1212.9557653155655,
+      "total_time": 0.0824432373046875,
+      "results_count": 12
+    },
+    "performance_improvement": 8.516415043223407
+  },
+  "overall_performance": {
+    "overall_score": 95.0547168107447,
+    "performance_target_met": true,
+    "individual_scores": [
+      100.0,
+      100,
+      85.16415043223407
+    ],
+    "grade": "A+ (优秀)"
+  }
+}

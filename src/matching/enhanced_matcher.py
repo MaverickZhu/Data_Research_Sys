@@ -196,13 +196,25 @@ class EnhancedMatcher:
         keywords2 = extract_address_keywords(addr2)
         
         if not keywords1 or not keywords2:
-            return fuzz.ratio(addr1, addr2) / 100.0
+            # 【修复】回退时也使用地址标准化
+            from .address_normalizer import normalize_address_for_matching
+            norm_addr1 = normalize_address_for_matching(addr1)
+            norm_addr2 = normalize_address_for_matching(addr2)
+            return fuzz.ratio(norm_addr1, norm_addr2) / 100.0
         
-        # 计算关键词重叠度
+        # 计算关键词重叠度（【修复】确保使用标准化后的地址数据）
         intersection = len(keywords1 & keywords2)
         union = len(keywords1 | keywords2)
         
-        return intersection / union if union > 0 else 0.0
+        # 【修复】如果关键词提取失败，使用标准化地址进行直接比较
+        if union == 0:
+            # 使用地址标准化进行比较
+            from .address_normalizer import normalize_address_for_matching
+            norm_addr1 = normalize_address_for_matching(addr1)
+            norm_addr2 = normalize_address_for_matching(addr2)
+            return fuzz.ratio(norm_addr1, norm_addr2) / 100.0
+        
+        return intersection / union
     
     def enhanced_match(self, unit1: Dict, unit2: Dict) -> Dict:
         """增强匹配算法"""

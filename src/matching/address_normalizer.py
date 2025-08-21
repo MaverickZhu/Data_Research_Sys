@@ -69,13 +69,13 @@ class AddressNormalizer:
     
     def normalize_address(self, address: str) -> str:
         """
-        标准化地址
+        标准化地址 - 优化版本，只保留纯地址信息
         
         Args:
             address: 原始地址
             
         Returns:
-            str: 标准化后的地址
+            str: 标准化后的纯地址（去除建筑物名称等无关信息）
         """
         if not address or not isinstance(address, str):
             return ""
@@ -103,11 +103,54 @@ class AddressNormalizer:
         normalized = normalized.replace('大道', '路')
         normalized = normalized.replace('大街', '街')
         
-        # 6. 清理多余空格
+        # 6. 【新增】去除建筑物名称，只保留纯地址
+        normalized = self._remove_building_names(normalized)
+        
+        # 7. 清理多余空格
         normalized = re.sub(r'\s+', '', normalized)
         
         logger.debug(f"地址标准化: '{address}' -> '{normalized}'")
         return normalized
+    
+    def _remove_building_names(self, address: str) -> str:
+        """
+        去除建筑物名称，只保留纯地址信息
+        
+        Args:
+            address: 包含建筑物名称的地址
+            
+        Returns:
+            str: 去除建筑物名称后的纯地址
+        """
+        # 定义建筑物名称的正则表达式模式
+        building_patterns = [
+            # 养老相关机构
+            r'[^路街道巷弄里号栋幢座楼室层]{1,20}(?:养老院|敬老院|老年公寓|护理院|福利院|老人院|颐养院)',
+            # 商业建筑
+            r'[^路街道巷弄里号栋幢座楼室层]{1,20}(?:大厦|大楼|广场|中心|商城|商场|市场|超市)',
+            # 住宅建筑
+            r'[^路街道巷弄里号栋幢座楼室层]{1,20}(?:小区|花园|公寓|别墅|村|庄园|家园|苑)',
+            # 办公建筑
+            r'[^路街道巷弄里号栋幢座楼室层]{1,20}(?:写字楼|办公楼|科技园|产业园|工业园)',
+            # 教育医疗
+            r'[^路街道巷弄里号栋幢座楼室层]{1,20}(?:学校|医院|诊所|幼儿园|大学|学院)',
+            # 政府机构
+            r'[^路街道巷弄里号栋幢座楼室层]{1,20}(?:政府|法院|派出所|消防队|社区|居委会)',
+            # 其他机构
+            r'[^路街道巷弄里号栋幢座楼室层]{1,20}(?:公司|厂|店|馆|所|站|场|院|园|宾馆|酒店)'
+        ]
+        
+        # 逐个应用模式，去除匹配的建筑物名称
+        for pattern in building_patterns:
+            # 找到所有匹配的建筑物名称
+            matches = re.findall(pattern, address)
+            for match in matches:
+                # 只有当匹配的内容在地址末尾时才去除（避免误删街道名）
+                if address.endswith(match):
+                    address = address[:-len(match)]
+                    logger.debug(f"去除建筑物名称: '{match}'")
+        
+        return address.strip()
     
     def _basic_cleanup(self, address: str) -> str:
         """基础清理"""

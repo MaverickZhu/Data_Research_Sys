@@ -33,16 +33,25 @@ logger = logging.getLogger(__name__)
 class UserDataMatcher:
     """用户数据智能匹配器"""
     
-    def __init__(self, db_manager=None, config: Dict[str, Any] = None):
+    def __init__(self, db_manager=None, config=None):
         """
         初始化用户数据匹配器
         
         Args:
             db_manager: 数据库管理器
-            config: 配置参数
+            config: 配置参数（可以是Dict或ConfigManager）
         """
         self.db_manager = db_manager
-        self.config = config or self._get_default_config()
+        
+        # 处理不同类型的配置输入
+        if config is None:
+            self.config = self._get_default_config()
+        elif hasattr(config, 'get_matching_config'):
+            # ConfigManager对象
+            self.config = config.get_matching_config()
+        else:
+            # 字典配置
+            self.config = config
         
         # 初始化各种匹配算法
         self._init_matchers()
@@ -526,8 +535,11 @@ class UserDataMatcher:
         try:
             logger.info(f"🚀 使用通用查询引擎进行批量预过滤: {len(batch_records)} 条记录")
             
+            # 【关键修复】转换字段映射格式为UniversalQueryEngine期望的格式
+            converted_mappings = self._convert_mapping_format(mappings)
+            
             # 使用通用查询引擎执行批量查询
-            query_results = self.universal_query_engine.query_batch_records(batch_records, mappings)
+            query_results = self.universal_query_engine.query_batch_records(batch_records, converted_mappings)
             
             # 转换查询结果格式
             batch_candidates_map = {}
@@ -546,6 +558,79 @@ class UserDataMatcher:
             # 降级到原有方法（保持系统稳定性）
             logger.warning("降级到原有预过滤方法")
             return self._batch_prefilter_candidates_fallback(batch_records, mappings, source_table)
+    
+    def _convert_mapping_format(self, mappings: List[Dict]) -> List[Dict]:
+        """
+        转换字段映射格式为UniversalQueryEngine期望的格式
+        
+        Args:
+            mappings: 原始字段映射（数据库格式）
+            
+        Returns:
+            List[Dict]: 转换后的字段映射（UniversalQueryEngine格式）
+        """
+        from .universal_text_matcher import FieldType, FieldProcessingConfig
+        
+        converted_mappings = []
+        
+        for mapping in mappings:
+            source_field = mapping.get('source_field')
+            target_field = mapping.get('target_field')
+            target_table = mapping.get('target_table')
+            
+            # 智能检测字段类型
+            is_address = self._is_address_field(source_field, target_field)
+            field_type = FieldType.ADDRESS if is_address else FieldType.TEXT
+            
+            # 创建字段处理配置
+            field_config = FieldProcessingConfig(
+                field_type=field_type,
+                preprocessing_func='_preprocess_address' if is_address else '_preprocess_text',
+                keyword_extraction_func='_extract_address_keywords' if is_address else '_extract_text_keywords',
+                similarity_threshold=0.6,
+                max_candidates=50
+            )
+            
+            converted_mapping = {
+                'source_field': source_field,
+                'target_field': target_field,
+                'target_table': target_table,
+                'field_type': field_type,
+                'config': field_config
+            }
+            
+            converted_mappings.append(converted_mapping)
+            
+            logger.debug(f"字段映射转换: {source_field} -> {target_field} (类型: {field_type.value})")
+        
+        return converted_mappings
+    
+    def _is_address_field(self, source_field: str, target_field: str) -> bool:
+        """
+        智能检测字段是否为地址字段
+        
+        Args:
+            source_field: 源字段名
+            target_field: 目标字段名
+            
+        Returns:
+            bool: 是否为地址字段
+        """
+        # 地址字段关键词
+        address_keywords = [
+            '地址', '地点', '位置', '住址', '场所', '所在地',
+            'address', 'addr', 'location', 'place', 'zcdz'
+        ]
+        
+        # 检查源字段名
+        source_lower = source_field.lower() if source_field else ''
+        target_lower = target_field.lower() if target_field else ''
+        
+        for keyword in address_keywords:
+            if keyword in source_lower or keyword in target_lower:
+                return True
+        
+        return False
     
     def _batch_prefilter_candidates_fallback(self, batch_records: List[Dict], mappings: List[Dict], 
                                            source_table: str) -> Dict[str, List[Dict]]:
@@ -658,31 +743,49 @@ class UserDataMatcher:
         """
         提取地址关键词（精简高效版）
         只提取最重要的地址组件用于预过滤查询
+        
+        【关键修复】先进行地址标准化，确保与索引表中的关键词一致
         """
         if not address:
             return []
         
+        # 【修复】先进行地址标准化，确保与索引表中的关键词一致
+        from .address_normalizer import normalize_address_for_matching
+        normalized_address = normalize_address_for_matching(address)
+        
         keywords = []
         
-        # 1. 提取门牌号（最重要）
-        number_pattern = r'(\d+号|\d+栋|\d+幢|\d+座|\d+楼)'
-        numbers = re.findall(number_pattern, address)
-        keywords.extend(numbers)
+        # 【修复】使用与UniversalTextMatcher相同的关键词提取逻辑
         
-        # 2. 提取街道名（重要）
-        street_pattern = r'([^省市区县]{2,8}(?:路|街|道|巷|弄|里|大街|大道))'
-        streets = re.findall(street_pattern, address)
-        keywords.extend(streets)
+        # 1. 省市区提取
+        province_match = re.search(r'([\u4e00-\u9fff]{2,}省)', normalized_address)
+        if province_match:
+            keywords.append(province_match.group(1))
         
-        # 3. 提取区县名（重要）
-        district_pattern = r'([^省市区县]{2,6}(?:区|县))'
-        districts = re.findall(district_pattern, address)
-        keywords.extend(districts)
+        city_match = re.search(r'([\u4e00-\u9fff]{2,}市)', normalized_address)
+        if city_match:
+            keywords.append(city_match.group(1))
         
-        # 4. 提取建筑物名（辅助）
-        building_pattern = r'([^路街道巷弄里号栋幢座楼]{3,15}(?:大厦|大楼|广场|中心|院|园|村|小区|公司|厂|店|馆|所|站|场|养老院))'
-        buildings = re.findall(building_pattern, address)
-        keywords.extend(buildings)
+        district_match = re.search(r'([\u4e00-\u9fff]{2,}[区县])', normalized_address)
+        if district_match:
+            keywords.append(district_match.group(1))
+        
+        # 2. 街道路名提取
+        street_matches = re.findall(r'([^省市区县]{2,8}[路街道巷弄])', normalized_address)
+        keywords.extend(street_matches)
+        
+        # 3. 门牌号提取
+        number_matches = re.findall(r'(\d+号?)', normalized_address)
+        keywords.extend(number_matches)
+        
+        # 4. 省市区组合（重要：确保与索引表一致）
+        if city_match and district_match:
+            # 避免重复的市名
+            city_name = city_match.group(1)
+            district_name = district_match.group(1)
+            if not district_name.startswith(city_name):
+                combined = city_name + district_name
+                keywords.append(combined)
         
         # 去重并过滤短词
         unique_keywords = []
@@ -772,9 +875,14 @@ class UserDataMatcher:
         if city_match:
             keywords.append(city_match.group(1))
         
-        district_match = re.search(r'([^省市区县]{2,8}(?:区|县|镇|开发区|高新区|经济区))', address)
+        district_match = re.search(r'([^省市区县]{2,8}(?:区|县|开发区|高新区|经济区))', address)
         if district_match:
             keywords.append(district_match.group(1))
+        
+        # 【关键修复】镇级行政区划提取 - 确保与UniversalTextMatcher一致
+        town_match = re.search(r'([^省市区县]{2,8}镇)', address)
+        if town_match:
+            keywords.append(town_match.group(1))
         
         # 提取街道路名
         street_matches = re.findall(r'([^路街道巷弄里]{1,20}(?:路|街|道|巷|弄|里|大街|大道|街道))', address)
@@ -850,22 +958,33 @@ class UserDataMatcher:
         best_match = None
         best_similarity = 0.0
         
-        # 使用增强模糊匹配器进行快速匹配
-        for candidate in candidates[:30]:  # 只处理前30个候选以提高速度
+        # 【智能修复】根据字段映射类型选择合适的匹配方法
+        use_enhanced_fuzzy = self._should_use_enhanced_fuzzy_matcher(mappings)
+        
+        for candidate in candidates:  # 【关键修复】处理所有候选，不限制数量
             try:
-                if self.enhanced_fuzzy_matcher:
-                    similarity = self.enhanced_fuzzy_matcher.calculate_similarity(source_record, candidate)
+                if use_enhanced_fuzzy and self.enhanced_fuzzy_matcher:
+                    # 使用EnhancedFuzzyMatcher（适用于标准字段映射）
+                    result = self.enhanced_fuzzy_matcher.match_single_record(source_record, [candidate])
+                    similarity = result.similarity_score if result.matched else 0.0
+                    matched_fields = [m['source_field'] for m in mappings]
+                    details = {'match_type': 'enhanced_fuzzy', 'algorithm': 'EnhancedFuzzyMatcher'}
                 else:
-                    # 简单相似度计算
-                    similarity = self._calculate_simple_similarity(source_record, candidate, mappings)
+                    # 使用通用相似度计算方法（适用于自定义字段映射）
+                    similarity, matched_fields, details = self._calculate_similarity(
+                        source_record, candidate, mappings, None
+                    )
+                
+                # 记录调试信息
+                logger.debug(f"候选相似度计算: {candidate.get('ZCDZ', 'N/A')[:50]}... = {similarity:.3f}")
                 
                 if similarity > best_similarity and similarity >= 0.6:  # 提高阈值
                     best_similarity = similarity
                     best_match = {
                         'target_record': candidate,
                         'similarity': similarity,
-                        'matched_fields': [m['source_field'] for m in mappings],
-                        'details': {'match_type': 'traditional', 'algorithm': 'enhanced_fuzzy'}
+                        'matched_fields': matched_fields,
+                        'details': details
                     }
             
             except Exception as e:
@@ -999,6 +1118,33 @@ class UserDataMatcher:
         
         return batch_results
     
+    def _should_use_enhanced_fuzzy_matcher(self, mappings: List[Dict]) -> bool:
+        """
+        判断是否应该使用EnhancedFuzzyMatcher
+        
+        Args:
+            mappings: 字段映射配置
+            
+        Returns:
+            bool: True表示使用EnhancedFuzzyMatcher，False表示使用通用方法
+        """
+        # 检查是否包含EnhancedFuzzyMatcher支持的标准字段
+        standard_fields = {
+            'UNIT_NAME', 'ADDRESS', 'dwmc', 'dwdz', 
+            'TYSHXYDM', 'tyshxydm'  # 统一社会信用代码
+        }
+        
+        for mapping in mappings:
+            source_field = mapping.get('source_field', '')
+            target_field = mapping.get('target_field', '')
+            
+            # 如果字段映射包含标准字段，使用EnhancedFuzzyMatcher
+            if source_field in standard_fields or target_field in standard_fields:
+                return True
+        
+        # 否则使用通用方法（适用于自定义字段如"起火地点"）
+        return False
+    
     def _format_optimized_match_result(self, source_record: Dict, match: Dict, 
                                      mappings: List[Dict], task_id: str) -> Dict:
         """格式化优化匹配结果"""
@@ -1057,15 +1203,15 @@ class UserDataMatcher:
                 collection = db[target_table]
                 
                 # 精确匹配
-                exact_candidates = list(collection.find({target_field: source_value}).limit(20))
+                exact_candidates = list(collection.find({target_field: source_value}).limit(50))  # 增加限制
                 all_candidates.extend(exact_candidates)
                 
                 # 如果候选不足，进行文本搜索
-                if len(all_candidates) < 50:
+                if len(all_candidates) < 100:  # 增加阈值
                     try:
                         text_candidates = list(collection.find(
                             {'$text': {'$search': str(source_value)}}
-                        ).limit(30))
+                        ).limit(50))  # 增加限制
                         all_candidates.extend(text_candidates)
                     except:
                         pass
@@ -1082,7 +1228,7 @@ class UserDataMatcher:
                 seen_ids.add(candidate_id)
                 unique_candidates.append(candidate)
         
-        return unique_candidates[:100]  # 限制候选数量
+        return unique_candidates[:200]  # 增加候选数量限制
     
     def _get_slice_enhanced_candidates(self, source_record: Dict, mappings: List[Dict]) -> List[Dict]:
         """使用切片增强匹配器获取候选记录"""
@@ -1491,7 +1637,7 @@ class UserDataMatcher:
                 # 执行批次匹配
                 batch_matches = self._execute_batch_matching(
                     batch_records, target_data, mappings, matcher,
-                    similarity_threshold, max_results
+                    similarity_threshold, max_results, source_table, task_id, config
                 )
                 
                 results.extend(batch_matches)
@@ -1567,7 +1713,8 @@ class UserDataMatcher:
     
     def _execute_batch_matching(self, source_records: List[Dict], target_data: Dict[str, List[Dict]],
                                mappings: List[Dict], matcher, similarity_threshold: float,
-                               max_results: int) -> List[Dict]:
+                               max_results: int, source_table: str = '', task_id: str = '', 
+                               config: Dict = None) -> List[Dict]:
         """
         执行批次匹配
         
@@ -1582,6 +1729,10 @@ class UserDataMatcher:
         Returns:
             List[Dict]: 匹配结果列表
         """
+        # 设置默认配置
+        if config is None:
+            config = {}
+            
         batch_results = []
         
         for source_record in source_records:
@@ -1717,13 +1868,31 @@ class UserDataMatcher:
             )
             
             field_scores[f"{source_field}->{target_field}"] = field_similarity
-            total_score += field_similarity
             
-            if field_similarity > 0.5:  # 字段匹配阈值
+            # 【关键修复】使用用户设置的阈值，而不是硬编码的0.5
+            field_threshold = mapping.get('similarity_score', 0.7)
+            weight = mapping.get('weight', 1.0)
+            
+            # 只有超过阈值的字段才参与总分计算和匹配字段列表
+            if field_similarity >= field_threshold:
+                total_score += field_similarity * weight
                 matched_fields.append(f"{source_field}->{target_field}")
+            else:
+                # 低于阈值的字段不参与计算，记录为0分
+                logger.info(f"🚫 字段 {source_field}->{target_field} 相似度 {field_similarity:.3f} 低于阈值 {field_threshold:.3f}，跳过匹配")
         
-        # 计算平均相似度
-        avg_similarity = total_score / len(mappings) if mappings else 0.0
+        # 【关键修复】计算权重化平均相似度
+        # 只计算通过阈值的字段的权重总和
+        total_weight = 0.0
+        for mapping in mappings:
+            field_key = f"{mapping['source_field']}->{mapping['target_field']}"
+            field_similarity = field_scores.get(field_key, 0.0)
+            field_threshold = mapping.get('similarity_score', 0.7)
+            
+            if field_similarity >= field_threshold:
+                total_weight += mapping.get('weight', 1.0)
+        
+        avg_similarity = total_score / total_weight if total_weight > 0 else 0.0
         
         details = {
             'field_scores': field_scores,
@@ -1754,8 +1923,18 @@ class UserDataMatcher:
                 logger.debug(f"地址语义匹配: {source_field}->{target_field}, {value1[:20]}... <-> {value2[:20]}... = {similarity:.3f}")
                 return similarity
             
+            # 【关键修复】使用正确的匹配器方法
+            # 对于EnhancedFuzzyMatcher，需要构造记录格式并使用match_single_record
+            if isinstance(matcher, EnhancedFuzzyMatcher):
+                # 构造临时记录格式
+                source_record = {source_field: value1} if source_field else {'value': value1}
+                target_record = {target_field: value2} if target_field else {'value': value2}
+                
+                result = matcher.match_single_record(source_record, [target_record])
+                return result.similarity_score if result.matched else 0.0
+            
             # 使用不同的匹配器计算相似度
-            if hasattr(matcher, 'calculate_similarity'):
+            elif hasattr(matcher, 'calculate_similarity'):
                 return matcher.calculate_similarity(value1, value2)
             elif hasattr(matcher, 'calculate_string_similarity'):
                 return matcher.calculate_string_similarity(value1, value2)

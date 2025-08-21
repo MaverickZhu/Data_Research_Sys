@@ -519,32 +519,42 @@ class UniversalTextMatcher:
         if not value:
             return []
         
+        # 【修复】先进行地址标准化，确保与索引表中的关键词一致
+        from .address_normalizer import normalize_address_for_matching
+        normalized_value = normalize_address_for_matching(value)
+        
         # 提取地址组件
         keywords = []
         
         # 省市区提取
-        province_match = re.search(r'([\u4e00-\u9fff]{2,}省)', value)
+        province_match = re.search(r'([\u4e00-\u9fff]{2,}省)', normalized_value)
         if province_match:
             keywords.append(province_match.group(1))
         
-        city_match = re.search(r'([\u4e00-\u9fff]{2,}市)', value)
+        city_match = re.search(r'([\u4e00-\u9fff]{2,}市)', normalized_value)
         if city_match:
             keywords.append(city_match.group(1))
         
-        district_match = re.search(r'([\u4e00-\u9fff]{2,}[区县])', value)
+        district_match = re.search(r'([\u4e00-\u9fff]{2,}[区县])', normalized_value)
         if district_match:
             keywords.append(district_match.group(1))
         
+        # 【关键修复】镇级行政区划提取 - 这是解决庄行镇vs柘林镇问题的关键
+        town_match = re.search(r'([\u4e00-\u9fff]{2,}镇)', normalized_value)
+        if town_match:
+            keywords.append(town_match.group(1))
+            logger.debug(f"提取到镇名关键词: {town_match.group(1)}")
+        
         # 街道路名提取 - 修复：提取具体街道名而不是带前缀的长字符串
-        street_matches = re.findall(r'([^省市区县]{2,8}[路街道巷弄])', value)
+        street_matches = re.findall(r'([^省市区县镇]{2,8}[路街道巷弄])', normalized_value)
         keywords.extend(street_matches)
         
         # 门牌号提取
-        number_matches = re.findall(r'(\d+号?)', value)
+        number_matches = re.findall(r'(\d+号?)', normalized_value)
         keywords.extend(number_matches)
         
         # 建筑物名称提取
-        building_matches = re.findall(r'([\u4e00-\u9fff]{2,}[大厦楼宇院])', value)
+        building_matches = re.findall(r'([\u4e00-\u9fff]{2,}[大厦楼宇院])', normalized_value)
         keywords.extend(building_matches)
         
         return list(set(keywords))

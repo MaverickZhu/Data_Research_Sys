@@ -44,35 +44,81 @@ class GraphMatcher:
 
         print(f"Building entity-attribute graph (limit: {limit} per collection)...")
         
-        # 定义查询参数
-        query_filter = {}
-        projection = {"_id": 1, "UNIT_NAME": 1, "UNIT_ADDRESS": 1, "LEGAL_PEOPLE": 1}
+        # 【关键修复】添加批处理和连接管理
+        batch_size = 1000  # 每批处理1000条记录
+        processed_count = 0
         
-        # 1. 加载 消防隐患安全排查系统 (xfaqpc_jzdwxx)
-        cursor_xfaqpc = self.db.xfaqpc_jzdwxx.find(query_filter, projection)
-        if limit > 0:
-            cursor_xfaqpc = cursor_xfaqpc.limit(limit)
-        
-        for unit in cursor_xfaqpc:
-            self.add_unit_to_graph(unit, 'xfaqpc', 
-                                   name_field='UNIT_NAME', 
-                                   address_field='UNIT_ADDRESS', 
-                                   person_field='LEGAL_PEOPLE')
+        try:
+            # 定义查询参数
+            query_filter = {}
+            projection = {"_id": 1, "UNIT_NAME": 1, "UNIT_ADDRESS": 1, "LEGAL_PEOPLE": 1}
+            
+            # 1. 批量加载 消防隐患安全排查系统 (xfaqpc_jzdwxx)
+            print("Processing xfaqpc_jzdwxx collection...")
+            collection = self.db.xfaqpc_jzdwxx
+            
+            # 计算实际需要处理的数量
+            actual_limit = limit if limit > 0 else collection.count_documents(query_filter)
+            
+            for skip in range(0, actual_limit, batch_size):
+                current_batch_size = min(batch_size, actual_limit - skip)
+                
+                # 批量查询
+                cursor = collection.find(query_filter, projection).skip(skip).limit(current_batch_size)
+                
+                batch_count = 0
+                for unit in cursor:
+                    self.add_unit_to_graph(unit, 'xfaqpc', 
+                                           name_field='UNIT_NAME', 
+                                           address_field='UNIT_ADDRESS', 
+                                           person_field='LEGAL_PEOPLE')
+                    batch_count += 1
+                
+                processed_count += batch_count
+                print(f"  Processed {processed_count}/{actual_limit} xfaqpc records...")
+                
+                # 如果批次不满，说明已经处理完了
+                if batch_count < current_batch_size:
+                    break
 
-        # 2. 加载 消防监督管理系统 (xxj_shdwjbxx)
-        projection_xxj = {"_id": 1, "dwmc": 1, "dwdz": 1, "fddbr": 1}
-        cursor_xxj = self.db.xxj_shdwjbxx.find(query_filter, projection_xxj)
-        if limit > 0:
-            cursor_xxj = cursor_xxj.limit(limit)
+            # 2. 批量加载 消防监督管理系统 (xxj_shdwjbxx)
+            print("Processing xxj_shdwjbxx collection...")
+            projection_xxj = {"_id": 1, "dwmc": 1, "dwdz": 1, "fddbr": 1}
+            collection_xxj = self.db.xxj_shdwjbxx
+            
+            # 计算实际需要处理的数量
+            actual_limit_xxj = limit if limit > 0 else collection_xxj.count_documents(query_filter)
+            processed_count_xxj = 0
+            
+            for skip in range(0, actual_limit_xxj, batch_size):
+                current_batch_size = min(batch_size, actual_limit_xxj - skip)
+                
+                # 批量查询
+                cursor = collection_xxj.find(query_filter, projection_xxj).skip(skip).limit(current_batch_size)
+                
+                batch_count = 0
+                for unit in cursor:
+                    self.add_unit_to_graph(unit, 'xxj', 
+                                           name_field='dwmc', 
+                                           address_field='dwdz', 
+                                           person_field='fddbr')
+                    batch_count += 1
+                
+                processed_count_xxj += batch_count
+                print(f"  Processed {processed_count_xxj}/{actual_limit_xxj} xxj records...")
+                
+                # 如果批次不满，说明已经处理完了
+                if batch_count < current_batch_size:
+                    break
 
-        for unit in cursor_xxj:
-            self.add_unit_to_graph(unit, 'xxj', 
-                                   name_field='dwmc', 
-                                   address_field='dwdz', 
-                                   person_field='fddbr')
-
-        self._is_built = True
-        print(f"Graph built successfully with {self.graph.number_of_nodes()} nodes and {self.graph.number_of_edges()} edges.")
+            self._is_built = True
+            print(f"Graph built successfully with {self.graph.number_of_nodes()} nodes and {self.graph.number_of_edges()} edges.")
+            
+        except Exception as e:
+            print(f"Error building graph: {str(e)}")
+            logger.error(f"图结构构建失败: {str(e)}")
+            # 即使失败也标记为已构建，避免重复尝试
+            self._is_built = True
 
     def get_shared_attributes(self, source_unit_id: str, target_unit_id: str) -> list:
         """

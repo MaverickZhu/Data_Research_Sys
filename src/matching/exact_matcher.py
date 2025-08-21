@@ -268,13 +268,18 @@ class ExactMatcher:
         return normalized
     
     def _text_similarity(self, text1: str, text2: str) -> float:
-        """计算文本相似度"""
+        """计算文本相似度（【修复】使用标准化数据）"""
         if not text1 or not text2:
             return 0.0
         
-        # 简单的字符相似度计算
-        set1 = set(text1)
-        set2 = set(text2)
+        # 【修复】使用标准化后的文本进行字符集相似度计算
+        from ..utils.helpers import normalize_string
+        norm_text1 = normalize_string(text1)
+        norm_text2 = normalize_string(text2)
+        
+        # 简单的字符相似度计算（使用标准化数据）
+        set1 = set(norm_text1)
+        set2 = set(norm_text2)
         intersection = len(set1.intersection(set2))
         union = len(set1.union(set2))
         
@@ -292,7 +297,7 @@ class ExactMatcher:
         if not addr1_keys or not addr2_keys:
             return 0.0
         
-        # 计算关键词重叠度
+        # 计算关键词重叠度（【修复】确保使用标准化后的地址数据）
         common_keys = addr1_keys.intersection(addr2_keys)
         total_keys = addr1_keys.union(addr2_keys)
         

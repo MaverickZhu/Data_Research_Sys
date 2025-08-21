@@ -310,8 +310,20 @@ class UniversalQueryEngine:
             if not aggregation_results:
                 return []
             
-            # 提取文档ID
-            doc_ids = [result['_id'] for result in aggregation_results]
+            # 提取文档ID并转换为ObjectId
+            from bson import ObjectId
+            doc_ids = []
+            for result in aggregation_results:
+                doc_id = result['_id']
+                # 如果是字符串，转换为ObjectId
+                if isinstance(doc_id, str):
+                    try:
+                        doc_ids.append(ObjectId(doc_id))
+                    except Exception as e:
+                        logger.warning(f"无效的ObjectId字符串: {doc_id} - {e}")
+                        continue
+                else:
+                    doc_ids.append(doc_id)
             
             # 批量查询完整记录
             target_collection = self.db[target_table]
@@ -323,8 +335,18 @@ class UniversalQueryEngine:
             
             for agg_result in aggregation_results:
                 doc_id = agg_result['_id']
-                if doc_id in record_map:
-                    record = record_map[doc_id].copy()
+                
+                # 统一ID格式进行匹配
+                if isinstance(doc_id, str):
+                    try:
+                        lookup_id = ObjectId(doc_id)
+                    except:
+                        continue
+                else:
+                    lookup_id = doc_id
+                
+                if lookup_id in record_map:
+                    record = record_map[lookup_id].copy()
                     record['similarity_score'] = agg_result['similarity_score']
                     record['_matched_keywords'] = agg_result['matched_keywords']
                     record['_original_value'] = agg_result['original_value']
@@ -342,8 +364,20 @@ class UniversalQueryEngine:
             if not aggregation_results:
                 return []
             
-            # 提取文档ID
-            doc_ids = [result['_id'] for result in aggregation_results]
+            # 提取文档ID并转换为ObjectId
+            from bson import ObjectId
+            doc_ids = []
+            for result in aggregation_results:
+                doc_id = result['_id']
+                # 如果是字符串，转换为ObjectId
+                if isinstance(doc_id, str):
+                    try:
+                        doc_ids.append(ObjectId(doc_id))
+                    except Exception as e:
+                        logger.warning(f"无效的ObjectId字符串: {doc_id} - {e}")
+                        continue
+                else:
+                    doc_ids.append(doc_id)
             
             # 批量查询完整记录
             target_collection = self.db[target_table]
@@ -355,14 +389,25 @@ class UniversalQueryEngine:
             
             for agg_result in aggregation_results:
                 doc_id = agg_result['_id']
-                if doc_id in record_map:
-                    record = record_map[doc_id].copy()
-                    # 批量查询使用关键词数量而不是相似度分数
-                    record['_keyword_count'] = agg_result.get('keyword_count', 0)
-                    record['_matched_keywords'] = agg_result['matched_keywords']
-                    record['_original_value'] = agg_result.get('original_address', '')
-                    # 计算简单的关键词匹配相似度
-                    record['similarity_score'] = agg_result.get('keyword_count', 0) / max(len(agg_result.get('matched_keywords', [])), 1)
+                
+                # 统一ID格式进行匹配
+                if isinstance(doc_id, str):
+                    try:
+                        lookup_id = ObjectId(doc_id)
+                    except:
+                        continue
+                else:
+                    lookup_id = doc_id
+                
+                if lookup_id in record_map:
+                    record = record_map[lookup_id].copy()
+                    # 【关键修复】使用聚合结果中的实际字段
+                    record['_keyword_count'] = agg_result.get('match_count', 0)
+                    record['_matched_keywords'] = agg_result.get('matched_keywords', [])
+                    record['_original_value'] = agg_result.get('original_value', '')
+                    # 【关键修复】不在此处计算相似度，留给后续的_match_candidates_to_records方法处理
+                    # 相似度计算需要源记录的关键词信息，这里无法获取
+                    # record['similarity_score'] 将在_match_candidates_to_records中正确计算
                     candidates.append(record)
             
             return candidates
@@ -509,7 +554,7 @@ class UniversalQueryEngine:
             
             # 执行批量聚合查询
             candidates = self._execute_batch_aggregation_query(
-                target_table, target_field, list(all_keywords), config
+                target_table, target_field, list(all_keywords), config, record_keywords
             )
             
             # 为每个记录匹配候选
@@ -531,7 +576,7 @@ class UniversalQueryEngine:
             raise
     
     def _execute_batch_aggregation_query(self, target_table: str, target_field: str, 
-                                        all_keywords: List[str], config) -> List[Dict]:
+                                        all_keywords: List[str], config, record_keywords: Dict) -> List[Dict]:
         """执行批量聚合查询"""
         try:
             index_table_name = f"{target_table}_address_keywords"
@@ -545,29 +590,29 @@ class UniversalQueryEngine:
                 else:
                     return []
             
-            # 构建批量聚合管道 - 适配简单索引结构
+            # 【关键修复】构建批量聚合管道 - 移除错误的相似度计算，由后续方法正确处理
             pipeline = [
+                # 第1阶段：匹配关键词
                 {'$match': {
-                    'keywords': {'$in': all_keywords}
+                    'keyword': {'$in': all_keywords},
+                    'field_name': target_field
                 }},
-                {'$addFields': {
-                    'matched_keywords': {
-                        '$filter': {
-                            'input': '$keywords',
-                            'cond': {'$in': ['$$this', all_keywords]}
-                        }
-                    }
+                # 第2阶段：按文档ID分组统计
+                {'$group': {
+                    '_id': '$doc_id',
+                    'original_value': {'$first': '$original_value'},
+                    'match_count': {'$sum': 1},
+                    'matched_keywords': {'$push': '$keyword'}
                 }},
-                {'$addFields': {
-                    'keyword_count': {'$size': '$matched_keywords'}
-                }},
-                {'$match': {'keyword_count': {'$gt': 0}}},
-                {'$sort': {'keyword_count': -1}},
-                {'$limit': self.query_config['max_candidates_per_field'] * 2}  # 获取更多候选用于后续筛选
+                # 第3阶段：按匹配关键词数量排序（更多匹配的优先）
+                {'$sort': {'match_count': -1}},
+                # 第4阶段：限制候选数量（在相似度计算前先限制，提高性能）
+                {'$limit': self.query_config['max_candidates_per_field'] * 2}  # 多取一些，后续再精确过滤
             ]
             
             # 执行查询
             index_collection = self.db[index_table_name]
+            
             aggregation_results = list(index_collection.aggregate(pipeline))
             
             # 获取完整记录（批量查询版本）
@@ -587,6 +632,7 @@ class UniversalQueryEngine:
             record_candidates = []
             
             for candidate in candidates:
+                # 【关键修复】使用正确的字段名 _matched_keywords（来自_fetch_full_records_batch）
                 candidate_keywords = set(candidate.get('_matched_keywords', []))
                 
                 # 计算关键词交集相似度（与单查询保持一致）

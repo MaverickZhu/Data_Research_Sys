@@ -117,9 +117,9 @@ class PerformancePrebuilder:
             db = self.db_manager.mongo_client.get_database()
             graph_matcher = GraphMatcher(db)
             
-            # 预建大规模图结构
+            # 【关键修复】预建适中规模图结构，避免连接超时
             graph_start = time.time()
-            graph_matcher.build_graph(limit=100000)  # 预建10万节点的图
+            graph_matcher.build_graph(limit=10000)  # 预建1万节点的图，避免超时
             graph_time = time.time() - graph_start
             
             self.stats['graph_nodes'] = graph_matcher.graph.number_of_nodes()

@@ -1705,7 +1705,8 @@ async function saveConfiguration() {
             source_field: relation.source,
             target_field: relation.target,
             target_table: relation.targetTable,
-            similarity_score: relation.similarity,
+            // 【关键修复】使用用户设置的阈值，而不是计算出的相似度
+            similarity_score: relation.threshold_config ? relation.threshold_config.high_threshold : 0.75,
             data_type: 'auto', // 默认数据类型
             field_priority: relation.field_priority || 'primary', // 字段优先级
             weight: relation.weight || 0.5, // 字段权重

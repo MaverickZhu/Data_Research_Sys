@@ -534,20 +534,30 @@ class StructuredNameMatcher:
             if source_field == target_field:
                 return 1.0
             
-            # 2. 长度不同，严重惩罚
-            if len(source_field) != len(target_field):
-                # 基础相似度
-                base_sim = fuzz.ratio(source_field, target_field) / 100.0
-                # 长度差异惩罚
-                len_diff = abs(len(source_field) - len(target_field))
+            # 2. 长度不同，严重惩罚（【修复】使用标准化后的字符串长度）
+            # 【关键修复】对于地址字段，使用地址标准化；对于其他字段，使用通用标准化
+            if field_type == 'address' or 'address' in field_type.lower():
+                from .address_normalizer import normalize_address_for_matching
+                norm_source = normalize_address_for_matching(source_field)
+                norm_target = normalize_address_for_matching(target_field)
+            else:
+                from ..utils.helpers import normalize_string
+                norm_source = normalize_string(source_field)
+                norm_target = normalize_string(target_field)
+            
+            if len(norm_source) != len(norm_target):
+                # 基础相似度（使用标准化数据）
+                base_sim = fuzz.ratio(norm_source, norm_target) / 100.0
+                # 长度差异惩罚（使用标准化后的长度）
+                len_diff = abs(len(norm_source) - len(norm_target))
                 len_penalty = len_diff * 0.2
                 return max(0.0, base_sim - len_penalty)
             
-            # 3. 长度相同，检查字符差异
-            diff_count = sum(1 for a, b in zip(source_field, target_field) if a != b)
+            # 3. 长度相同，检查字符差异（【修复】使用标准化数据）
+            diff_count = sum(1 for a, b in zip(norm_source, norm_target) if a != b)
             
-            # 4. 短名称（2-4个字）的严格处理
-            if len(source_field) <= 4:
+            # 4. 短名称（2-4个字）的严格处理（【修复】使用标准化后的长度）
+            if len(norm_source) <= 4:
                 if diff_count == 0:
                     return 1.0
                 elif diff_count == 1:
@@ -557,13 +567,13 @@ class StructuredNameMatcher:
                     # 多个字不同，最高0.3
                     return 0.3
             
-            # 5. 较长名称的处理
+            # 5. 较长名称的处理（【修复】使用标准化后的长度）
             else:
                 if diff_count == 0:
                     return 1.0
                 else:
-                    # 按差异比例计算
-                    diff_ratio = diff_count / len(source_field)
+                    # 按差异比例计算（使用标准化后的长度）
+                    diff_ratio = diff_count / len(norm_source)
                     return max(0.0, 1.0 - diff_ratio * 1.5)
         elif field_type == 'region':
             # 区域名称使用部分匹配

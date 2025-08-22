@@ -2030,6 +2030,10 @@ class UserDataMatcher:
             if not self.db_manager or not self.db_manager.mongo_client:
                 return False
             
+            # 【关键修复】设置内存停止标志 - 立即生效
+            self.stop_flags[task_id] = True
+            logger.info(f"设置任务 {task_id} 的内存停止标志")
+            
             db = self.db_manager.mongo_client.get_database()
             task_collection = db['user_matching_tasks']
             
@@ -2039,7 +2043,8 @@ class UserDataMatcher:
                 {
                     '$set': {
                         'status': 'stopped',
-                        'updated_at': datetime.now().isoformat()
+                        'updated_at': datetime.now().isoformat(),
+                        'end_time': datetime.now().isoformat()
                     }
                 }
             )
@@ -2048,6 +2053,7 @@ class UserDataMatcher:
             if task_id in self.running_tasks:
                 del self.running_tasks[task_id]
             
+            logger.info(f"任务停止请求处理完成: {task_id}, 数据库更新结果: {result.modified_count > 0}")
             return result.modified_count > 0
             
         except Exception as e:

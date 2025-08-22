@@ -269,27 +269,31 @@ class SimilarityCalculator:
         【关键修复】确保输入地址已经过标准化处理
         """
         components = {
-            'province': '',      # 省份
-            'city': '',         # 城市
-            'district': '',     # 区县
-            'street': '',       # 街道/路
-            'number': '',       # 门牌号
-            'building': '',     # 建筑物名称
-            'detail': ''        # 其他详细信息
+            'province': '',    # 1省级：省、自治区、直辖市
+            'city': '',        # 2地级：地级市、地区、自治州、盟
+            'district': '',    # 3县级：县、县级市、区、旗
+            'town': '',        # 4乡级：街道、镇、乡
+            'street': '',      # 5村级：社区、行政村、新村、里弄、道路
+            'number': '',      # 6门牌：门牌号、楼号、单元号、室号
+            'building': '',    # 建筑物名称（不参与6级匹配）
+            'detail': ''       # 其他详细信息（不参与6级匹配）
         }
         
         # 【修复】确保输入地址已标准化（调用方已处理，这里做二次确认）
         # 注意：此时address应该已经是标准化后的地址
         logger.debug(f"提取地址组件，输入地址: '{address}'")
         
-        # 地址解析正则表达式（优化版 - 适配标准化后的地址格式）
+        # 【2025年8月22日修复】6级地址组件提取 - 严格按照6级层级结构
+        # 1省级：省、自治区、直辖市；2地级：地级市、地区、自治州、盟；3县级：县、县级市、区、旗；
+        # 4乡级：街道、镇、乡；5村级：社区、行政村、新村、里弄、道路；6门牌：门牌号、楼号、单元号、室号
         patterns = {
-            'province': r'([^省市区县]{2,8}(?:省|市|自治区))',
-            'city': r'([^省市区县]{2,8}(?:市|州|县))',
-            'district': r'([^省市区县]{2,8}(?:区|县|镇|开发区|高新区|经济区))',
-            'street': r'([^路街道巷弄里号]{1,20}(?:路|街|道|巷|弄|里|街道))',  # 【修复】移除"大街|大道"因为已标准化为"路|街"
-            'number': r'(\d+(?:号|弄|栋|幢|座|楼|室|层)(?:\d+(?:号|室|层)?)?)',  # 【修复】支持复合门牌号
-            'building': r'([^路街道巷弄里号栋幢座楼室层]{2,20}(?:养老院|敬老院|老年公寓|护理院|福利院|大厦|大楼|广场|中心|院|园|村|小区|公司|厂|店|馆|所|站|场))'  # 【修复】优先匹配养老相关建筑
+            'province': r'([^省市区县]{2,8}(?:省|市|自治区))',  # 1省级
+            'city': r'([^省市区县]{2,8}(?:市|州|县))',          # 2地级  
+            'district': r'([^省市区县镇]{2,8}(?:区|县|开发区|高新区|经济区))',  # 3县级
+            'town': r'([^省市区县]{2,8}(?:镇|乡|街道))',        # 4乡级：街道、镇、乡
+            'street': r'([^路街道巷弄里号栋幢座楼室层]{1,20}(?:路|街|道|巷|里|大街|大道|街道|村|邨|社区|新村|小区|公寓|花园|苑|庄|家园|城|园区))',  # 5村级：道路、村、邨、社区、小区等（移除弄，避免与门牌冲突）
+            'number': r'(\d+(?:弄\d*号?|号|栋|幢|座|楼|室|层))',  # 6门牌：门牌号、楼号、单元号、室号
+            'building': r'([^路街道巷弄里号栋幢座楼室层]{2,20}(?:养老院|敬老院|老年公寓|护理院|福利院|公司|厂|店|馆|所|站|场|生态园|科技园|工业园|产业园|广场|中心|大厦))'
         }
         
         # 【修复】预处理已在标准化阶段完成，这里直接使用标准化后的地址
@@ -325,20 +329,47 @@ class SimilarityCalculator:
         logger.debug(f"地址1组件: {comp1}")
         logger.debug(f"地址2组件: {comp2}")
         
-        # 【核心算法】严格层级终止匹配 - 按用户要求实现
+        # 【核心算法】严格6级分层匹配 - 按用户2025年8月21日要求实现
+        # 1省级：省、自治区、直辖市；2地级：地级市、地区、自治州、盟；3县级：县、县级市、区、旗；
+        # 4乡级：街道、镇、乡；5村级：社区、行政村、新村、里弄、道路；6门牌：门牌号、楼号、单元号、室号
         hierarchy_levels = [
-            ('province', '省级', 0.85),    # 省/直辖市
-            ('city', '市级', 0.85),        # 市
-            ('district', '区县级', 0.80),   # 区/县 - 关键区分级别
-            ('town', '镇街级', 0.85),       # 镇/街道 - 关键区分级别
-            ('community', '小区级', 0.75),  # 小区/社区 - 关键区分级别
-            ('street', '路级', 0.70),      # 路/村
-            ('lane', '弄级', 0.80),        # 弄号 - 关键区分级别
-            ('number', '门牌级', 0.60),    # 门牌号/组号
+            ('province', '1省级', 0.90),   # 省、自治区、直辖市
+            ('city', '2地级', 0.90),       # 地级市、地区、自治州、盟
+            ('district', '3县级', 0.90),   # 县、县级市、区、旗
+            ('town', '4乡级', 0.90),       # 街道、镇、乡
+            ('street', '5村级', 0.90),     # 社区、行政村、新村、里弄、道路
+            ('number', '6门牌', 0.85),     # 门牌号、楼号、单元号、室号
         ]
         
-        logger.debug(f"🔍 开始严格层级终止验证（共{len(hierarchy_levels)}级）")
+        logger.debug(f"🔍 开始严格6级分层匹配验证（共{len(hierarchy_levels)}级）")
         
+        # 【2025年8月22日修复】先检查地址完整性级别是否匹配
+        def get_address_max_level(comp):
+            """获取地址的最高级别"""
+            for level_idx, (level, _, _) in enumerate(hierarchy_levels):
+                if comp.get(level, '').strip():
+                    max_level = level_idx + 1
+            return max_level if 'max_level' in locals() else 0
+        
+        max_level1 = get_address_max_level(comp1)
+        max_level2 = get_address_max_level(comp2)
+        
+        logger.debug(f"📊 地址完整性检查: 地址1最高级别={max_level1}, 地址2最高级别={max_level2}")
+        
+        # 【2025年8月22日修复】第6级（门牌）严格匹配检查
+        # 跳空仅对6级以前的生效，第6级必须严格匹配
+        val1_level6 = comp1.get('number', '').strip()  # 第6级：门牌
+        val2_level6 = comp2.get('number', '').strip()
+        
+        # 如果一个有第6级，另一个没有第6级 → 匹配失败
+        if (val1_level6 and not val2_level6) or (not val1_level6 and val2_level6):
+            logger.debug(f"❌ 第6级（门牌）不对等: 地址1='{val1_level6}', 地址2='{val2_level6}'")
+            logger.debug(f"   逻辑依据: 跳空仅对6级以前生效，第6级必须严格匹配")
+            return 0.0
+        
+        logger.debug(f"✅ 第6级（门牌）对等性检查通过: 地址1='{val1_level6}', 地址2='{val2_level6}'")
+        
+        # 【严格6级匹配】逐级验证
         for level_idx, (level, level_name, threshold) in enumerate(hierarchy_levels):
             val1 = comp1.get(level, '').strip()
             val2 = comp2.get(level, '').strip()
@@ -356,64 +387,32 @@ class SimilarityCalculator:
                 else:
                     logger.debug(f"✅ 第{level_idx+1}级 {level_name}匹配通过: {level_similarity:.3f} ≥ {threshold:.2f}")
             
-            # 【关键逻辑2】有空值 → 允许继续（缺省推断）
+            # 【关键逻辑2】有空值的处理 - 2025年8月22日修复
             elif not val1 or not val2:
-                logger.debug(f"🔄 第{level_idx+1}级 {level_name}存在空值: '{val1}' vs '{val2}' → 继续下级验证")
-                continue
+                current_level = level_idx + 1
+                
+                # 检查是否在最高级别范围内
+                if current_level <= max(max_level1, max_level2):
+                    logger.debug(f"🔄 第{level_idx+1}级 {level_name}存在空值: '{val1}' vs '{val2}' → 继续下级验证")
+                    continue
+                else:
+                    logger.debug(f"⏹️ 第{level_idx+1}级 {level_name}超出地址最高级别 → 停止验证")
+                    break
         
-        logger.debug(f"🎯 严格层级终止验证通过！所有级别均匹配或存在合理空值")
+        logger.debug(f"🎯 严格6级分层匹配验证通过！开始计算综合相似度")
         
-        # 【地址类型冲突检测】- 特殊逻辑
-        community1, community2 = comp1.get('community', '').strip(), comp2.get('community', '').strip()
-        street1, street2 = comp1.get('street', '').strip(), comp2.get('street', '').strip()
-        lane1, lane2 = comp1.get('lane', '').strip(), comp2.get('lane', '').strip()
+        # 【按用户要求】6级匹配通过后，直接进行评分，不需要额外的冲突检测
         
-        # 小区地址 vs 路弄地址冲突检测
-        if community1 and (street2 or lane2):
-            logger.debug(f"❌ 地址类型冲突: 小区地址 '{community1}' vs 路弄地址 '{street2}{lane2}'")
-            return 0.0
-        elif community2 and (street1 or lane1):
-            logger.debug(f"❌ 地址类型冲突: 小区地址 '{community2}' vs 路弄地址 '{street1}{lane1}'")
-            return 0.0
-        
-        # 【关键修复6】路/村级强制验证 - 这是最关键的修复！
-        # 提取门牌号用于后续逻辑
-        number1, number2 = comp1.get('number', '').strip(), comp2.get('number', '').strip()
-        
-        if street1 and street2:
-            street_sim = self._calculate_component_similarity(street1, street2, 'street')
-            logger.debug(f"🛣️ 路/村级匹配分析: '{street1}' vs '{street2}' = {street_sim:.3f}")
-            
-            # 【核心逻辑】路/村名必须高度相似，不能仅凭门牌号匹配
-            if street_sim < 0.60:  # 路/村级相似度阈值
-                logger.debug(f"❌ 路/村级不匹配强制过滤: '{street1}' vs '{street2}' = {street_sim:.3f}")
-                logger.debug(f"   即使门牌号相同('{number1}' vs '{number2}')也不能匹配不同路/村的地址")
-                return 0.0
-            else:
-                logger.debug(f"✅ 路/村级匹配通过: {street_sim:.3f} ≥ 0.60")
-        
-        # 【关键修复4】防止仅凭门牌号匹配的逻辑
-        if number1 and number2 and number1 == number2:
-            # 门牌号相同，但必须确保上级地址也匹配
-            if not street1 or not street2:
-                logger.debug(f"⚠️ 门牌号相同('{number1}')但缺少路/村信息，降低可信度")
-            elif street1 != street2:
-                # 这种情况已经在上面被过滤了，这里是双重保险
-                logger.debug(f"❌ 门牌号相同('{number1}')但路/村不同('{street1}' vs '{street2}')，强制过滤")
-                return 0.0
-        
-        # 【第二阶段】计算综合相似度 - 只有通过层级验证才能到这里
+        # 【第二阶段】严格6级权重配置 - 按用户2025年8月21日要求
+        # 1省级：省、自治区、直辖市；2地级：地级市、地区、自治州、盟；3县级：县、县级市、区、旗；
+        # 4乡级：街道、镇、乡；5村级：社区、行政村、新村、里弄、道路；6门牌：门牌号、楼号、单元号、室号
         weights = {
-            'province': 0.05,    # 省份权重最低（通常都是上海市）
-            'city': 0.08,        # 城市权重较低
-            'district': 0.20,    # 区县权重中等（重要区分）
-            'town': 0.25,        # 镇/街道权重较高（关键区分）
-            'community': 0.35,   # 【新增】小区权重很高（岚皋馨苑vs其他小区必须区分）
-            'street': 0.30,      # 路/村权重高（具体定位）
-            'lane': 0.30,        # 【新增】弄号权重高（251弄vs其他弄必须区分）
-            'number': 0.35,      # 门牌号权重最高（精确定位）
-            'building': 0.02,    # 建筑物权重最低
-            'detail': 0.01       # 其他详细信息权重最低
+            'province': 0.10,    # 1省级：省、自治区、直辖市
+            'city': 0.15,        # 2地级：地级市、地区、自治州、盟
+            'district': 0.20,    # 3县级：县、县级市、区、旗
+            'town': 0.20,        # 4乡级：街道、镇、乡
+            'street': 0.25,      # 5村级：社区、行政村、新村、里弄、道路
+            'number': 0.30,      # 6门牌：门牌号、楼号、单元号、室号
         }
         
         total_score = 0.0
@@ -431,8 +430,8 @@ class SimilarityCalculator:
                 total_weight += weight
                 matched_components += 1
                 
-                # 统计关键组件匹配
-                if component in ['district', 'town', 'street', 'number']:
+                # 统计关键组件匹配（6级中的关键级别）
+                if component in ['district', 'town', 'street', 'number']:  # 3县级、4乡级、5村级、6门牌
                     critical_matches += 1
                 
                 logger.debug(f"📊 组件 '{component}': '{val1}' vs '{val2}' = {similarity:.3f} (权重: {weight})")
@@ -463,28 +462,51 @@ class SimilarityCalculator:
         计算特定组件的相似度
         根据组件类型使用不同的匹配策略
         
-        【关键修复】确保所有地址组件相似度计算都使用地址标准化后的数据
+        【2025年8月21日新增】增加人为输入数据错误的容错处理
+        处理如：上海虹口天宝路881号 vs 上海市虹口区天宝路881号
         """
         if val1 == val2:
             return 1.0
         
-        # 【修复】对地址组件进行二次标准化，确保数据一致性
-        from .address_normalizer import normalize_address_for_matching
-        normalized_val1 = normalize_address_for_matching(val1) if val1 else ""
-        normalized_val2 = normalize_address_for_matching(val2) if val2 else ""
+        # 【2025年8月22日修复】对地址组件进行二次标准化，确保数据一致性
+        # 对于street组件（第5级村级），不使用会移除小区村名的标准化
+        if component_type == 'street':
+            # 对于村级组件，只进行基本标准化，不移除小区村名
+            normalized_val1 = val1.strip() if val1 else ""
+            normalized_val2 = val2.strip() if val2 else ""
+        else:
+            # 对于其他组件，使用完整的地址标准化
+            from .address_normalizer import normalize_address_for_matching
+            normalized_val1 = normalize_address_for_matching(val1) if val1 else ""
+            normalized_val2 = normalize_address_for_matching(val2) if val2 else ""
         
         # 标准化后再次检查完全匹配
         if normalized_val1 == normalized_val2:
             return 1.0
         
+        # 【新增】人为输入错误容错处理
+        tolerance_score = self._calculate_tolerance_similarity(val1, val2, component_type)
+        if tolerance_score > 0.0:
+            return tolerance_score
+        
         if component_type == 'number':
-            # 门牌号：数字部分完全匹配得分更高
+            # 【2025年8月22日修复】门牌号必须精确匹配，不允许模糊匹配
+            # 门牌号是地址的关键标识，必须完全一致才能认为是同一地址
+            
+            # 提取所有数字进行完整比较
             num1 = re.findall(r'\d+', normalized_val1)
             num2 = re.findall(r'\d+', normalized_val2)
-            if num1 and num2 and num1[0] == num2[0]:
-                return 0.95  # 数字相同，但可能单位不同
+            
+            # 只有当所有数字完全匹配时才认为相似
+            if num1 == num2 and len(num1) > 0:
+                # 数字完全匹配，检查格式是否相似（如：27号 vs 27室）
+                if normalized_val1 == normalized_val2:
+                    return 1.0  # 完全匹配
+                else:
+                    return 0.95  # 数字相同但格式略有差异
             else:
-                return fuzz.ratio(normalized_val1, normalized_val2) / 100.0 * 0.6
+                # 数字不匹配，门牌号不同，返回0（严格匹配）
+                return 0.0
         
         elif component_type in ['street', 'building']:
             # 街道和建筑物：使用多种算法综合评估（使用标准化数据）
@@ -573,16 +595,14 @@ class SimilarityCalculator:
     def _extract_address_components(self, address: str) -> Dict[str, str]:
         """提取地址组件"""
         components = {
-            'province': '',
-            'city': '',
-            'district': '',
-            'town': '',        # 【新增】镇级行政区划
-            'community': '',   # 【新增】小区/社区名称
-            'street': '',
-            'lane': '',        # 【新增】弄号
-            'number': '',
-            'building': '',
-            'detail': ''
+            'province': '',    # 1省级：省、自治区、直辖市
+            'city': '',        # 2地级：地级市、地区、自治州、盟
+            'district': '',    # 3县级：县、县级市、区、旗
+            'town': '',        # 4乡级：街道、镇、乡
+            'street': '',      # 5村级：社区、行政村、新村、里弄、道路
+            'number': '',      # 6门牌：门牌号、楼号、单元号、室号
+            'building': '',    # 建筑物名称（不参与6级匹配）
+            'detail': ''       # 其他详细信息（不参与6级匹配）
         }
         
         # 预处理：移除行政层级词汇
@@ -590,17 +610,17 @@ class SimilarityCalculator:
         remaining_address = re.sub(r'市辖区', '', remaining_address)  # 移除"市辖区"
         remaining_address = re.sub(r'县辖区', '', remaining_address)  # 移除"县辖区"
         
-        # 【关键修复】地址解析正则表达式 - 区分小区地址和路弄地址
+        # 【2025年8月22日修复】6级地址组件提取 - 严格按照6级层级结构
+        # 1省级：省、自治区、直辖市；2地级：地级市、地区、自治州、盟；3县级：县、县级市、区、旗；
+        # 4乡级：街道、镇、乡；5村级：社区、行政村、新村、里弄、道路；6门牌：门牌号、楼号、单元号、室号
         patterns = {
-            'province': r'([^省市区县]{2,8}(?:省|市|自治区))',
-            'city': r'([^省市区县]{2,8}(?:市|州|县))',
-            'district': r'([^省市区县镇]{2,8}(?:区|县|开发区|高新区|经济区))',
-            'town': r'([^省市区县]{2,8}镇)',  # 【关键修复】单独提取镇级行政区划
-            'community': r'([^路街道巷弄里号栋幢座楼室层]{2,20}(?:小区|公寓|花园|苑|庄|村|新村|家园|城|园区|广场|中心|大厦))',  # 【新增】小区/社区名称
-            'street': r'([^路街道巷弄里]{1,20}(?:路|街|道|巷|弄|里|大街|大道|街道))',
-            'lane': r'(\d+弄)',  # 【新增】弄号（如251弄）
-            'number': r'(\d+(?:号|栋|幢|座|楼|室|层))',
-            'building': r'([^路街道巷弄里号栋幢座楼室层]{2,20}(?:养老院|敬老院|老年公寓|护理院|福利院|公司|厂|店|馆|所|站|场|生态园|科技园|工业园|产业园))'
+            'province': r'([^省市区县]{2,8}(?:省|市|自治区))',  # 1省级
+            'city': r'([^省市区县]{2,8}(?:市|州|县))',          # 2地级  
+            'district': r'([^省市区县镇]{2,8}(?:区|县|开发区|高新区|经济区))',  # 3县级
+            'town': r'([^省市区县]{2,8}(?:镇|乡|街道))',        # 4乡级：街道、镇、乡
+            'street': r'([^路街道巷弄里号栋幢座楼室层]{1,20}(?:路|街|道|巷|里|大街|大道|街道|村|邨|社区|新村|小区|公寓|花园|苑|庄|家园|城|园区))',  # 5村级：道路、村、邨、社区、小区等（移除弄，避免与门牌冲突）
+            'number': r'(\d+(?:弄\d*号?|号|栋|幢|座|楼|室|层))',  # 6门牌：门牌号、楼号、单元号、室号
+            'building': r'([^路街道巷弄里号栋幢座楼室层]{2,20}(?:养老院|敬老院|老年公寓|护理院|福利院|公司|厂|店|馆|所|站|场|生态园|科技园|工业园|产业园|广场|中心|大厦))'
         }
         
         # 按顺序提取各组件
@@ -682,4 +702,102 @@ class SimilarityCalculator:
         # 计算综合相似度
         comprehensive_score = weighted_score / total_weight if total_weight > 0 else 0.0
         
-        return comprehensive_score, field_similarities 
+        return comprehensive_score, field_similarities
+    
+    def _calculate_tolerance_similarity(self, val1: str, val2: str, component_type: str) -> float:
+        """
+        处理人为输入数据错误的容错匹配
+        
+        常见错误模式：
+        1. 缺少行政级别后缀：上海 vs 上海市，虹口 vs 虹口区
+        2. 格式不一致：天宝路881号 vs 天宝路881号
+        3. 简写vs全称：上海 vs 上海市
+        
+        Args:
+            val1, val2: 待比较的地址组件
+            component_type: 组件类型（province, city, district, town, street, number）
+            
+        Returns:
+            float: 容错相似度分数，0.0表示无法容错匹配
+        """
+        if not val1 or not val2:
+            return 0.0
+        
+        # 【容错策略1】行政级别后缀容错
+        if component_type in ['province', 'city', 'district', 'town']:
+            # 定义各级别的常见后缀
+            suffixes_map = {
+                'province': ['省', '市', '自治区', '特别行政区'],  # 省级后缀
+                'city': ['市', '地区', '自治州', '盟'],           # 地级后缀  
+                'district': ['区', '县', '县级市', '旗'],         # 县级后缀
+                'town': ['街道', '镇', '乡', '办事处']            # 乡级后缀
+            }
+            
+            suffixes = suffixes_map.get(component_type, [])
+            
+            # 尝试移除后缀进行匹配
+            core1 = self._remove_admin_suffixes(val1, suffixes)
+            core2 = self._remove_admin_suffixes(val2, suffixes)
+            
+            if core1 and core2 and core1 == core2:
+                logger.debug(f"🔧 {component_type}级容错匹配成功: '{val1}' vs '{val2}' → 核心部分 '{core1}'")
+                return 0.95  # 高分但略低于完全匹配
+        
+        # 【容错策略2】街道/道路名称容错
+        if component_type == 'street':
+            # 移除常见道路后缀进行匹配
+            road_suffixes = ['路', '街', '道', '大道', '大街', '巷', '弄', '里', '村']
+            core1 = self._remove_road_suffixes(val1, road_suffixes)
+            core2 = self._remove_road_suffixes(val2, road_suffixes)
+            
+            if core1 and core2 and core1 == core2:
+                logger.debug(f"🔧 街道容错匹配成功: '{val1}' vs '{val2}' → 核心部分 '{core1}'")
+                return 0.95
+        
+        # 【容错策略3】门牌号格式容错
+        if component_type == 'number':
+            # 提取数字部分进行匹配
+            import re
+            nums1 = re.findall(r'\d+', val1)
+            nums2 = re.findall(r'\d+', val2)
+            
+            if nums1 and nums2 and nums1 == nums2:
+                logger.debug(f"🔧 门牌号容错匹配成功: '{val1}' vs '{val2}' → 数字部分 {nums1}")
+                return 0.90  # 数字相同但格式可能不同
+        
+        # 【容错策略4】模糊匹配兜底
+        # 如果核心内容高度相似，给予一定容错分数
+        from fuzzywuzzy import fuzz
+        fuzzy_score = fuzz.ratio(val1, val2) / 100.0
+        
+        if fuzzy_score >= 0.85:  # 85%以上相似度认为是容错匹配
+            logger.debug(f"🔧 模糊容错匹配: '{val1}' vs '{val2}' = {fuzzy_score:.3f}")
+            return fuzzy_score * 0.9  # 降低一些分数作为容错惩罚
+        
+        return 0.0  # 无法容错匹配
+    
+    def _remove_admin_suffixes(self, text: str, suffixes: list) -> str:
+        """移除行政级别后缀，返回核心名称"""
+        if not text:
+            return ""
+        
+        for suffix in suffixes:
+            if text.endswith(suffix):
+                core = text[:-len(suffix)].strip()
+                if core:  # 确保移除后缀后还有内容
+                    return core
+        
+        return text  # 没有匹配的后缀，返回原文
+    
+    def _remove_road_suffixes(self, text: str, suffixes: list) -> str:
+        """移除道路后缀，返回核心名称"""
+        if not text:
+            return ""
+        
+        for suffix in suffixes:
+            if text.endswith(suffix):
+                core = text[:-len(suffix)].strip()
+                if core:  # 确保移除后缀后还有内容
+                    return core
+        
+        return text  # 没有匹配的后缀，返回原文 

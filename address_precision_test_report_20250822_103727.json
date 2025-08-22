@@ -1,0 +1,286 @@
+{
+  "test_summary": {
+    "test_time": "2025-08-22 10:37:27",
+    "source_table": "hztj_hzxx",
+    "target_table": "dwd_yljgxx",
+    "total_tests": 50,
+    "matches_found": 11,
+    "match_rate": "22.0%",
+    "high_precision_matches": 0,
+    "high_precision_rate": "0.0%",
+    "medium_precision_matches": 11,
+    "medium_precision_rate": "22.0%",
+    "low_precision_matches": 0,
+    "no_matches": 39
+  },
+  "performance_metrics": {
+    "total_time": 6.239644289016724,
+    "avg_time_per_test": 0.12479288578033447,
+    "tests_per_second": 8.013277309415225
+  },
+  "table_info": {
+    "source": {
+      "table_name": "hztj_hzxx",
+      "total_records": 25268,
+      "sample_fields": [
+        "_id",
+        "BO_FIRE_INFO_ID",
+        "警情信息ID",
+        "火灾编号",
+        "起火时间",
+        "起火地点",
+        "区域",
+        "单位/户主名称",
+        "单位统一社会信用代码",
+        "起火经过",
+        "补充说明"
+      ],
+      "address_fields": [
+        {
+          "field": "起火地点",
+          "sample_value": "上海市市辖区浦东新区商城路665号和风细雨"
+        },
+        {
+          "field": "起火经过",
+          "sample_value": "2025年01月09日20时09分，上海市市辖区浦东新区商城路665号和风细雨一普通型塑料及其制品起火。起火原因系xx，过火面积1平方米，造成0死0伤，直接经济损失1200元。"
+        },
+        {
+          "field": "补充说明",
+          "sample_value": "经询问，当晚员工赵某在门店 1F 大堂区等待给包房客人上菜之际， 头脑发热想用打火机试试该区域摆放的芦苇装饰能否点着，试了两次后将芦苇点着。经 询问店长杨某，赵某与门店及同事并无矛盾纠纷。 现场勘验：..."
+        }
+      ]
+    },
+    "target": {
+      "table_name": "dwd_yljgxx",
+      "total_records": 731,
+      "sample_fields": [
+        "_id",
+        "ID",
+        "TYSHXYDM",
+        "IS_FZJG",
+        "ZT_JGMC",
+        "ZT_TYSHXYDM",
+        "JGMC",
+        "FRXZ",
+        "DJJG",
+        "ZCDZ",
+        "YWFW",
+        "KBZJ",
+        "JBDW",
+        "FDDBR",
+        "FRSFZ",
+        "FWCS_JGMC",
+        "HDCWS",
+        "IS_BA",
+        "BASJ",
+        "BAJG",
+        "FWCS_QU",
+        "FWCS_JD",
+        "FWCS_DZ",
+        "FWCS_YB",
+        "FWCS_XZ",
+        "FWCS_CZQK",
+        "FWCS_ZDMJ",
+        "FWCS_JZMJ",
+        "FWCS_SSMJ",
+        "FWCS_LHMJ",
+        "TZZT_MC",
+        "TZZT_XZ",
+        "TZZT_ZF_XZ",
+        "TZZT_QY_XZ",
+        "IS_YYFDZ",
+        "YYFDZJE",
+        "IS_DSFYYJG",
+        "JGSX",
+        "YY_TYXYDM",
+        "YY_JGMC",
+        "YY_PP",
+        "YY_FRXZ",
+        "YY_DJJG",
+        "YY_YWFW",
+        "YY_JBDW",
+        "YY_KBZJ",
+        "YY_FRXM",
+        "YY_LXR",
+        "YY_LXDH",
+        "DARJ_NUM",
+        "SHRJ_NUM",
+        "SARJ_NUM",
+        "SIRJ_NUM",
+        "WURJ_NUM",
+        "LIRJ_NUM",
+        "QIRJ_NUM",
+        "BARJ_NUM",
+        "FJ_NUM",
+        "KLYCWS",
+        "BJBCWS",
+        "HLXCWS",
+        "HLX_NSHLYCWS",
+        "ZCYHCWS",
+        "RZZZHDYS",
+        "RZZZHCWS",
+        "IS_CHXDDJG",
+        "FCHXDDJGYY",
+        "CHXDDJGLX",
+        "CHXDDJGPDSJ",
+        "IS_NSYLJG",
+        "NSYLJGLX",
+        "NSYLJGMC",
+        "NSYLJGXKDJH",
+        "NSYLJGDZ",
+        "NSYLJGZLKM",
+        "NSYLJGFR",
+        "NSYLJGZYFZR",
+        "NRYBLWQK",
+        "IS_YLJGQY",
+        "YLJGQYS",
+        "TZSZYLJGS",
+        "PLSZYLJGS",
+        "LJSZYLJGS",
+        "TZFW",
+        "JHPT_DELETE"
+      ],
+      "address_fields": [
+        {
+          "field": "DJJG",
+          "sample_value": "静安区民政局"
+        },
+        {
+          "field": "ZCDZ",
+          "sample_value": "上海市静安区临汾路1513弄45号"
+        },
+        {
+          "field": "JBDW",
+          "sample_value": "彭浦新村街道"
+        },
+        {
+          "field": "BAJG",
+          "sample_value": "静安区民政局"
+        },
+        {
+          "field": "FWCS_JD",
+          "sample_value": "彭浦新村街道"
+        },
+        {
+          "field": "FWCS_DZ",
+          "sample_value": "静安区彭浦新村街道临汾路1513弄45号"
+        },
+        {
+          "field": "TZZT_MC",
+          "sample_value": "彭浦新村街道"
+        },
+        {
+          "field": "YY_DJJG",
+          "sample_value": "上海市静安区民政局"
+        }
+      ]
+    }
+  },
+  "detailed_results": [
+    {
+      "test_id": 1,
+      "source_address": "S4杭州往上海方向刚过海湾出口2-3公里",
+      "normalized_source": "S4号杭州往上海方向刚过海湾出口2号-3号公里",
+      "best_match_address": "",
+      "best_match_normalized": "",
+      "similarity_score": 0.0,
+      "match_category": "no_match",
+      "has_match": false
+    },
+    {
+      "test_id": 2,
+      "source_address": "上奉贤区梅园村2组256号叶家石桥",
+      "normalized_source": "上奉贤区梅园村2号组256号叶家石桥",
+      "best_match_address": "上海市奉贤区民政局",
+      "best_match_normalized": "上海市奉贤区民政局",
+      "similarity_score": 0.5733333333333333,
+      "match_category": "no_match",
+      "has_match": false
+    },
+    {
+      "test_id": 3,
+      "source_address": "上海市奉贤区南华亭大道130号",
+      "normalized_source": "上海市奉贤区南华亭路130号",
+      "best_match_address": "上海市奉贤区民政局",
+      "best_match_normalized": "上海市奉贤区民政局",
+      "similarity_score": 0.7,
+      "match_category": "medium_precision",
+      "has_match": true
+    },
+    {
+      "test_id": 4,
+      "source_address": "上海市奉贤区南桥镇宁富路768弄3号302室（一般居民）",
+      "normalized_source": "上海市奉贤区南桥镇宁富路768弄3号302室（一般居民）",
+      "best_match_address": "上海市奉贤区民政局",
+      "best_match_normalized": "上海市奉贤区民政局",
+      "similarity_score": 0.677653846153846,
+      "match_category": "no_match",
+      "has_match": false
+    },
+    {
+      "test_id": 5,
+      "source_address": "上海市奉贤区南桥镇育秀路29号",
+      "normalized_source": "上海市奉贤区南桥镇育秀路29号",
+      "best_match_address": "上海市奉贤区民政局",
+      "best_match_normalized": "上海市奉贤区民政局",
+      "similarity_score": 0.7,
+      "match_category": "medium_precision",
+      "has_match": true
+    },
+    {
+      "test_id": 6,
+      "source_address": "上海市奉贤区南桥镇解放西路后门 26 号 203 室",
+      "normalized_source": "上海市奉贤区南桥镇解放西路后门26号号203号室",
+      "best_match_address": "上海市奉贤区民政局",
+      "best_match_normalized": "上海市奉贤区民政局",
+      "similarity_score": 0.673076923076923,
+      "match_category": "no_match",
+      "has_match": false
+    },
+    {
+      "test_id": 7,
+      "source_address": "上海市奉贤区南桥镇运河北路1358弄民旺苑北区66号11楼（一般居民）",
+      "normalized_source": "上海市奉贤区南桥镇运河北路1358弄民旺苑北区66号11楼（一般居民）",
+      "best_match_address": "上海市杨浦民政局",
+      "best_match_normalized": "上海市杨浦民政局",
+      "similarity_score": 0.259,
+      "match_category": "no_match",
+      "has_match": false
+    },
+    {
+      "test_id": 8,
+      "source_address": "上海市奉贤区南桥镇通阳路337-339号 ",
+      "normalized_source": "上海市奉贤区南桥镇通阳路337号-339号",
+      "best_match_address": "上海市奉贤区民政局",
+      "best_match_normalized": "上海市奉贤区民政局",
+      "similarity_score": 0.673076923076923,
+      "match_category": "no_match",
+      "has_match": false
+    },
+    {
+      "test_id": 9,
+      "source_address": "上海市奉贤区周家村305号农村自建房",
+      "normalized_source": "上海市奉贤区周家村305号农村自建房",
+      "best_match_address": "上海市奉贤区民政局",
+      "best_match_normalized": "上海市奉贤区民政局",
+      "similarity_score": 0.673076923076923,
+      "match_category": "no_match",
+      "has_match": false
+    },
+    {
+      "test_id": 10,
+      "source_address": "上海市奉贤区四团镇三团港路靠近平福路口南侧500米（室外杂物）",
+      "normalized_source": "上海市奉贤区四团镇三团港路靠近平福路口南侧500号米（室外杂物）",
+      "best_match_address": "上海市奉贤区民政局",
+      "best_match_normalized": "上海市奉贤区民政局",
+      "similarity_score": 0.673076923076923,
+      "match_category": "no_match",
+      "has_match": false
+    }
+  ],
+  "recommendations": [
+    "匹配率较低，建议优化地址标准化算法",
+    "高精度匹配率较低，建议增强地址组件权重配置",
+    "处理速度较慢，建议优化匹配算法性能"
+  ]
+}

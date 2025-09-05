@@ -178,13 +178,14 @@ class UniversalTextMatcher:
         if not sample_values:
             return FieldType.TEXT
         
-        # 基于字段名称的启发式规则
+        # 基于字段名称的启发式规则 - 优化优先级，地址字段优先
         field_name_lower = field_name.lower()
         
-        if any(keyword in field_name_lower for keyword in ['name', '名称', '单位', 'unit', 'company']):
-            return FieldType.UNIT_NAME
-        elif any(keyword in field_name_lower for keyword in ['address', '地址', 'addr', '位置']):
+        # 地址字段优先检测，避免被单位名称误判
+        if any(keyword in field_name_lower for keyword in ['address', '地址', 'addr', '位置']):
             return FieldType.ADDRESS
+        elif any(keyword in field_name_lower for keyword in ['name', '名称', '单位', 'unit', 'company']) and '地址' not in field_name_lower:
+            return FieldType.UNIT_NAME
         elif any(keyword in field_name_lower for keyword in ['person', '人名', '姓名', '法人', '联系人']):
             return FieldType.PERSON_NAME
         elif any(keyword in field_name_lower for keyword in ['phone', '电话', 'tel', '手机']):
@@ -515,47 +516,42 @@ class UniversalTextMatcher:
         return list(set(keywords))
     
     def _extract_address_keywords(self, value: str) -> List[str]:
-        """地址关键词提取"""
+        """地址关键词提取（高性能优化版）"""
         if not value:
             return []
         
-        # 【修复】先进行地址标准化，确保与索引表中的关键词一致
-        from .address_normalizer import normalize_address_for_matching
-        normalized_value = normalize_address_for_matching(value)
-        
-        # 提取地址组件
+        # 跳过复杂的地址标准化，直接从原始地址提取关键词
         keywords = []
         
         # 省市区提取
-        province_match = re.search(r'([\u4e00-\u9fff]{2,}省)', normalized_value)
+        province_match = re.search(r'([\u4e00-\u9fff]{2,}省)', value)
         if province_match:
             keywords.append(province_match.group(1))
         
-        city_match = re.search(r'([\u4e00-\u9fff]{2,}市)', normalized_value)
+        city_match = re.search(r'([\u4e00-\u9fff]{2,}市)', value)
         if city_match:
             keywords.append(city_match.group(1))
         
-        district_match = re.search(r'([\u4e00-\u9fff]{2,}[区县])', normalized_value)
+        district_match = re.search(r'([\u4e00-\u9fff]{2,}[区县])', value)
         if district_match:
             keywords.append(district_match.group(1))
         
-        # 【关键修复】镇级行政区划提取 - 这是解决庄行镇vs柘林镇问题的关键
-        town_match = re.search(r'([\u4e00-\u9fff]{2,}镇)', normalized_value)
+        # 镇级行政区划提取
+        town_match = re.search(r'([\u4e00-\u9fff]{2,}镇)', value)
         if town_match:
             keywords.append(town_match.group(1))
-            logger.debug(f"提取到镇名关键词: {town_match.group(1)}")
         
-        # 街道路名提取 - 修复：提取具体街道名而不是带前缀的长字符串
-        street_matches = re.findall(r'([^省市区县镇]{2,8}[路街道巷弄])', normalized_value)
-        keywords.extend(street_matches)
+        # 街道路名提取（简化版）
+        street_matches = re.findall(r'([^省市区县镇]{2,6}[路街道巷弄])', value)
+        keywords.extend(street_matches[:3])  # 只取前3个，避免过多关键词
         
-        # 门牌号提取
-        number_matches = re.findall(r'(\d+号?)', normalized_value)
-        keywords.extend(number_matches)
+        # 门牌号提取（简化版）
+        number_matches = re.findall(r'(\d+号?)', value)
+        keywords.extend(number_matches[:2])  # 只取前2个门牌号
         
-        # 建筑物名称提取
-        building_matches = re.findall(r'([\u4e00-\u9fff]{2,}[大厦楼宇院])', normalized_value)
-        keywords.extend(building_matches)
+        # 建筑物名称提取（简化版）
+        building_matches = re.findall(r'([\u4e00-\u9fff]{2,6}[大厦楼宇院])', value)
+        keywords.extend(building_matches[:2])  # 只取前2个建筑物名称
         
         return list(set(keywords))
     

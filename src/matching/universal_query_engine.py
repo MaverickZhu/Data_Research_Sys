@@ -71,18 +71,19 @@ class UniversalQueryEngine:
             logger.warning(f"初始化地址相似度计算器失败: {e}")
             self.similarity_calculator = None
         
-        # 查询配置
+        # 查询配置（高性能优化）
         self.query_config = {
             'enable_batch_query': True,
-            'batch_size': 100,
-            'max_workers': 16,
+            'batch_size': 500,  # 增加批量大小，减少数据库查询次数
+            'max_workers': 32,  # 增加并发数
             'enable_parallel': True,
             'enable_cache': True,
             'cache_ttl': 3600,
             'default_similarity_threshold': 0.6,
-            'max_candidates_per_field': 50,
-            'query_timeout': 30.0,  # 30秒超时
-            'enable_auto_index_creation': True
+            'max_candidates_per_field': 30,  # 减少候选数量，提升速度
+            'query_timeout': 60.0,  # 增加超时时间
+            'enable_auto_index_creation': True,
+            'enable_fast_mode': True  # 启用快速模式
         }
         
         # 缓存系统
@@ -218,8 +219,8 @@ class UniversalQueryEngine:
                                    keywords: List[str], config, similarity_threshold: float) -> List[Dict]:
         """执行单字段聚合查询"""
         try:
-            # 构建索引表名（兼容现有索引表命名）
-            index_table_name = f"{target_table}_address_keywords"
+            # 构建索引表名（根据字段名动态生成）
+            index_table_name = f"{target_table}_{target_field}_keywords"
             
             # 检查索引表是否存在
             if index_table_name not in self.db.list_collection_names():
@@ -579,7 +580,8 @@ class UniversalQueryEngine:
                                         all_keywords: List[str], config, record_keywords: Dict) -> List[Dict]:
         """执行批量聚合查询"""
         try:
-            index_table_name = f"{target_table}_address_keywords"
+            # 构建索引表名（根据字段名动态生成）
+            index_table_name = f"{target_table}_{target_field}_keywords"
             
             # 检查索引表
             if index_table_name not in self.db.list_collection_names():
@@ -653,7 +655,7 @@ class UniversalQueryEngine:
     
     def _calculate_address_similarity(self, addr1: str, addr2: str) -> float:
         """
-        计算地址相似度
+        计算地址相似度（高性能优化版）
         
         Args:
             addr1: 地址1
@@ -662,26 +664,26 @@ class UniversalQueryEngine:
         Returns:
             float: 相似度分数 (0-1)
         """
-        if not self.similarity_calculator:
-            logger.warning("地址相似度计算器未初始化，使用简单字符串匹配")
-            # 简单的字符串相似度作为后备
-            if addr1 == addr2:
-                return 1.0
-            # 使用简单的字符重叠比例
-            addr1_chars = set(addr1)
-            addr2_chars = set(addr2)
-            intersection = len(addr1_chars.intersection(addr2_chars))
-            union = len(addr1_chars.union(addr2_chars))
-            return intersection / max(union, 1)
+        # 快速预检查
+        if not addr1 or not addr2:
+            return 0.0
+        if addr1 == addr2:
+            return 1.0
+            
+        # 使用简单高效的字符重叠比例，避免复杂的地址标准化
+        addr1_chars = set(addr1)
+        addr2_chars = set(addr2)
+        intersection = len(addr1_chars.intersection(addr2_chars))
+        union = len(addr1_chars.union(addr2_chars))
         
-        try:
-            # 使用专门的地址相似度计算
-            similarity = self.similarity_calculator.calculate_address_similarity(addr1, addr2)
-            return similarity
-        except Exception as e:
-            logger.error(f"地址相似度计算异常: {e}")
-            # 回退到简单匹配
-            return 0.5 if addr1 and addr2 else 0.0
+        # 基础相似度
+        base_similarity = intersection / max(union, 1)
+        
+        # 快速关键词匹配加权
+        if any(keyword in addr1 and keyword in addr2 for keyword in ['区', '市', '路', '街', '号']):
+            base_similarity *= 1.2  # 提升有共同地址关键词的相似度
+            
+        return min(base_similarity, 1.0)
     
     def _merge_batch_results(self, batch_records: List[Dict], batch_results: List[Dict], 
                            mappings: List[Dict]) -> Dict[str, QueryResult]:

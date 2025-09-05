@@ -578,11 +578,30 @@ class UserDataMatcher:
             target_field = mapping.get('target_field')
             target_table = mapping.get('target_table')
             
-            # 智能检测字段类型
-            is_address = self._is_address_field(source_field, target_field)
-            field_type = FieldType.ADDRESS if is_address else FieldType.TEXT
+            # 智能检测字段类型 - 优先使用UniversalTextMatcher的检测结果
+            field_type = FieldType.TEXT
+            
+            # 首先尝试基于字段名的智能检测
+            if source_field:
+                source_lower = source_field.lower()
+                if '地址' in source_lower or 'address' in source_lower or 'addr' in source_lower:
+                    field_type = FieldType.ADDRESS
+                elif '名称' in source_lower or 'name' in source_lower or '单位' in source_lower:
+                    # 如果同时包含地址关键词，优先识别为地址
+                    if '地址' not in source_lower:
+                        field_type = FieldType.UNIT_NAME
+            
+            # 如果还是TEXT，检查目标字段
+            if field_type == FieldType.TEXT and target_field:
+                target_lower = target_field.lower()
+                if '地址' in target_lower or 'address' in target_lower or 'addr' in target_lower:
+                    field_type = FieldType.ADDRESS
+                elif '名称' in target_lower or 'name' in target_lower or '单位' in target_lower:
+                    if '地址' not in target_lower:
+                        field_type = FieldType.UNIT_NAME
             
             # 创建字段处理配置
+            is_address = (field_type == FieldType.ADDRESS)
             field_config = FieldProcessingConfig(
                 field_type=field_type,
                 preprocessing_func='_preprocess_address' if is_address else '_preprocess_text',
@@ -741,23 +760,19 @@ class UserDataMatcher:
     
     def _extract_address_keywords_simple(self, address: str) -> List[str]:
         """
-        提取地址关键词（精简高效版）
-        只提取最重要的地址组件用于预过滤查询
-        
-        【关键修复】先进行地址标准化，确保与索引表中的关键词一致
+        提取地址关键词（高性能优化版）
+        跳过复杂的地址标准化，直接提取关键词
         """
         if not address:
             return []
         
-        # 【修复】先进行地址标准化，确保与索引表中的关键词一致
+        # 【重要】恢复地址标准化 - 这是地址匹配的核心功能
         from .address_normalizer import normalize_address_for_matching
         normalized_address = normalize_address_for_matching(address)
         
         keywords = []
         
-        # 【修复】使用与UniversalTextMatcher相同的关键词提取逻辑
-        
-        # 1. 省市区提取
+        # 1. 省市区提取（使用标准化后的地址）
         province_match = re.search(r'([\u4e00-\u9fff]{2,}省)', normalized_address)
         if province_match:
             keywords.append(province_match.group(1))
@@ -770,33 +785,20 @@ class UserDataMatcher:
         if district_match:
             keywords.append(district_match.group(1))
         
-        # 2. 街道路名提取
-        street_matches = re.findall(r'([^省市区县]{2,8}[路街道巷弄])', normalized_address)
-        keywords.extend(street_matches)
+        # 2. 街道路名提取（使用标准化后的地址）
+        street_matches = re.findall(r'([^省市区县]{2,6}[路街道巷弄])', normalized_address)
+        keywords.extend(street_matches[:3])  # 增加到3个，提升匹配率
         
-        # 3. 门牌号提取
+        # 3. 门牌号提取（使用标准化后的地址）
         number_matches = re.findall(r'(\d+号?)', normalized_address)
-        keywords.extend(number_matches)
+        keywords.extend(number_matches[:3])  # 增加到3个，提升匹配率
         
-        # 4. 省市区组合（重要：确保与索引表一致）
-        if city_match and district_match:
-            # 避免重复的市名
-            city_name = city_match.group(1)
-            district_name = district_match.group(1)
-            if not district_name.startswith(city_name):
-                combined = city_name + district_name
-                keywords.append(combined)
+        # 4. 建筑物名称提取（使用标准化后的地址）
+        building_matches = re.findall(r'([\u4e00-\u9fff]{2,6}[大厦楼宇院])', normalized_address)
+        keywords.extend(building_matches[:2])  # 添加建筑物关键词
         
-        # 去重并过滤短词
-        unique_keywords = []
-        seen = set()
-        for keyword in keywords:
-            if keyword and len(keyword) >= 3 and keyword not in seen:
-                unique_keywords.append(keyword)
-                seen.add(keyword)
-        
-        # 限制关键词数量（避免查询过于复杂）
-        return unique_keywords[:5]
+        # 去重并返回
+        return list(set(keywords))
     
     def _get_address_candidates_from_index(self, source_address: str, target_table: str, target_field: str) -> List[Dict]:
         """
@@ -809,8 +811,8 @@ class UserDataMatcher:
             if not source_keywords:
                 return []
             
-            # 构建索引表名（基于目标表名）
-            keyword_collection_name = f"{target_table}_address_keywords"
+            # 构建索引表名（根据字段名动态生成）
+            keyword_collection_name = f"{target_table}_{target_field}_keywords"
             
             # 检查索引表是否存在
             db = self.db_manager.get_db()
@@ -1881,18 +1883,31 @@ class UserDataMatcher:
                 # 低于阈值的字段不参与计算，记录为0分
                 logger.info(f"🚫 字段 {source_field}->{target_field} 相似度 {field_similarity:.3f} 低于阈值 {field_threshold:.3f}，跳过匹配")
         
-        # 【关键修复】计算权重化平均相似度
-        # 只计算通过阈值的字段的权重总和
-        total_weight = 0.0
-        for mapping in mappings:
-            field_key = f"{mapping['source_field']}->{mapping['target_field']}"
-            field_similarity = field_scores.get(field_key, 0.0)
-            field_threshold = mapping.get('similarity_score', 0.7)
-            
-            if field_similarity >= field_threshold:
-                total_weight += mapping.get('weight', 1.0)
+        # 【关键修复】正确的权重化相似度计算
+        # 计算所有字段的权重总和（不仅仅是通过阈值的字段）
+        total_weight = sum(mapping.get('weight', 1.0) for mapping in mappings)
         
+        # 权重化平均相似度 = 加权总分 / 总权重
         avg_similarity = total_score / total_weight if total_weight > 0 else 0.0
+        
+        # 【核心逻辑修复】主要字段低相似度时，直接跳过匹配
+        # 检查主要字段的相似度，如果过低则直接返回0
+        primary_field_threshold = 0.4  # 主要字段最低阈值40%
+        
+        for mapping in mappings:
+            if mapping.get('field_priority') == 'primary':
+                field_key = f"{mapping['source_field']}->{mapping['target_field']}"
+                field_similarity = field_scores.get(field_key, 0.0)
+                
+                # 如果主要字段相似度低于40%，直接跳过整个匹配
+                if field_similarity < primary_field_threshold:
+                    logger.info(f"🚫 主要字段 {field_key} 相似度 {field_similarity:.3f} 低于关键阈值 {primary_field_threshold:.3f}，跳过整个匹配")
+                    return 0.0, [], {
+                        'field_scores': field_scores,
+                        'total_fields': len(mappings),
+                        'matched_field_count': 0,
+                        'skip_reason': f'主要字段相似度过低 ({field_similarity:.3f} < {primary_field_threshold:.3f})'
+                    }
         
         details = {
             'field_scores': field_scores,

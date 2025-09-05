@@ -216,6 +216,7 @@ class SimilarityCalculator:
             return 0.0
         
         # 地址标准化预处理
+        # 恢复地址标准化 - 这是地址匹配的核心功能
         from .address_normalizer import normalize_address_for_matching
         normalized_addr1 = normalize_address_for_matching(addr1)
         normalized_addr2 = normalize_address_for_matching(addr2)
@@ -476,6 +477,7 @@ class SimilarityCalculator:
             normalized_val2 = val2.strip() if val2 else ""
         else:
             # 对于其他组件，使用完整的地址标准化
+            # 恢复地址标准化 - 这是地址匹配的核心功能
             from .address_normalizer import normalize_address_for_matching
             normalized_val1 = normalize_address_for_matching(val1) if val1 else ""
             normalized_val2 = normalize_address_for_matching(val2) if val2 else ""

@@ -68,29 +68,29 @@ class DatabaseManager:
             # 获取连接池配置，使用更保守的默认值
             pool_config = self.mongodb_config.get('connection_pool', {})
             
-            # 优化连接参数，防止连接耗尽
+            # 优化连接参数，使用更保守和稳定的配置
             self._mongo_client = MongoClient(
                 self.mongodb_config.get('uri', 'mongodb://localhost:27017/'),
-                # 连接池配置 - 更保守的设置
-                maxPoolSize=pool_config.get('max_pool_size', 500),  # 减少最大连接数
-                minPoolSize=pool_config.get('min_pool_size', 20),   # 增加最小连接数
-                maxIdleTimeMS=pool_config.get('max_idle_time_ms', 60000),  # 增加空闲时间
+                # 连接池配置 - 超保守的设置，防止MongoDB崩溃
+                maxPoolSize=pool_config.get('max_pool_size', 3),   # 从15进一步降到3
+                minPoolSize=pool_config.get('min_pool_size', 1),    # 从2降到1
+                maxIdleTimeMS=pool_config.get('max_idle_time_ms', 30000),  # 从15秒增加到30秒
                 
-                # 超时配置 - 更长的超时时间
-                connectTimeoutMS=pool_config.get('connect_timeout_ms', 30000),  # 30秒连接超时
-                serverSelectionTimeoutMS=pool_config.get('server_selection_timeout_ms', 60000),  # 60秒服务器选择超时
-                socketTimeoutMS=pool_config.get('socket_timeout_ms', 120000),  # 2分钟socket超时
+                # 超时配置 - 适中的超时时间
+                connectTimeoutMS=pool_config.get('connect_timeout_ms', 20000),  # 从30秒降到20秒
+                serverSelectionTimeoutMS=pool_config.get('server_selection_timeout_ms', 30000),  # 从60秒降到30秒
+                socketTimeoutMS=pool_config.get('socket_timeout_ms', 60000),  # 从120秒降到60秒
                 
-                # 新增配置 - 防止连接问题
-                waitQueueTimeoutMS=pool_config.get('wait_queue_timeout_ms', 60000),  # 等待队列超时
-                maxConnecting=pool_config.get('max_connecting', 20),  # 最大并发连接数
+                # 新增配置 - 防止连接风暴
+                waitQueueTimeoutMS=pool_config.get('wait_queue_timeout_ms', 15000),  # 从30秒降到15秒
+                maxConnecting=pool_config.get('max_connecting', 1),  # 从2降到1
                 
-                # 重连配置
-                retryWrites=True,  # 启用重试写入
-                retryReads=True,   # 启用重试读取
+                # 重连配置 - 禁用自动重试，由我们手动控制
+                retryWrites=False,  # 禁用重试写入，避免连接风暴
+                retryReads=False,   # 禁用重试读取，避免连接风暴
                 
-                # 心跳配置
-                heartbeatFrequencyMS=10000,  # 10秒心跳间隔
+                # 心跳配置 - 增加心跳间隔，减少网络负载
+                heartbeatFrequencyMS=30000,  # 从10秒增加到30秒
                 
                 # 事件监听 - 用于监控连接状态
                 event_listeners=[]  # 可以后续添加事件监听器
@@ -178,7 +178,7 @@ class DatabaseManager:
             return False
     
     def _reconnect_mongodb(self) -> bool:
-        """重新连接MongoDB"""
+        """重新连接MongoDB - 增加重连间隔，避免连接风暴"""
         try:
             logger.info("尝试重新连接MongoDB...")
             
@@ -189,16 +189,23 @@ class DatabaseManager:
                 except:
                     pass
             
+            # 等待一段时间再重连，避免连接风暴
+            import time
+            time.sleep(2)  # 等待2秒
+            
             # 重新建立连接
             self._connect_mongodb()
             return True
         except Exception as e:
             logger.error(f"MongoDB重连失败: {e}")
+            # 重连失败后等待更长时间
+            import time
+            time.sleep(5)  # 等待5秒
             return False
     
     def get_collection(self, collection_name: str) -> Collection:
         """
-        获取MongoDB集合 - 增强版本，支持自动重连
+        获取MongoDB集合 - 增强版本，支持自动重连，但限制重连频率
         
         Args:
             collection_name: 集合名称
@@ -206,9 +213,22 @@ class DatabaseManager:
         Returns:
             Collection: MongoDB集合对象
         """
+        # 添加重连限制，避免频繁重连
+        if not hasattr(self, '_last_reconnect_time'):
+            self._last_reconnect_time = 0
+        
+        import time
+        current_time = time.time()
+        
         # 检查连接健康状态
         if not self._check_mongodb_connection():
+            # 如果距离上次重连不足10秒，直接抛出异常
+            if current_time - self._last_reconnect_time < 10:
+                raise Exception("MongoDB连接不健康，重连过于频繁，请稍后重试")
+            
             logger.warning("MongoDB连接不健康，尝试重连...")
+            self._last_reconnect_time = current_time
+            
             if not self._reconnect_mongodb():
                 raise Exception("MongoDB连接失败且重连失败")
         

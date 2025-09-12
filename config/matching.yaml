@@ -1,108 +1,94 @@
-# 数据匹配算法配置
-
-# 精确匹配字段配置
+address_similarity:
+  city_weight: 0.3
+  detail_weight: 0.2
+  district_weight: 0.3
+  enable_segmentation: true
+  province_weight: 0.2
+batch_processing:
+  batch_size: 50
+  enable_circuit_breaker: true
+  max_workers: 4
+  retry_times: 3
+  timeout: 300
 exact_match:
   fields:
-    unit_name:
-      source_field: "UNIT_NAME"      # 安全排查系统-单位名称
-      target_field: "dwmc"           # 消防监督系统-单位名称
-      priority: 2
     credit_code:
-      source_field: "CREDIT_CODE"    # 安全排查系统-统一社会信用代码
-      target_field: "tyshxydm"       # 消防监督系统-统一社会信用代码
-      priority: 1                    # 最高优先级
-
-# 模糊匹配字段权重配置
-fuzzy_match:
-  # 相似度阈值
-  similarity_threshold: 0.75
-  
-  # 各字段权重配置
-  fields:
+      priority: 1
+      source_field: CREDIT_CODE
+      target_field: tyshxydm
     unit_name:
-      source_field: "UNIT_NAME"      # 安全排查系统-单位名称
-      target_field: "dwmc"           # 消防监督系统-单位名称
-      weight: 0.4
-      match_type: "string"
-      
+      priority: 2
+      source_field: UNIT_NAME
+      target_field: dwmc
+fuzzy_match:
+  enable_entity_type_conflict_detection: true
+  enable_industry_conflict_detection: true
+  # 关键字段评分优化配置
+  critical_field_validation:
+    enabled: true  # 是否启用关键字段验证
+    minimum_threshold: 0.4  # 关键字段最低评分阈值
+    minimum_field_count: 2  # 触发验证的最少关键字段数量
+  fields:
     address:
-      source_field: "ADDRESS"        # 安全排查系统-单位地址
-      target_field: "dwdz"           # 消防监督系统-单位地址
+      match_type: address
+      source_field: ADDRESS
+      target_field: dwdz
       weight: 0.3
-      match_type: "address"
-      
     legal_person:
-      source_field: "LEGAL_PEOPLE"   # 安全排查系统-法定代表人
-      target_field: "fddbr"          # 消防监督系统-法定代表人
+      match_type: string
+      source_field: LEGAL_PEOPLE
+      target_field: fddbr
       weight: 0.15
-      match_type: "string"
-      
     security_person:
-      source_field: "SECURITY_PEOPLE" # 安全排查系统-消防安全管理人
-      target_field: "xfaqglr"        # 消防监督系统-消防安全管理人
+      match_type: string
+      source_field: SECURITY_PEOPLE
+      target_field: xfaqglr
       weight: 0.15
-      match_type: "string"
-
-# 字符串相似度算法配置
+    unit_name:
+      match_type: string
+      source_field: UNIT_NAME
+      target_field: dwmc
+      weight: 0.4
+  reject_threshold: 0.25
+  similarity_threshold: 0.6
+  suspicious_threshold: 0.4
+graph_matching:
+  attribute_weights:
+    address: 0.6
+    legal_person: 1.0
+  enabled: true
+  initial_build_limit: 5000
+logging:
+  level: INFO
+  log_match_decisions: true
+  log_similarity_details: true
+mongodb_optimization:
+  connect_timeout_ms: 10000
+  max_pool_size: 50
+  min_pool_size: 5
+  server_selection_timeout_ms: 5000
+  socket_timeout_ms: 30000
+numeric_similarity:
+  building_area:
+    max_diff: 0.2
+    method: percentage_diff
+phone_similarity:
+  ignore_area_code: false
+  match_mobile_landline: true
+  normalize: true
+result_saving:
+  backup_interval: 1000
+  save_interval: 10
 string_similarity:
   algorithms:
-    - name: "levenshtein"
-      weight: 0.3
-    - name: "jaro_winkler"  
-      weight: 0.3
-    - name: "cosine"
-      weight: 0.4
-      
-  # 中文处理配置
+  - name: levenshtein
+    weight: 0.3
+  - name: jaro_winkler
+    weight: 0.3
+  - name: cosine
+    weight: 0.4
   chinese_processing:
-    enable_pinyin: true              # 启用拼音相似度
-    enable_jieba: true               # 启用结巴分词
-    remove_punctuation: true         # 移除标点符号
-    normalize_spaces: true           # 标准化空格
-
-# 数值相似度配置
-numeric_similarity:
-  # 建筑面积相似度计算
-  building_area:
-    method: "percentage_diff"        # 百分比差异法
-    max_diff: 0.2                   # 最大允许20%差异
-    
-# 电话号码相似度配置
-phone_similarity:
-  normalize: true                    # 标准化电话号码格式
-  ignore_area_code: false           # 是否忽略区号
-  match_mobile_landline: true       # 手机和座机交叉匹配
-
-# 地址相似度配置  
-address_similarity:
-  enable_segmentation: true         # 启用地址分段
-  province_weight: 0.2             # 省份权重
-  city_weight: 0.3                 # 城市权重  
-  district_weight: 0.3             # 区县权重
-  detail_weight: 0.2               # 详细地址权重
-
-# 批处理配置
-batch_processing:
-  batch_size: 100                   # 每批处理记录数
-  max_workers: 8                    # 最大工作线程数
-  timeout: 600                      # 单批处理超时时间(秒)
-  retry_times: 3                    # 失败重试次数
-  
-# 结果保存配置
-result_saving:
-  save_interval: 10                 # 每处理10条记录保存一次
-  backup_interval: 1000             # 每处理1000条记录备份一次
-  
-# 日志配置
-logging:
-  level: "INFO"
-  log_similarity_details: true      # 记录详细相似度计算过程
-  log_match_decisions: true         # 记录匹配决策过程
-
-# 新增图匹配配置
-graph_matching:
-  enabled: true             # 是否启用图匹配器作为二次验证
-  initial_build_limit: 5000 # 初始化时预加载的记录数，用于构建热启动图
-  attribute_weights:
-    address: 0.6            # 共享地址的基础权重
-    legal_person: 1.0       # 共享法人的基础权重
+    enable_jieba: true
+    enable_pinyin: true
+    normalize_spaces: true
+    remove_punctuation: true

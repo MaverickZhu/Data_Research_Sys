@@ -1,0 +1,66 @@
+# MongoDB性能优化配置
+
+# 连接池优化
+connection_pool:
+  max_pool_size: 50          # 减小最大连接池大小，避免资源耗尽
+  min_pool_size: 5           # 最小连接池大小
+  max_idle_time_ms: 30000    # 连接最大空闲时间30秒
+  wait_queue_timeout_ms: 5000 # 等待队列超时5秒
+
+# 超时设置优化
+timeouts:
+  connect_timeout_ms: 10000   # 连接超时10秒
+  server_selection_timeout_ms: 5000  # 服务器选择超时5秒
+  socket_timeout_ms: 30000    # Socket超时30秒
+  max_staleness_seconds: 120  # 最大延迟120秒
+
+# 批处理优化
+batch_processing:
+  batch_size: 50             # 减小批次大小，从100降到50
+  max_workers: 4             # 减少并发工作线程，从8降到4
+  processing_timeout: 300    # 单批处理超时5分钟
+  retry_attempts: 3          # 重试次数
+  retry_delay: 2.0          # 重试延迟2秒
+
+# 内存优化
+memory_optimization:
+  cursor_batch_size: 100     # 游标批次大小
+  max_bson_size: 16777216   # 最大BSON文档大小16MB
+  enable_compression: true   # 启用压缩
+  compression_level: 6       # 压缩级别
+
+# 查询优化
+query_optimization:
+  enable_query_cache: true   # 启用查询缓存
+  max_time_ms: 60000        # 查询最大执行时间60秒
+  allow_partial_results: false # 不允许部分结果
+  read_preference: "primary" # 读取偏好设置为主节点
+
+# 索引优化建议
+index_recommendations:
+  - collection: "source_data"
+    indexes:
+      - fields: ["UNIT_NAME", "ADDRESS"]
+        options: {"background": true}
+      - fields: ["CREDIT_CODE"]
+        options: {"unique": true, "background": true}
+  
+  - collection: "target_data"
+    indexes:
+      - fields: ["dwmc", "dwdz"]
+        options: {"background": true}
+      - fields: ["tyshxydm"]
+        options: {"unique": true, "background": true}
+
+# 监控配置
+monitoring:
+  enable_profiling: true     # 启用性能分析
+  slow_operation_threshold: 1000  # 慢操作阈值1秒
+  log_slow_queries: true     # 记录慢查询
+  
+# 错误处理
+error_handling:
+  auto_reconnect: true       # 自动重连
+  max_reconnect_attempts: 5  # 最大重连次数
+  reconnect_delay: 5.0      # 重连延迟5秒
+  circuit_breaker_threshold: 10  # 熔断器阈值

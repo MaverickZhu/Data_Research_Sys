@@ -1,0 +1,38 @@
+# 最终优化配置
+# 2025年9月8日 - 解决MongoDB崩溃和匹配精度问题
+
+# MongoDB性能优化
+mongodb:
+  max_pool_size: 50
+  min_pool_size: 5
+  batch_size: 50
+  max_workers: 4
+  connection_timeout: 10000
+  socket_timeout: 30000
+
+# 匹配阈值优化
+matching_thresholds:
+  similarity_threshold: 0.6    # 提高匹配阈值
+  suspicious_threshold: 0.4    # 疑似匹配阈值
+  reject_threshold: 0.25       # 直接拒绝阈值
+
+# 冲突检测配置
+conflict_detection:
+  enable_core_name_conflict: true
+  enable_industry_conflict: true
+  enable_entity_type_conflict: true
+  
+  # 核心名称冲突惩罚
+  core_name_penalty: 0.95
+  
+  # 行业冲突惩罚
+  industry_conflict_penalty: 0.9
+  
+  # 企业性质冲突惩罚
+  entity_type_penalty: 0.8
+
+# 性能监控
+performance:
+  enable_monitoring: true
+  log_slow_queries: true
+  slow_query_threshold: 5.0    # 秒

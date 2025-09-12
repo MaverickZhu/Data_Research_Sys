@@ -469,26 +469,59 @@ class UniversalQueryEngine:
         """并行执行批量查询"""
         results = []
         
-        with ThreadPoolExecutor(max_workers=self.query_config['max_workers']) as executor:
-            future_to_plan = {
-                executor.submit(self._execute_single_batch_query, plan): plan
-                for plan in query_plan
-            }
-            
-            for future in as_completed(future_to_plan):
-                plan = future_to_plan[future]
-                try:
-                    result = future.result(timeout=self.query_config['query_timeout'])
-                    results.append(result)
-                except Exception as e:
-                    logger.error(f"并行批量查询失败: {plan['target_table']}.{plan['target_field']} - {str(e)}")
-                    results.append({
-                        'target_table': plan['target_table'],
-                        'target_field': plan['target_field'],
-                        'status': 'error',
-                        'error': str(e),
-                        'record_results': {}
-                    })
+        try:
+            with ThreadPoolExecutor(max_workers=self.query_config['max_workers']) as executor:
+                # 检查解释器状态
+                import sys
+                if hasattr(sys, '_getframe') and sys.is_finalizing():
+                    logger.warning("解释器正在关闭，降级到顺序执行")
+                    return self._execute_batch_queries_sequential(query_plan)
+                
+                future_to_plan = {}
+                
+                # 安全地提交任务
+                for plan in query_plan:
+                    try:
+                        future = executor.submit(self._execute_single_batch_query, plan)
+                        future_to_plan[future] = plan
+                    except RuntimeError as e:
+                        if "cannot schedule new futures after interpreter shutdown" in str(e):
+                            logger.warning("检测到解释器关闭，停止提交新任务")
+                            break
+                        else:
+                            raise
+                
+                # 处理已提交的任务
+                for future in as_completed(future_to_plan):
+                    plan = future_to_plan[future]
+                    try:
+                        result = future.result(timeout=self.query_config['query_timeout'])
+                        results.append(result)
+                    except Exception as e:
+                        error_msg = str(e)
+                        if "cannot schedule new futures after interpreter shutdown" in error_msg:
+                            logger.warning(f"任务执行中断（解释器关闭）: {plan['target_table']}.{plan['target_field']}")
+                        else:
+                            logger.error(f"并行批量查询失败: {plan['target_table']}.{plan['target_field']} - {error_msg}")
+                        
+                        results.append({
+                            'target_table': plan['target_table'],
+                            'target_field': plan['target_field'],
+                            'status': 'error',
+                            'error': error_msg,
+                            'record_results': {}
+                        })
+        
+        except RuntimeError as e:
+            if "cannot schedule new futures after interpreter shutdown" in str(e):
+                logger.warning("ThreadPoolExecutor创建失败（解释器关闭），降级到顺序执行")
+                return self._execute_batch_queries_sequential(query_plan)
+            else:
+                raise
+        except Exception as e:
+            logger.error(f"并行执行框架异常: {str(e)}")
+            # 降级到顺序执行
+            return self._execute_batch_queries_sequential(query_plan)
         
         return results
     

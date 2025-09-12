@@ -3,15 +3,7 @@
 专门处理用户上传数据的智能匹配，复用原项目成熟算法
 """
 
-
-# 优化匹配系统导入
-from optimize_matching_system import EnhancedMatchingOptimizer, MatchingOptimization
 import logging
-# 优化匹配器导入
-from .optimized_intelligent_matcher import OptimizedIntelligentMatcher
-from .hybrid_weight_matcher import HybridWeightMatcher
-from .dual_validation_matcher import DualValidationMatcher
-
 import re
 from typing import Dict, List, Any, Optional, Tuple
 import pandas as pd
@@ -35,7 +27,6 @@ from .slice_enhanced_matcher import SliceEnhancedMatcher
 from .universal_query_engine import UniversalQueryEngine
 from .hierarchical_matcher import HierarchicalMatcher
 from .intelligent_unit_name_matcher import IntelligentUnitNameMatcher
-from .address_similarity_filter import AddressSimilarityFilter, AddressFilterConfig
 
 logger = logging.getLogger(__name__)
 
@@ -81,20 +72,6 @@ class UserDataMatcher:
         # 初始化通用查询引擎（替换58秒瓶颈）
         self.universal_query_engine = UniversalQueryEngine(db_manager)
         
-        # 初始化地址相似度过滤器
-        address_filter_config = AddressFilterConfig(
-            min_address_similarity=0.3,  # 最小地址相似度阈值
-            address_weight=0.4,  # 地址权重
-            strict_mode=True  # 严格模式
-        )
-        self.address_filter = AddressSimilarityFilter(address_filter_config)
-        
-        # 初始化双重验证匹配器
-        self.dual_validation_matcher = DualValidationMatcher(config)
-        
-        # 加载关键字段验证配置
-        self._load_critical_field_validation_config()
-        
         # 匹配任务缓存
         self.running_tasks = {}
         self.stop_flags = {}  # 任务停止标志
@@ -110,28 +87,6 @@ class UserDataMatcher:
         
         logger.info("用户数据智能匹配器初始化完成")
     
-
-        # 初始化优化匹配器
-        try:
-            self.optimized_matcher = OptimizedIntelligentMatcher()
-            self.use_optimized_matching = True
-            logger.info("优化匹配器初始化成功")
-        except Exception as e:
-            logger.warning(f"优化匹配器初始化失败，使用默认匹配器: {e}")
-            self.optimized_matcher = None
-            self.use_optimized_matching = False
-
-        # 初始化优化配置
-        self.optimization_config = MatchingOptimization(
-            batch_size=50,
-            max_workers=4,
-            connection_pool_size=50,
-            similarity_threshold=0.6,
-            suspicious_threshold=0.4,
-            reject_threshold=0.25
-        )
-        self.optimizer = EnhancedMatchingOptimizer(self.optimization_config)
-
     def _get_default_config(self) -> Dict[str, Any]:
         """获取默认配置"""
         return {
@@ -227,44 +182,6 @@ class UserDataMatcher:
         except Exception as e:
             logger.error(f"匹配算法初始化失败: {str(e)}")
             raise
-    
-    def _load_critical_field_validation_config(self):
-        """加载关键字段验证配置"""
-        try:
-            # 从配置中读取关键字段验证设置
-            fuzzy_match_config = self.config.get('fuzzy_match', {})
-            critical_validation_config = fuzzy_match_config.get('critical_field_validation', {
-                'enabled': True,
-                'minimum_threshold': 0.4,
-                'minimum_field_count': 2
-            })
-            
-            # 设置到实例属性中
-            self.critical_validation_config = critical_validation_config
-            
-            # 也设置到双重验证匹配器中
-            if hasattr(self.dual_validation_matcher, 'critical_validation_config'):
-                self.dual_validation_matcher.critical_validation_config = critical_validation_config
-            else:
-                setattr(self.dual_validation_matcher, 'critical_validation_config', critical_validation_config)
-            
-            logger.info(f"✅ 关键字段验证配置加载完成: {critical_validation_config}")
-            
-        except Exception as e:
-            # 使用默认配置
-            default_config = {
-                'enabled': True,
-                'minimum_threshold': 0.4,
-                'minimum_field_count': 2
-            }
-            self.critical_validation_config = default_config
-            if hasattr(self.dual_validation_matcher, 'critical_validation_config'):
-                self.dual_validation_matcher.critical_validation_config = default_config
-            else:
-                setattr(self.dual_validation_matcher, 'critical_validation_config', default_config)
-            
-            logger.warning(f"关键字段验证配置加载失败，使用默认配置: {str(e)}")
-            logger.info(f"默认配置: {default_config}")
     
     def start_matching_task(self, task_config: Dict[str, Any]) -> str:
         """
@@ -561,85 +478,36 @@ class UserDataMatcher:
             # 【高性能并行处理】使用批量候选进行匹配
             max_workers = min(32, batch_size)
             
-            try:
-                with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    # 检查解释器状态
-                    import sys
-                    if hasattr(sys, '_getframe') and sys.is_finalizing():
-                        logger.warning("解释器正在关闭，降级到顺序处理")
-                        # 降级到顺序处理
-                        for source_record in batch_records:
-                            source_id = str(source_record.get('_id', ''))
-                            candidates = batch_candidates_map.get(source_id, [])
-                            try:
-                                result = self._process_single_record_with_candidates(
-                                    source_record, candidates, mappings, source_table, task_id
-                                )
-                                if result:
-                                    batch_results.append(result)
-                            except Exception as e:
-                                logger.error(f"❌ 顺序处理记录失败: {source_record.get('_id', 'Unknown')}, 错误: {e}")
-                        return batch_results
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_record = {}
+                
+                for source_record in batch_records:
+                    source_id = str(source_record.get('_id', ''))
+                    candidates = batch_candidates_map.get(source_id, [])
                     
-                    future_to_record = {}
-                    
-                    # 安全地提交任务
-                    for source_record in batch_records:
-                        source_id = str(source_record.get('_id', ''))
-                        candidates = batch_candidates_map.get(source_id, [])
+                    future = executor.submit(
+                        self._process_single_record_with_candidates,
+                        source_record, candidates, mappings, source_table, task_id
+                    )
+                    future_to_record[future] = source_record
+                
+                # 收集结果
+                processed_count = 0
+                for future in as_completed(future_to_record):
+                    source_record = future_to_record[future]
+                    try:
+                        result = future.result(timeout=10)  # 减少超时时间
+                        if result:
+                            batch_results.append(result)
+                        processed_count += 1
                         
-                        try:
-                            future = executor.submit(
-                                self._process_single_record_with_candidates,
-                                source_record, candidates, mappings, source_table, task_id
-                            )
-                            future_to_record[future] = source_record
-                        except RuntimeError as e:
-                            if "cannot schedule new futures after interpreter shutdown" in str(e):
-                                logger.warning("检测到解释器关闭，停止提交新的匹配任务")
-                                break
-                            else:
-                                raise
-                    
-                    # 收集结果
-                    processed_count = 0
-                    for future in as_completed(future_to_record):
-                        source_record = future_to_record[future]
-                        try:
-                            result = future.result(timeout=10)  # 减少超时时间
-                            if result:
-                                batch_results.append(result)
-                            processed_count += 1
+                        # 每处理500条记录报告一次进度
+                        if processed_count % 500 == 0:
+                            logger.info(f"📊 批次进度: {processed_count}/{batch_size}")
                             
-                            # 每处理500条记录报告一次进度
-                            if processed_count % 500 == 0:
-                                logger.info(f"📊 批次进度: {processed_count}/{batch_size}")
-                                
-                        except Exception as e:
-                            error_msg = str(e)
-                            if "cannot schedule new futures after interpreter shutdown" in error_msg:
-                                logger.warning(f"匹配任务执行中断（解释器关闭）: {source_record.get('_id', 'Unknown')}")
-                            else:
-                                logger.error(f"❌ 处理记录失败: {source_record.get('_id', 'Unknown')}, 错误: {error_msg}")
-                            processed_count += 1
-                            
-            except RuntimeError as e:
-                if "cannot schedule new futures after interpreter shutdown" in str(e):
-                    logger.warning("ThreadPoolExecutor创建失败（解释器关闭），降级到顺序处理")
-                    # 降级到顺序处理
-                    for source_record in batch_records:
-                        source_id = str(source_record.get('_id', ''))
-                        candidates = batch_candidates_map.get(source_id, [])
-                        try:
-                            result = self._process_single_record_with_candidates(
-                                source_record, candidates, mappings, source_table, task_id
-                            )
-                            if result:
-                                batch_results.append(result)
-                        except Exception as e:
-                            logger.error(f"❌ 顺序处理记录失败: {source_record.get('_id', 'Unknown')}, 错误: {e}")
-                else:
-                    raise
+                    except Exception as e:
+                        logger.error(f"❌ 处理记录失败: {source_record.get('_id', 'Unknown')}, 错误: {e}")
+                        processed_count += 1
         
         except Exception as e:
             logger.error(f"批量处理失败: {str(e)}")
@@ -1322,7 +1190,7 @@ class UserDataMatcher:
             
             # 匹配详细信息
             'match_details': {
-                'field_scores': (match.get('details') or {}).get('field_scores', {}),
+                'field_scores': match.get('details', {}).get('field_scores', {}),
                 'total_fields': len(mappings),
                 'matched_field_count': len(match['matched_fields']),
                 'confidence_level': self._calculate_confidence_level(match['similarity']),
@@ -1762,8 +1630,6 @@ class UserDataMatcher:
             
             # 选择匹配算法
             matcher = self._select_matcher(algorithm_type)
-            # 设置当前算法类型，用于_calculate_similarity方法判断
-            self._current_algorithm_type = algorithm_type
             
             # 批量处理源数据
             processed = 0
@@ -1864,8 +1730,7 @@ class UserDataMatcher:
             'fuzzy': self.fuzzy_matcher,
             'enhanced': self.enhanced_fuzzy_matcher,
             'optimized': self.optimized_processor if hasattr(self, 'optimized_processor') else self.enhanced_fuzzy_matcher,
-            'hybrid': self.enhanced_fuzzy_matcher,  # 混合算法使用增强模糊匹配
-            'dual_validation': 'dual_validation'  # 双重验证算法标记
+            'hybrid': self.enhanced_fuzzy_matcher  # 混合算法使用增强模糊匹配
         }
         
         return matchers.get(algorithm_type, self.enhanced_fuzzy_matcher)
@@ -1923,7 +1788,6 @@ class UserDataMatcher:
                         'similarity_score': match['similarity'],
                         'matched_fields': match['matched_fields'],
                         'match_algorithm': config.get('algorithm_type', 'enhanced'),
-                        'algorithm_used': (match.get('details') or {}).get('algorithm_used', config.get('algorithm_type', 'unknown')),
                         
                         # 源记录关键字段（用于快速查看和追溯）
                         'source_key_fields': self._extract_key_fields(source_record, mappings, 'source'),
@@ -1935,9 +1799,9 @@ class UserDataMatcher:
                         
                         # 匹配详细信息
                         'match_details': {
-                            'field_scores': (match.get('details') or {}).get('field_scores', {}),
-                            'total_fields': (match.get('details') or {}).get('total_fields', 0),
-                            'matched_field_count': (match.get('details') or {}).get('matched_field_count', 0),
+                            'field_scores': match.get('details', {}).get('field_scores', {}),
+                            'total_fields': match.get('details', {}).get('total_fields', 0),
+                            'matched_field_count': match.get('details', {}).get('matched_field_count', 0),
                             'confidence_level': self._calculate_confidence_level(match['similarity']),
                             'match_type': self._determine_match_type(match['similarity'], match['matched_fields'])
                         },
@@ -1989,10 +1853,6 @@ class UserDataMatcher:
             else:
                 logger.debug(f"❌ 匹配失败: 相似度 {similarity:.3f} < 阈值 {similarity_threshold}, 字段得分: {details.get('field_scores', {})}")
         
-        # 应用地址相似度过滤器
-        if matches:
-            matches = self.address_filter.filter_matches(matches, source_record, mappings)
-        
         # 按相似度排序，返回前N个结果
         matches.sort(key=lambda x: x['similarity'], reverse=True)
         return matches[:max_results]
@@ -2000,105 +1860,7 @@ class UserDataMatcher:
     def _calculate_similarity(self, source_record: Dict, target_record: Dict,
                             mappings: List[Dict], matcher) -> Tuple[float, List[str], Dict]:
         """
-        计算两条记录的相似度（优先使用双重验证匹配器）
-        
-        Args:
-            source_record: 源记录
-            target_record: 目标记录
-            mappings: 字段映射
-            matcher: 匹配器（可以是字符串标记或匹配器实例）
-            
-        Returns:
-            Tuple[float, List[str], Dict]: (相似度, 匹配字段列表, 详细信息)
-        """
-        try:
-            # 检查是否使用双重验证算法
-            use_dual_validation = (matcher == 'dual_validation' or 
-                                 getattr(self, '_current_algorithm_type', None) == 'dual_validation')
-            
-            if use_dual_validation:
-                logger.info("🔧 使用双重验证匹配器")
-                # 配置双重验证匹配器的字段映射（传入样本数据用于内容分析）
-                source_sample = [source_record] if source_record else []
-                target_sample = [target_record] if target_record else []
-                self.dual_validation_matcher.configure_fields(mappings, source_sample, target_sample)
-                
-                # 执行双重验证匹配
-                validation_result = self.dual_validation_matcher.validate_match(source_record, target_record)
-                
-                # 构建匹配字段列表
-                matched_fields = []
-                if validation_result.is_valid:
-                    # 从验证详情中提取通过验证的字段（安全访问）
-                    validation_details = validation_result.validation_details or {}
-                    primary_validation = validation_details.get('primary_validation', {})
-                    secondary_validation = validation_details.get('secondary_validation', {})
-                    
-                    # 添加通过验证的主要字段
-                    for field_name, score in primary_validation.get('field_scores', {}).items():
-                        if score >= self.dual_validation_matcher.primary_field_threshold:
-                            matched_fields.append(field_name)
-                
-                    # 添加通过验证的次要字段
-                    for field_name, score in secondary_validation.get('field_scores', {}).items():
-                        if score >= self.dual_validation_matcher.secondary_field_threshold:
-                            matched_fields.append(field_name)
-                
-                # 构建详细信息
-                validation_details = validation_result.validation_details or {}
-                details = {
-                    'field_scores': {},
-                    'total_fields': len(mappings),
-                    'matched_field_count': len(matched_fields),
-                    'dual_validation_result': validation_details,
-                    'rejection_reason': validation_result.rejection_reason,
-                    'algorithm_used': 'dual_validation'
-                }
-                
-                # 合并字段得分（安全访问）
-                primary_validation = validation_details.get('primary_validation') or {}
-                secondary_validation = validation_details.get('secondary_validation') or {}
-                primary_scores = primary_validation.get('field_scores', {})
-                secondary_scores = secondary_validation.get('field_scores', {})
-                details['field_scores'].update(primary_scores)
-                details['field_scores'].update(secondary_scores)
-                
-                # 记录匹配结果
-                if validation_result.is_valid:
-                    logger.debug(f"✅ 双重验证匹配成功: 最终得分 {validation_result.final_score:.3f} "
-                               f"(主要: {validation_result.primary_field_score:.3f}, "
-                               f"次要: {validation_result.secondary_field_score:.3f})")
-                else:
-                    logger.debug(f"❌ 双重验证匹配失败: {validation_result.rejection_reason}")
-                
-                return validation_result.final_score, matched_fields, details
-            
-            else:
-                # 使用传统匹配器
-                logger.info(f"🔧 使用传统匹配器: {type(matcher).__name__ if hasattr(matcher, '__name__') else str(matcher)}")
-                return self._calculate_similarity_fallback(source_record, target_record, mappings, matcher)
-            
-        except Exception as e:
-            logger.error(f"双重验证匹配计算失败: {str(e)}")
-            logger.error(f"错误详情: source_record类型={type(source_record)}, target_record类型={type(target_record)}")
-            
-            # 【关键修复】在降级前进行额外的安全检查
-            if source_record is None or target_record is None:
-                logger.error("降级逻辑：记录为None，直接返回0相似度")
-                return 0.0, [], {'fallback_mode': True, 'error': 'None记录'}
-            
-            if not isinstance(source_record, dict) or not isinstance(target_record, dict):
-                logger.error("降级逻辑：记录不是字典类型，直接返回0相似度")
-                return 0.0, [], {'fallback_mode': True, 'error': '类型错误'}
-            
-            # 降级到原有逻辑
-            logger.warning("使用fallback逻辑进行匹配")
-            return self._calculate_similarity_fallback(source_record, target_record, mappings, matcher)
-    
-    def _calculate_similarity_fallback(self, source_record: Dict, target_record: Dict,
-                                     mappings: List[Dict], matcher) -> Tuple[float, List[str], Dict]:
-        """
-        相似度计算降级逻辑（原有逻辑的简化版本）
+        计算两条记录的相似度
         
         Args:
             source_record: 源记录
@@ -2109,41 +1871,19 @@ class UserDataMatcher:
         Returns:
             Tuple[float, List[str], Dict]: (相似度, 匹配字段列表, 详细信息)
         """
-        
-        # 【加强fallback安全检查】
-        if source_record is None or target_record is None:
-            logger.error("Fallback逻辑：输入记录为None")
-            return 0.0, [], {'fallback_mode': True, 'error': 'None输入'}
-        
-        if not isinstance(source_record, dict) or not isinstance(target_record, dict):
-            logger.error(f"Fallback逻辑：输入类型错误 source={type(source_record)}, target={type(target_record)}")
-            return 0.0, [], {'fallback_mode': True, 'error': '类型错误'}
-        
-        if not mappings:
-            logger.error("Fallback逻辑：映射配置为空")
-            return 0.0, [], {'fallback_mode': True, 'error': '映射为空'}
-        
-        logger.info(f"Fallback逻辑开始：处理 {len(mappings)} 个字段映射")
-        
         total_score = 0.0
         field_scores = {}
         matched_fields = []
         
         for mapping in mappings:
-            source_field = mapping.get('source_field', '')
-            target_field = mapping.get('target_field', '')
+            source_field = mapping['source_field']
+            target_field = mapping['target_field']
             
-            if not source_field or not target_field:
-                logger.warning(f"Fallback逻辑：字段映射不完整 source={source_field}, target={target_field}")
-                continue
-            
-            # 【安全字段访问】
-            source_value = (source_record or {}).get(source_field, '')
-            target_value = (target_record or {}).get(target_field, '')
+            source_value = source_record.get(source_field, '')
+            target_value = target_record.get(target_field, '')
             
             # 跳过空值
             if not source_value or not target_value:
-                logger.debug(f"Fallback逻辑：跳过空值字段 {source_field}->{target_field}")
                 continue
             
             # 计算字段相似度
@@ -2153,63 +1893,48 @@ class UserDataMatcher:
             
             field_scores[f"{source_field}->{target_field}"] = field_similarity
             
-            # 使用35%作为最低阈值
-            field_threshold = max(mapping.get('similarity_score', 0.7), 0.35)
+            # 【关键修复】使用用户设置的阈值，而不是硬编码的0.5
+            field_threshold = mapping.get('similarity_score', 0.7)
             weight = mapping.get('weight', 1.0)
             
             # 只有超过阈值的字段才参与总分计算和匹配字段列表
             if field_similarity >= field_threshold:
                 total_score += field_similarity * weight
                 matched_fields.append(f"{source_field}->{target_field}")
+            else:
+                # 低于阈值的字段不参与计算，记录为0分
+                logger.info(f"🚫 字段 {source_field}->{target_field} 相似度 {field_similarity:.3f} 低于阈值 {field_threshold:.3f}，跳过匹配")
         
-        # 计算权重化平均相似度
+        # 【关键修复】正确的权重化相似度计算
+        # 计算所有字段的权重总和（不仅仅是通过阈值的字段）
         total_weight = sum(mapping.get('weight', 1.0) for mapping in mappings)
+        
+        # 权重化平均相似度 = 加权总分 / 总权重
         avg_similarity = total_score / total_weight if total_weight > 0 else 0.0
         
-        # 【新增优化逻辑】当关键映射字段有两个以上时，所有关键字段必须达到配置的阈值以上
-        # 从配置中读取关键字段验证参数（如果有配置管理器的话）
-        critical_validation_config = getattr(self, 'critical_validation_config', {
-            'enabled': True,
-            'minimum_threshold': 0.4,
-            'minimum_field_count': 2
-        })
+        # 【核心逻辑修复】主要字段低相似度时，直接跳过匹配
+        # 检查主要字段的相似度，如果过低则直接返回0
+        primary_field_threshold = 0.4  # 主要字段最低阈值40%
         
-        critical_field_threshold = critical_validation_config.get('minimum_threshold', 0.4)
-        minimum_field_count = critical_validation_config.get('minimum_field_count', 2)
-        validation_enabled = critical_validation_config.get('enabled', True)
-        
-        primary_fields = [m for m in mappings if m.get('field_priority') == 'primary']
-        
-        if validation_enabled and len(primary_fields) >= minimum_field_count:
-            # 检查所有关键字段是否都达到配置的阈值以上
-            low_score_primary_fields = []
-            for mapping in primary_fields:
-                source_field = mapping.get('source_field', '')
-                target_field = mapping.get('target_field', '')
-                field_key = f"{source_field}->{target_field}"
-                field_score = field_scores.get(field_key, 0.0)
+        for mapping in mappings:
+            if mapping.get('field_priority') == 'primary':
+                field_key = f"{mapping['source_field']}->{mapping['target_field']}"
+                field_similarity = field_scores.get(field_key, 0.0)
                 
-                if field_score < critical_field_threshold:
-                    low_score_primary_fields.append(f"{field_key}({field_score:.3f})")
-            
-            # 如果有关键字段低于阈值，则整体匹配失败
-            if low_score_primary_fields:
-                avg_similarity = 0.0
-                matched_fields = []
-                logger.info(f"🚫 Fallback多关键字段匹配失败: 关键字段评分不足(需≥{critical_field_threshold}): {', '.join(low_score_primary_fields)}")
-            else:
-                logger.info(f"✅ Fallback多关键字段匹配成功: 所有{len(primary_fields)}个关键字段均≥{critical_field_threshold}")
-        
-        # 应用35%最终阈值
-        if avg_similarity < 0.35:
-            avg_similarity = 0.0
-            matched_fields = []
+                # 如果主要字段相似度低于40%，直接跳过整个匹配
+                if field_similarity < primary_field_threshold:
+                    logger.info(f"🚫 主要字段 {field_key} 相似度 {field_similarity:.3f} 低于关键阈值 {primary_field_threshold:.3f}，跳过整个匹配")
+                    return 0.0, [], {
+                        'field_scores': field_scores,
+                        'total_fields': len(mappings),
+                        'matched_field_count': 0,
+                        'skip_reason': f'主要字段相似度过低 ({field_similarity:.3f} < {primary_field_threshold:.3f})'
+                    }
         
         details = {
             'field_scores': field_scores,
             'total_fields': len(mappings),
-            'matched_field_count': len(matched_fields),
-            'fallback_mode': True
+            'matched_field_count': len(matched_fields)
         }
         
         return avg_similarity, matched_fields, details
@@ -2241,13 +1966,15 @@ class UserDataMatcher:
                 logger.debug(f"地址语义匹配: {source_field}->{target_field}, {value1[:20]}... <-> {value2[:20]}... = {similarity:.3f}")
                 return similarity
             
-            # 【关键修复】禁用有问题的EnhancedFuzzyMatcher.match_single_record方法
-            # 这个方法在fallback模式下会产生错误的高相似度结果
-            # 改为使用安全的字符串相似度计算
+            # 【关键修复】使用正确的匹配器方法
+            # 对于EnhancedFuzzyMatcher，需要构造记录格式并使用match_single_record
             if isinstance(matcher, EnhancedFuzzyMatcher):
-                # 使用安全的字符串相似度计算，避免错误的匹配结果
-                logger.warning(f"Fallback模式：跳过EnhancedFuzzyMatcher.match_single_record，使用安全的字符串匹配")
-                return self.similarity_calculator.calculate_string_similarity(value1, value2)
+                # 构造临时记录格式
+                source_record = {source_field: value1} if source_field else {'value': value1}
+                target_record = {target_field: value2} if target_field else {'value': value2}
+                
+                result = matcher.match_single_record(source_record, [target_record])
+                return result.similarity_score if result.matched else 0.0
             
             # 使用不同的匹配器计算相似度
             elif hasattr(matcher, 'calculate_similarity'):

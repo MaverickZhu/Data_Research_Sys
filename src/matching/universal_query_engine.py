@@ -74,14 +74,15 @@ class UniversalQueryEngine:
         # 查询配置（高性能优化）
         self.query_config = {
             'enable_batch_query': True,
-            'batch_size': 500,  # 增加批量大小，减少数据库查询次数
-            'max_workers': 32,  # 增加并发数
+            'batch_size': 2000,  # 【高性能恢复】增加批处理大小  # 增加批量大小，减少数据库查询次数
+            'max_workers': 16,  # 【高性能恢复】恢复到188万数据成功时的线程配置
             'enable_parallel': True,
             'enable_cache': True,
             'cache_ttl': 3600,
             'default_similarity_threshold': 0.6,
-            'max_candidates_per_field': 30,  # 减少候选数量，提升速度
-            'query_timeout': 60.0,  # 增加超时时间
+            'max_candidates_per_field': 200,  # 【高性能恢复】增加候选数量
+            'max_candidates_per_record': 50,  # 【高性能恢复】增加每记录候选数
+            'query_timeout': 60.0,  # 【高性能模式】合理的超时时间
             'enable_auto_index_creation': True,
             'enable_fast_mode': True  # 启用快速模式
         }
@@ -208,6 +209,9 @@ class UniversalQueryEngine:
             logger.info(f"✅ 批量查询完成: {len(final_results)} 个结果, "
                        f"总候选数: {total_candidates}, 耗时: {batch_time:.3f}s, "
                        f"平均速度: {len(batch_records) / max(batch_time, 0.001):.1f} 条/秒")
+            
+            # 【关键修复】批次结束后强制清理资源
+            self._force_cleanup_batch_resources()
             
             return final_results
             
@@ -642,7 +646,7 @@ class UniversalQueryEngine:
                 # 第3阶段：按匹配关键词数量排序（更多匹配的优先）
                 {'$sort': {'match_count': -1}},
                 # 第4阶段：限制候选数量（在相似度计算前先限制，提高性能）
-                {'$limit': self.query_config['max_candidates_per_field'] * 2}  # 多取一些，后续再精确过滤
+                {'$limit': self.query_config['max_candidates_per_field'] * 5}  # 【修复】为500条记录提供足够候选
             ]
             
             # 执行查询
@@ -661,6 +665,7 @@ class UniversalQueryEngine:
                                    similarity_threshold: float) -> Dict[str, List[Dict]]:
         """将候选记录匹配到源记录"""
         record_results = {}
+        max_candidates_per_record = self.query_config.get('max_candidates_per_record', 20)
         
         for record_id, keyword_info in record_keywords.items():
             record_keywords_set = set(keyword_info['keywords'])
@@ -682,7 +687,8 @@ class UniversalQueryEngine:
             if record_candidates:
                 # 按相似度排序
                 record_candidates.sort(key=lambda x: x['similarity_score'], reverse=True)
-                record_results[record_id] = record_candidates
+                # 【关键修复】限制每个记录的候选数量，防止候选爆炸
+                record_results[record_id] = record_candidates[:max_candidates_per_record]
         
         return record_results
     
@@ -746,6 +752,11 @@ class UniversalQueryEngine:
             # 去重和排序
             unique_candidates = self._deduplicate_candidates(all_candidates)
             
+            # 【关键修复】在合并阶段也要限制每个记录的最终候选数量
+            max_final_candidates = self.query_config.get('max_candidates_per_record', 20)
+            if len(unique_candidates) > max_final_candidates:
+                unique_candidates = unique_candidates[:max_final_candidates]
+            
             final_results[record_id] = QueryResult(
                 unique_candidates, 0.0,  # 批量查询时间在外层统计
                 record, field_info
@@ -799,3 +810,47 @@ class UniversalQueryEngine:
         self.query_cache.clear()
         self.pipeline_cache.clear()
         logger.info("查询缓存已清空")
+
+    def _cleanup_cache_if_needed(self):
+        """根据需要清理缓存，防止内存泄漏"""
+        try:
+            # 检查缓存大小
+            query_cache_size = len(self.query_cache)
+            pipeline_cache_size = len(self.pipeline_cache)
+            
+            # 如果缓存过大，清理旧缓存
+            max_cache_size = 1000  # 最大缓存条目数
+            
+            if query_cache_size > max_cache_size:
+                # 清理一半的查询缓存
+                items_to_remove = query_cache_size // 2
+                cache_keys = list(self.query_cache.keys())
+                for key in cache_keys[:items_to_remove]:
+                    del self.query_cache[key]
+                logger.info(f"🧹 清理查询缓存: {items_to_remove} 个条目")
+            
+            if pipeline_cache_size > max_cache_size:
+                # 清理一半的管道缓存
+                items_to_remove = pipeline_cache_size // 2
+                cache_keys = list(self.pipeline_cache.keys())
+                for key in cache_keys[:items_to_remove]:
+                    del self.pipeline_cache[key]
+                logger.info(f"🧹 清理管道缓存: {items_to_remove} 个条目")
+                
+        except Exception as e:
+            logger.warning(f"缓存清理失败: {e}")
+    
+    def _force_cleanup_batch_resources(self):
+        """强制清理批次资源"""
+        try:
+            # 强制垃圾回收
+            import gc
+            gc.collect()
+            
+            # 清理缓存
+            self._cleanup_cache_if_needed()
+            
+            logger.debug("✅ 批次资源强制清理完成")
+            
+        except Exception as e:
+            logger.warning(f"强制资源清理失败: {e}")

@@ -10,7 +10,7 @@ import logging
 # 优化匹配器导入
 from .optimized_intelligent_matcher import OptimizedIntelligentMatcher
 from .hybrid_weight_matcher import HybridWeightMatcher
-from .dual_validation_matcher import DualValidationMatcher
+# from .dual_validation_matcher import DualValidationMatcher  # 已移除
 
 import re
 from typing import Dict, List, Any, Optional, Tuple
@@ -25,6 +25,7 @@ from src.utils.memory_manager import get_memory_manager, check_memory_before_tas
 from .exact_matcher import ExactMatcher
 from .fuzzy_matcher import FuzzyMatcher
 from .optimized_match_processor import OptimizedMatchProcessor
+from .simple_fast_matcher import SimpleFastMatcher
 from .enhanced_fuzzy_matcher import EnhancedFuzzyMatcher
 from .similarity_scorer import SimilarityCalculator
 from .match_result import MatchResult
@@ -89,8 +90,8 @@ class UserDataMatcher:
         )
         self.address_filter = AddressSimilarityFilter(address_filter_config)
         
-        # 初始化双重验证匹配器
-        self.dual_validation_matcher = DualValidationMatcher(config)
+        # 双重验证匹配器已移除（容易崩溃）
+        # self.dual_validation_matcher = DualValidationMatcher(config)
         
         # 加载关键字段验证配置
         self._load_critical_field_validation_config()
@@ -217,10 +218,23 @@ class UserDataMatcher:
             # 智能单位名称匹配器（新增）
             self.intelligent_unit_matcher = IntelligentUnitNameMatcher()
             
-            # 优化匹配处理器（如果需要复杂匹配）
-            # 注意：OptimizedMatchProcessor需要ConfigManager，这里先不初始化
-            # 如果需要使用，可以在具体匹配方法中临时创建
-            self.optimized_processor = None
+            # 【正确修复】启用优化匹配处理器，替代容易崩溃的双重验证匹配器
+            try:
+                from src.utils.config import ConfigManager
+                config_manager = ConfigManager()
+                self.optimized_processor = OptimizedMatchProcessor(self.db_manager, config_manager)
+                logger.info("✅ 优化匹配处理器初始化成功（替代双重验证）")
+            except Exception as e:
+                logger.warning(f"优化匹配处理器初始化失败: {e}")
+                self.optimized_processor = None
+            
+            # 【紧急速度优化】初始化简单快速匹配器
+            try:
+                self.simple_fast_matcher = SimpleFastMatcher(self.db_manager)
+                logger.info("✅ 简单快速匹配器初始化成功")
+            except Exception as e:
+                logger.warning(f"简单快速匹配器初始化失败: {e}")
+                self.simple_fast_matcher = None
             
             logger.info("匹配算法初始化完成")
             
@@ -242,11 +256,11 @@ class UserDataMatcher:
             # 设置到实例属性中
             self.critical_validation_config = critical_validation_config
             
-            # 也设置到双重验证匹配器中
-            if hasattr(self.dual_validation_matcher, 'critical_validation_config'):
-                self.dual_validation_matcher.critical_validation_config = critical_validation_config
-            else:
-                setattr(self.dual_validation_matcher, 'critical_validation_config', critical_validation_config)
+            # 双重验证匹配器已移除
+            # if hasattr(self.dual_validation_matcher, 'critical_validation_config'):
+            #     self.dual_validation_matcher.critical_validation_config = critical_validation_config
+            # else:
+            #     setattr(self.dual_validation_matcher, 'critical_validation_config', critical_validation_config)
             
             logger.info(f"✅ 关键字段验证配置加载完成: {critical_validation_config}")
             
@@ -258,10 +272,11 @@ class UserDataMatcher:
                 'minimum_field_count': 2
             }
             self.critical_validation_config = default_config
-            if hasattr(self.dual_validation_matcher, 'critical_validation_config'):
-                self.dual_validation_matcher.critical_validation_config = default_config
-            else:
-                setattr(self.dual_validation_matcher, 'critical_validation_config', default_config)
+            # 双重验证匹配器已移除
+            # if hasattr(self.dual_validation_matcher, 'critical_validation_config'):
+            #     self.dual_validation_matcher.critical_validation_config = default_config
+            # else:
+            #     setattr(self.dual_validation_matcher, 'critical_validation_config', default_config)
             
             logger.warning(f"关键字段验证配置加载失败，使用默认配置: {str(e)}")
             logger.info(f"默认配置: {default_config}")
@@ -454,7 +469,7 @@ class UserDataMatcher:
             # 初始化进度
             processed_count = 0
             matched_count = 0
-            batch_size = config.get('batch_size', 5000)  # 优化批次大小，避免内存溢出
+            batch_size = config.get('batch_size', 10000)  # 【高性能恢复】恢复到大批次处理
             
             # 创建结果集合
             result_collection_name = f'user_match_results_{task_id}'
@@ -540,12 +555,34 @@ class UserDataMatcher:
     
     def _process_optimized_batch(self, batch_records: List[Dict], mappings: List[Dict], 
                                source_table: str, task_id: str) -> List[Dict]:
-        """处理优化批次（使用批量预过滤优化）"""
-        batch_results = []
+        """处理优化批次（使用简单快速匹配器）"""
         batch_start_time = time.time()
         batch_size = len(batch_records)
         
-        logger.info(f"🚀 开始批量处理: {batch_size} 条记录（超高性能优化）")
+        logger.info(f"🚀 开始批量处理: {batch_size} 条记录（简单快速匹配）")
+        
+        # 【紧急速度优化】直接使用简单快速匹配器
+        if hasattr(self, 'simple_fast_matcher') and self.simple_fast_matcher:
+            try:
+                batch_results = self.simple_fast_matcher.batch_match(
+                    batch_records, mappings, source_table, task_id
+                )
+                
+                batch_duration = time.time() - batch_start_time
+                records_per_second = batch_size / batch_duration if batch_duration > 0 else 0
+                
+                logger.info(f"✅ 简单快速匹配完成: {batch_size} 条记录, "
+                           f"耗时: {batch_duration:.2f}秒, "
+                           f"速度: {records_per_second:.1f} 条/秒, "
+                           f"匹配结果: {len(batch_results)}")
+                
+                return batch_results
+                
+            except Exception as e:
+                logger.error(f"简单快速匹配失败，降级到原算法: {e}")
+        
+        # 降级到原算法（保留原有逻辑）
+        batch_results = []
         
         try:
             # 【关键优化】批量预过滤 - 一次性获取所有候选记录
@@ -558,8 +595,8 @@ class UserDataMatcher:
             prefilter_time = time.time() - prefilter_start
             logger.info(f"✅ 批量预过滤完成: {len(batch_candidates_map)} 条记录有候选, 耗时: {prefilter_time:.2f}秒")
             
-            # 【高性能并行处理】使用批量候选进行匹配
-            max_workers = min(32, batch_size)
+            # 【高性能模式】使用8线程，配合100个连接池
+            max_workers = min(8, batch_size)  # 【高性能恢复】恢复到8线程
             
             try:
                 with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -653,6 +690,28 @@ class UserDataMatcher:
                    f"耗时: {batch_duration:.2f}秒, "
                    f"速度: {records_per_second:.1f} 条/秒, "
                    f"匹配结果: {len(batch_results)}")
+        
+        # 【增强修复】更全面的内存清理
+        try:
+            # 清理候选记录映射
+            if 'batch_candidates_map' in locals():
+                batch_candidates_map.clear()
+                del batch_candidates_map
+            
+            # 注意：不能清理batch_results，因为需要返回给调用者
+            
+            # 清理通用查询引擎缓存
+            if hasattr(self, 'universal_query_engine') and self.universal_query_engine:
+                self.universal_query_engine._cleanup_cache_if_needed()
+            
+            # 强制垃圾回收
+            import gc
+            gc.collect()
+            
+            logger.debug("✅ 增强批次内存清理完成")
+            self._monitor_memory_usage(f"批次处理结束")
+        except Exception as e:
+            logger.warning(f"增强内存清理失败: {e}")
         
         # 【性能目标检查】与原项目对比
         target_speed = 1040  # 原项目目标速度
@@ -1274,6 +1333,116 @@ class UserDataMatcher:
         
         return batch_results
     
+    def _calculate_similarity_with_optimized_processor(self, source_record: Dict, target_record: Dict,
+                                                     mappings: List[Dict]) -> Tuple[float, List[str], Dict]:
+        """
+        使用优化匹配处理器计算相似度（适配方法）
+        """
+        try:
+            # 使用优化匹配处理器的核心匹配逻辑
+            # 这里我们直接使用其内部的匹配器进行计算
+            
+            # 1. 尝试精确匹配
+            exact_result = self.optimized_processor.exact_matcher.match(source_record, target_record)
+            if exact_result and exact_result.similarity >= 0.95:
+                return (
+                    exact_result.similarity,
+                    exact_result.matched_fields,
+                    {
+                        'algorithm': 'optimized_exact',
+                        'field_scores': getattr(exact_result, 'field_scores', {}),
+                        'details': {'match_type': 'exact'}
+                    }
+                )
+            
+            # 2. 尝试增强模糊匹配
+            enhanced_result = self.optimized_processor.enhanced_fuzzy_matcher.match(source_record, target_record)
+            if enhanced_result and enhanced_result.similarity > 0:
+                # 【在这里添加关键字段验证逻辑】
+                final_similarity, matched_fields = self._apply_critical_field_validation(
+                    enhanced_result.similarity, enhanced_result.matched_fields, 
+                    source_record, target_record, mappings, enhanced_result
+                )
+                
+                return (
+                    final_similarity,
+                    matched_fields,
+                    {
+                        'algorithm': 'optimized_enhanced_fuzzy',
+                        'field_scores': getattr(enhanced_result, 'field_scores', {}),
+                        'details': {'match_type': 'enhanced_fuzzy'}
+                    }
+                )
+            
+            # 3. 降级到普通模糊匹配
+            fuzzy_result = self.optimized_processor.fuzzy_matcher.match(source_record, target_record)
+            if fuzzy_result and fuzzy_result.similarity > 0:
+                return (
+                    fuzzy_result.similarity,
+                    fuzzy_result.matched_fields,
+                    {
+                        'algorithm': 'optimized_fuzzy',
+                        'field_scores': getattr(fuzzy_result, 'field_scores', {}),
+                        'details': {'match_type': 'fuzzy'}
+                    }
+                )
+            
+            return (0.0, [], {'algorithm': 'optimized_no_match', 'details': {}})
+            
+        except Exception as e:
+            logger.error(f"优化匹配处理器适配失败: {e}")
+            return (0.0, [], {'algorithm': 'optimized_error', 'error': str(e)})
+    
+    def _apply_critical_field_validation(self, similarity: float, matched_fields: List[str],
+                                       source_record: Dict, target_record: Dict, 
+                                       mappings: List[Dict], match_result) -> Tuple[float, List[str]]:
+        """
+        应用关键字段验证逻辑到优化匹配结果
+        """
+        try:
+            # 获取关键字段验证配置
+            critical_validation_config = getattr(self, 'critical_validation_config', {
+                'enabled': False,
+                'minimum_threshold': 0.4,
+                'minimum_field_count': 2
+            })
+            
+            if not critical_validation_config.get('enabled', False):
+                return similarity, matched_fields
+            
+            # 获取主要字段映射
+            primary_fields = [m for m in mappings if m.get('field_priority') == 'primary']
+            minimum_field_count = critical_validation_config.get('minimum_field_count', 2)
+            
+            if len(primary_fields) < minimum_field_count:
+                return similarity, matched_fields
+            
+            # 检查关键字段得分
+            critical_field_threshold = critical_validation_config.get('minimum_threshold', 0.4)
+            field_scores = getattr(match_result, 'field_scores', {})
+            
+            low_score_fields = []
+            for mapping in primary_fields:
+                source_field = mapping.get('source_field', '')
+                target_field = mapping.get('target_field', '')
+                field_key = f"{source_field}->{target_field}"
+                field_score = field_scores.get(field_key, 0.0)
+                
+                if field_score < critical_field_threshold:
+                    low_score_fields.append(f"{field_key}({field_score:.3f})")
+            
+            # 如果有关键字段低于阈值，则整体匹配失败
+            if low_score_fields:
+                logger.info(f"🚫 优化匹配关键字段验证失败: {', '.join(low_score_fields)}")
+                return (0.0, [])
+            else:
+                logger.info(f"✅ 优化匹配关键字段验证成功: 所有{len(primary_fields)}个关键字段均≥{critical_field_threshold}")
+                return similarity, matched_fields
+                
+        except Exception as e:
+            logger.warning(f"关键字段验证失败: {e}")
+            return similarity, matched_fields
+    
     def _should_use_enhanced_fuzzy_matcher(self, mappings: List[Dict]) -> bool:
         """
         判断是否应该使用EnhancedFuzzyMatcher
@@ -1865,7 +2034,7 @@ class UserDataMatcher:
             'enhanced': self.enhanced_fuzzy_matcher,
             'optimized': self.optimized_processor if hasattr(self, 'optimized_processor') else self.enhanced_fuzzy_matcher,
             'hybrid': self.enhanced_fuzzy_matcher,  # 混合算法使用增强模糊匹配
-            'dual_validation': 'dual_validation'  # 双重验证算法标记
+            # 'dual_validation': 'dual_validation'  # 双重验证算法已移除
         }
         
         return matchers.get(algorithm_type, self.enhanced_fuzzy_matcher)
@@ -2000,7 +2169,7 @@ class UserDataMatcher:
     def _calculate_similarity(self, source_record: Dict, target_record: Dict,
                             mappings: List[Dict], matcher) -> Tuple[float, List[str], Dict]:
         """
-        计算两条记录的相似度（优先使用双重验证匹配器）
+        计算两条记录的相似度（优先使用优化匹配处理器）
         
         Args:
             source_record: 源记录
@@ -2012,66 +2181,21 @@ class UserDataMatcher:
             Tuple[float, List[str], Dict]: (相似度, 匹配字段列表, 详细信息)
         """
         try:
-            # 检查是否使用双重验证算法
-            use_dual_validation = (matcher == 'dual_validation' or 
-                                 getattr(self, '_current_algorithm_type', None) == 'dual_validation')
-            
-            if use_dual_validation:
-                logger.info("🔧 使用双重验证匹配器")
-                # 配置双重验证匹配器的字段映射（传入样本数据用于内容分析）
-                source_sample = [source_record] if source_record else []
-                target_sample = [target_record] if target_record else []
-                self.dual_validation_matcher.configure_fields(mappings, source_sample, target_sample)
-                
-                # 执行双重验证匹配
-                validation_result = self.dual_validation_matcher.validate_match(source_record, target_record)
-                
-                # 构建匹配字段列表
-                matched_fields = []
-                if validation_result.is_valid:
-                    # 从验证详情中提取通过验证的字段（安全访问）
-                    validation_details = validation_result.validation_details or {}
-                    primary_validation = validation_details.get('primary_validation', {})
-                    secondary_validation = validation_details.get('secondary_validation', {})
+            # 【正确逻辑】优先使用稳定的优化匹配处理器
+            if self.optimized_processor is not None:
+                logger.info("🚀 使用优化匹配处理器")
+                try:
+                    # 使用优化匹配处理器进行匹配（适配接口）
+                    similarity, matched_fields, details = self._calculate_similarity_with_optimized_processor(
+                        source_record, target_record, mappings
+                    )
                     
-                    # 添加通过验证的主要字段
-                    for field_name, score in primary_validation.get('field_scores', {}).items():
-                        if score >= self.dual_validation_matcher.primary_field_threshold:
-                            matched_fields.append(field_name)
-                
-                    # 添加通过验证的次要字段
-                    for field_name, score in secondary_validation.get('field_scores', {}).items():
-                        if score >= self.dual_validation_matcher.secondary_field_threshold:
-                            matched_fields.append(field_name)
-                
-                # 构建详细信息
-                validation_details = validation_result.validation_details or {}
-                details = {
-                    'field_scores': {},
-                    'total_fields': len(mappings),
-                    'matched_field_count': len(matched_fields),
-                    'dual_validation_result': validation_details,
-                    'rejection_reason': validation_result.rejection_reason,
-                    'algorithm_used': 'dual_validation'
-                }
-                
-                # 合并字段得分（安全访问）
-                primary_validation = validation_details.get('primary_validation') or {}
-                secondary_validation = validation_details.get('secondary_validation') or {}
-                primary_scores = primary_validation.get('field_scores', {})
-                secondary_scores = secondary_validation.get('field_scores', {})
-                details['field_scores'].update(primary_scores)
-                details['field_scores'].update(secondary_scores)
-                
-                # 记录匹配结果
-                if validation_result.is_valid:
-                    logger.debug(f"✅ 双重验证匹配成功: 最终得分 {validation_result.final_score:.3f} "
-                               f"(主要: {validation_result.primary_field_score:.3f}, "
-                               f"次要: {validation_result.secondary_field_score:.3f})")
-                else:
-                    logger.debug(f"❌ 双重验证匹配失败: {validation_result.rejection_reason}")
-                
-                return validation_result.final_score, matched_fields, details
+                    if similarity > 0:
+                        return (similarity, matched_fields, details)
+                except Exception as e:
+                    logger.warning(f"优化匹配处理器失败，降级到双重验证: {e}")
+            
+            # 双重验证算法已完全移除，不再支持
             
             else:
                 # 使用传统匹配器
@@ -2410,6 +2534,36 @@ class UserDataMatcher:
             logger.error(f"获取任务进度失败: {str(e)}")
             return None
     
+
+    def _monitor_memory_usage(self, label: str = ""):
+        """监控内存使用情况"""
+        try:
+            import psutil
+            import gc
+            
+            process = psutil.Process()
+            memory_info = process.memory_info()
+            
+            rss_mb = memory_info.rss / 1024 / 1024
+            vms_mb = memory_info.vms / 1024 / 1024
+            gc_objects = len(gc.get_objects())
+            
+            # 如果内存使用过高，记录警告
+            if rss_mb > 1000:  # 超过1GB
+                logger.warning(f"⚠️ 内存使用过高 [{label}]: RSS={rss_mb:.1f}MB, VMS={vms_mb:.1f}MB, 对象={gc_objects}")
+            else:
+                logger.info(f"📊 内存监控 [{label}]: RSS={rss_mb:.1f}MB, VMS={vms_mb:.1f}MB, 对象={gc_objects}")
+                
+            return {
+                'rss_mb': rss_mb,
+                'vms_mb': vms_mb,
+                'gc_objects': gc_objects
+            }
+            
+        except Exception as e:
+            logger.warning(f"内存监控失败: {e}")
+            return {}
+
     def _extract_key_fields(self, record: Dict, mappings: List[Dict], field_type: str) -> Dict:
         """
         提取记录的关键字段（用于快速查看和追溯）

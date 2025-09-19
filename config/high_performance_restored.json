@@ -1,0 +1,37 @@
+{
+  "high_performance_mode": {
+    "enabled": true,
+    "description": "基于188万数据成功处理经验的高性能配置",
+    "mongodb": {
+      "connection_pool": {
+        "max_pool_size": 100,
+        "min_pool_size": 10,
+        "max_idle_time_ms": 15000,
+        "connect_timeout_ms": 30000,
+        "server_selection_timeout_ms": 60000,
+        "socket_timeout_ms": 120000,
+        "wait_queue_timeout_ms": 30000,
+        "max_connecting": 5,
+        "retry_writes": true,
+        "retry_reads": true,
+        "heartbeat_frequency_ms": 10000
+      }
+    },
+    "matching": {
+      "batch_size": 10000,
+      "max_workers": 8,
+      "universal_query_engine": {
+        "max_workers": 16,
+        "batch_size": 2000,
+        "max_candidates_per_field": 200,
+        "max_candidates_per_record": 50,
+        "query_timeout": 60.0
+      }
+    },
+    "performance_targets": {
+      "target_speed": "1040条/秒",
+      "target_throughput": "188万数据/30分钟",
+      "success_reference": "用户188万数据成功处理经验"
+    }
+  }
+}

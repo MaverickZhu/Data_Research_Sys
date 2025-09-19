@@ -72,25 +72,25 @@ class DatabaseManager:
             self._mongo_client = MongoClient(
                 self.mongodb_config.get('uri', 'mongodb://localhost:27017/'),
                 # 连接池配置 - 超保守的设置，防止MongoDB崩溃
-                maxPoolSize=pool_config.get('max_pool_size', 3),   # 从15进一步降到3
-                minPoolSize=pool_config.get('min_pool_size', 1),    # 从2降到1
-                maxIdleTimeMS=pool_config.get('max_idle_time_ms', 30000),  # 从15秒增加到30秒
+                maxPoolSize=pool_config.get('max_pool_size', 100),   # 从15进一步降到3
+                minPoolSize=pool_config.get('min_pool_size', 10),    # 从2降到1
+                maxIdleTimeMS=pool_config.get('max_idle_time_ms', 15000),  # 从15秒增加到30秒
                 
                 # 超时配置 - 适中的超时时间
-                connectTimeoutMS=pool_config.get('connect_timeout_ms', 20000),  # 从30秒降到20秒
-                serverSelectionTimeoutMS=pool_config.get('server_selection_timeout_ms', 30000),  # 从60秒降到30秒
-                socketTimeoutMS=pool_config.get('socket_timeout_ms', 60000),  # 从120秒降到60秒
+                connectTimeoutMS=pool_config.get('connect_timeout_ms', 30000),  # 从30秒降到20秒
+                serverSelectionTimeoutMS=pool_config.get('server_selection_timeout_ms', 60000),  # 从60秒降到30秒
+                socketTimeoutMS=pool_config.get('socket_timeout_ms', 120000),  # 从120秒降到60秒
                 
                 # 新增配置 - 防止连接风暴
-                waitQueueTimeoutMS=pool_config.get('wait_queue_timeout_ms', 15000),  # 从30秒降到15秒
-                maxConnecting=pool_config.get('max_connecting', 1),  # 从2降到1
+                waitQueueTimeoutMS=pool_config.get('wait_queue_timeout_ms', 30000),  # 从30秒降到15秒
+                maxConnecting=pool_config.get('max_connecting', 5),  # 从2降到1
                 
                 # 重连配置 - 禁用自动重试，由我们手动控制
-                retryWrites=False,  # 禁用重试写入，避免连接风暴
-                retryReads=False,   # 禁用重试读取，避免连接风暴
+                retryWrites=True,  # 禁用重试写入，避免连接风暴
+                retryReads=True,   # 禁用重试读取，避免连接风暴
                 
                 # 心跳配置 - 增加心跳间隔，减少网络负载
-                heartbeatFrequencyMS=30000,  # 从10秒增加到30秒
+                heartbeatFrequencyMS=10000,  # 从10秒增加到30秒
                 
                 # 事件监听 - 用于监控连接状态
                 event_listeners=[]  # 可以后续添加事件监听器

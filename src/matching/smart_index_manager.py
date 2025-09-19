@@ -361,8 +361,13 @@ class SmartIndexManager:
                         result['indexes'].append(index_name)
                         logger.info(f"✅ 源表基础索引创建: {source_table}.{index_name}")
                     except Exception as e:
-                        result['error_count'] += 1
-                        logger.warning(f"⚠️ 源表基础索引创建失败: {index_name} - {str(e)}")
+                        # 检查是否是索引名称冲突
+                        if 'Index already exists with a different name' in str(e):
+                            logger.info(f"📋 源表基础索引跳过（已存在相同字段索引）: {field} - {str(e)}")
+                            result['skipped_count'] += 1
+                        else:
+                            result['error_count'] += 1
+                            logger.warning(f"⚠️ 源表基础索引创建失败: {index_name} - {str(e)}, full error: {e}")
                 else:
                     result['skipped_count'] += 1
                     logger.info(f"📋 源表基础索引跳过（功能已存在）: {field} {'降序' if direction == DESCENDING else '升序'}索引")
@@ -472,8 +477,8 @@ class SmartIndexManager:
                     ("idx_match_status", [("match_status", ASCENDING)]),
                     
                     # 时间范围索引（用于增量匹配）
-                    ("idx_created_time_desc", [("created_at", DESCENDING)]),
-                    ("idx_updated_time_desc", [("updated_at", DESCENDING)]),
+                    ("idx_created_at_desc", [("created_at", DESCENDING)]),
+                    ("idx_updated_at_desc", [("updated_at", DESCENDING)]),
                     
                     # 复合性能索引
                     ("idx_match_time_compound", [("is_matched", ASCENDING), ("updated_at", DESCENDING)]),

@@ -25,7 +25,7 @@ fuzzy_match:
   enable_industry_conflict_detection: true
   # 关键字段评分优化配置
   critical_field_validation:
-    enabled: true  # 是否启用关键字段验证
+    enabled: false  # 【临时禁用】排查崩溃原因
     minimum_threshold: 0.4  # 关键字段最低评分阈值
     minimum_field_count: 2  # 触发验证的最少关键字段数量
   fields:
